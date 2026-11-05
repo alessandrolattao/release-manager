@@ -1,0 +1,16 @@
+{
+  "name": "release-manager",
+  "description": "Release manager: takes your GitHub issues to merged, with background agents, without ever taking a technical decision.",
+  "owner": {
+    "name": "Alessandro Lattao",
+    "url": "https://github.com/alessandrolattao"
+  },
+  "plugins": [
+    {
+      "name": "release-manager",
+      "source": "./",
+      "category": "productivity",
+      "tags": ["release", "issues", "agents", "qa", "coordination"]
+    }
+  ]
+}

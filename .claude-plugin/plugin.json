@@ -1,0 +1,14 @@
+{
+  "name": "release-manager",
+  "displayName": "Release manager",
+  "version": "0.1.0",
+  "description": "A release manager for one repository: picks your next unblocked issue by priority, hands it to a background agent on its own branch, answers it from what is written, tests the work, merges it and moves on. It never takes a technical decision: it stops and asks you.",
+  "author": {
+    "name": "Alessandro Lattao",
+    "url": "https://github.com/alessandrolattao"
+  },
+  "homepage": "https://github.com/alessandrolattao/release-manager",
+  "repository": "https://github.com/alessandrolattao/release-manager",
+  "keywords": ["release", "issues", "agents", "qa", "merge", "coordination", "github", "background"],
+  "license": "GPL-3.0-or-later"
+}

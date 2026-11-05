@@ -26,9 +26,9 @@ The user talks with you and together you decide what to build and how; the relea
 - Written with the repository's conventions (title, body, acceptance criteria that can be tried, language).
 - Assigned: to the user when the release manager should build it; to whoever the repository's `.md` files name when it is someone else's area (then it is not the release manager's).
 - **Priority and Effort**, when the repository has those fields: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. They only order the queue.
-- **The label `ready for development`, last**, once everything above is in place and the user says yes: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). Without it the issue stays in the backlog and the release manager never takes it.
 - **Relationships**: an issue that needs another one first is blocked by it: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/block.sh" <n> <blocking>` (`--remove` to undo).
 - **Technical decisions in a comment that starts with `## Technical decisions`**, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the release manager and its agents tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
+- **The label `ready for development`, last of all**: only after the `## Technical decisions` comment is posted, with everything above in place, and the user says yes: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). The label is what lets the release manager take the issue, so it never goes on before the decisions; the script refuses it while the issue has no `## Technical decisions` comment.
 
 ## Before you finish
 

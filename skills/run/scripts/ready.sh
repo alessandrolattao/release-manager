@@ -12,6 +12,12 @@ if [ "${1:-}" = --remove ]; then
 fi
 issue=${1:?issue number}
 if [ "$action" = add ]; then
+	# The label lets the release manager take the issue: never before its technical decisions are posted.
+	decided=$(gh issue view "$issue" --json comments --jq '[.comments[].body | select(startswith("## Technical decisions"))] | length')
+	[ "${decided:-0}" -gt 0 ] || {
+		echo "issue $issue has no '## Technical decisions' comment yet: post the decisions first, then mark it ready" >&2
+		exit 1
+	}
 	gh label list --limit 200 --json name --jq '.[].name' | grep -qxF "$label" ||
 		gh label create "$label" --color 0E8A16 --description "Technical decisions taken: the release manager may build it" >/dev/null
 	gh issue edit "$issue" --add-label "$label" >/dev/null

@@ -9,17 +9,7 @@ mode=${1:?working or idle}
 # shellcheck source=hooks/common.sh
 . "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
 
-# Is this the release manager? Asked once per session.
-role="$state_dir/$sid.role"
-if [ ! -f "$role" ]; then
-	list=$(claude agents --json 2>/dev/null) || exit 0
-	name=$(printf '%s' "$list" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s) | .name][0] // empty')
-	case "$name" in
-	"release manager"*) echo manager >"$role" ;;
-	*) echo other >"$role" ;;
-	esac
-fi
-[ "$(cat "$role")" = manager ] || exit 0
+role_is "release manager" is-manager || exit 0
 
 if [ "$mode" = working ]; then
 	want=green

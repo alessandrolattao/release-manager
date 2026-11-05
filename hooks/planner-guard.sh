@@ -7,17 +7,7 @@ set -eu
 # shellcheck source=hooks/common.sh
 . "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
 
-# Is this a planner? Asked once per session.
-role="$state_dir/$sid.planner"
-if [ ! -f "$role" ]; then
-	list=$(claude agents --json 2>/dev/null) || exit 0
-	name=$(printf '%s' "$list" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s) | .name][0] // empty')
-	case "$name" in
-	planner*) echo yes >"$role" ;;
-	*) echo no >"$role" ;;
-	esac
-fi
-[ "$(cat "$role")" = yes ] || exit 0
+role_is "planner" is-planner || exit 0
 
 tool=$(field tool_name)
 deny() {

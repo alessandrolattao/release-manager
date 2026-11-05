@@ -50,6 +50,7 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 
 - **Your name**: `release manager · <repo> 🚀<n>`, the count of today's merges, kept by `merge.sh`.
 - **Your color**: green while you work, yellow when your turn ends with agents still at work, red when it ends with everything waiting on the user. You do nothing for it.
+- **Agent colors**: cyan while they work, set when they start; none once `[done]`.
 - **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user, `[done]` merged and colorless. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
 - After a rename the old name no longer reaches a session: message agents and the planner by their current name (`claude agents --json` or ListAgents). Agents find you the same way, by the start of your name.
 

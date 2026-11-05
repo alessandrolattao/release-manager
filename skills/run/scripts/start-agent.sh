@@ -40,9 +40,20 @@ brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}
 unset_args=$(env | grep -o -E '^CLAUDE[A-Z_]*' | grep -v '^CLAUDE_CONFIG_DIR$' | sed 's/^/-u /' | tr '\n' ' ')
 cd "$worktree"
 # shellcheck disable=SC2086 # unset_args is a list of -u flags
-out=$(env $unset_args claude --bg --name "[dev] $branch" "$brief" 2>&1)
+out=$(env $unset_args claude --bg --name "$(sh "$here/agent-name.sh" "$branch" dev)" "$brief" 2>&1)
 
 sh "$here/board.sh" "$issue" "In Progress" || true
+
+# Agents are cyan while they work (they lose it at [done]); find the new session by its name.
+name=$(sh "$here/agent-name.sh" "$branch" dev)
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+	agent=$(claude agents --json 2>/dev/null | jq -r --arg n "$name" '[.[] | select(.name == $n) | .sessionId][0] // empty')
+	[ -n "$agent" ] && break
+	sleep 1
+done
+if [ -n "$agent" ]; then
+	sh "$here/color.sh" "$agent" cyan || echo "could not color the agent cyan" >&2
+fi
 
 echo "branch   $branch"
 echo "worktree $worktree"

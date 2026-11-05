@@ -1,7 +1,7 @@
 {
   "name": "release-manager",
   "displayName": "Release manager",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A release manager for one repository: picks your next unblocked issue by priority, hands it to a background agent on its own branch, answers it from what is written, tests the work, merges it and moves on. It never takes a technical decision: it stops and asks you.",
   "author": {
     "name": "Alessandro Lattao",

@@ -40,6 +40,8 @@ cd "$worktree"
 # shellcheck disable=SC2086 # unset_args is a list of -u flags
 out=$(env $unset_args claude --bg --name "[dev] $branch" "$brief" 2>&1)
 
+sh "$here/board.sh" "$issue" "In Progress" || true
+
 echo "branch   $branch"
 echo "worktree $worktree"
 echo "$out" | tail -5

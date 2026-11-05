@@ -27,6 +27,10 @@ It also opens issues, for you or for whoever the repository's `.md` files name, 
 
 The other half: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, shows you everything before publishing, writes only the decisions you took, and ends by telling you which issues are ready and which are not.
 
+## The model chooses, the plugin does
+
+Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent, moves the board and calls you through TitTieS.
+
 ## It never decides how
 
 Engineering manager, delivery manager, QA and release manager, yes; tech lead and product owner, no. Every technical doubt stops the work on that point and becomes a question for you: a comment on the issue, the `question` label, and a call out loud through [TitTieS](https://github.com/alessandrolattao/titties) (only for decisions and blocks, never for progress). You answer in the issue and remove `question`; it picks the issue up again.

@@ -73,7 +73,7 @@ Each agent's session name is its state and its branch, so `claude agents` reads 
 - `[test]`: you are testing it;
 - `[fix]`: your test failed and it is fixing;
 - `[ask]`: stopped on a question to the user;
-- `[done]`: merged.
+- `[done]`: merged. Also take its color away (`sh "${CLAUDE_SKILL_DIR}/scripts/color.sh" <agent session id> default`), so finished agents stay in `claude agents` by name, grey, out of the way of the working ones.
 
 After a rename the old name no longer reaches the agent: always message it by its current name, the one you gave it last.
 
@@ -110,7 +110,7 @@ One test at a time. When an agent sends `PR ready`:
 2. Test the way the repository says (its testing skills): every acceptance criterion of the issue, in the browser for what a person sees, with the right tool otherwise (tests, API calls, commands).
 3. Stop whatever you started and go back: `git switch <default branch>`.
 
-**Passed** and the PR's CI is green and its review handled: merge with `gh pr merge <pr> --merge`, remove the worktree (`git worktree remove .claude/worktrees/<branch>`), delete the local branch, and write on the PR what you tried. Then back to step 1.
+**Passed** and the PR's CI is green and its review handled: merge with `gh pr merge <pr> --merge`, rename the agent `[done] <branch>` and take its color away, remove the worktree (`git worktree remove .claude/worktrees/<branch>`), delete the local branch, and write on the PR what you tried. Then back to step 1.
 
 The merge is where your work ends, whatever the repository does next. Releases, tags, versions and deploys are the user's: you never cut a release, push a tag or check a deploy.
 

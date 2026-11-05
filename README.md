@@ -6,7 +6,7 @@ A release manager for one repository, as a [Claude Code](https://code.claude.com
 claude --bg --name "release manager" "/release-manager:run"
 ```
 
-Open it with `claude attach "release manager"` or from `claude agents`. Its color tells you its state: green while it works, yellow while it waits on its agents or CI, red when it waits for you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, `[done]`.
+Open it with `claude attach "release manager"` or from `claude agents`. Its color tells you its state: green while it works, yellow while it waits on its agents or CI, red when it waits for you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, `[done]`; finished ones lose their color and stay out of the way.
 
 and it works through your GitHub issues on its own:
 

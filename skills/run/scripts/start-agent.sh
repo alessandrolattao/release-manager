@@ -1,7 +1,7 @@
 #!/bin/sh
 # Starts the developer agent of one issue: the branch linked to the issue, a worktree of it, and a
 # background session named after the branch, on the same Claude Code account as this session.
-#   start-agent.sh <issue-number> <release-manager-session-name>
+#   start-agent.sh <issue-number> "<release-manager name and reference, e.g. release manager [b95743]>"
 # Run it from the main checkout. Prints the branch, the worktree and the agent id.
 set -eu
 

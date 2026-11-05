@@ -1,10 +1,12 @@
 # release-manager
 
-A release manager for one repository, as a [Claude Code](https://code.claude.com) plugin. Start it in a session in the main checkout:
+A release manager for one repository, as a [Claude Code](https://code.claude.com) plugin. Start it as a background session, from the main checkout:
 
+```sh
+claude --bg --name "release manager" "/release-manager:run"
 ```
-/release-manager:run
-```
+
+Open it with `claude attach "release manager"` or from `claude agents`. Its color tells you its state: green while it works, yellow while it waits on its agents or CI, red when it waits for you.
 
 and it works through your GitHub issues on its own:
 
@@ -41,6 +43,7 @@ Needs:
 - [`gh`](https://cli.github.com), logged in, and `jq`.
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
 - [TitTieS](https://github.com/alessandrolattao/titties) for the voice (optional).
+- `python3`, for the session colors.
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.
 

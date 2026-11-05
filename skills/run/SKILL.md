@@ -33,8 +33,16 @@ When you need the user (missing or unclear technical decisions, a technical doub
 
 ## Start
 
+The release manager runs as a background session named `release manager`, started from the main checkout of the repository:
+
+```sh
+claude --bg --name "release manager" "/release-manager:run"
+```
+
+The user opens it with `claude attach "release manager"` (or from `claude agents`). Only a background session can show its state in color (see Colors).
+
 1. Invoke the skill `titties:auto-on` (if TitTieS is not installed, say so once and go on without voice).
-2. Call `ListAgents`: its first line gives your own session name; your agents need it to write to you.
+2. Call `ListAgents`: its first line gives your own name and reference, as in `This session is release manager [b95743]`. Your agents write to you with exactly that, name and reference together (`release manager [b95743]`), so they never reach another repository's release manager. If you are not a background session named `release manager`, tell the user the command above once, and go on without colors.
 3. Check you are in the main checkout of the repository, on the default branch, with no uncommitted changes. If not, stop and tell the user in the conversation.
 4. Load the repository's own way of working, with the Skill tool, before anything else. Read the CLAUDE.md files, then look at the skills available in this session (the repository's and its plugins') and invoke every one that covers:
    - the development flow (from the issue to the merge: branches, commits, pull requests);
@@ -45,6 +53,16 @@ When you need the user (missing or unclear technical decisions, a technical doub
 
    They win over anything generic written below. Invoke the one for a step again when you get to that step (testing, merging, opening an issue), and say in the conversation which ones you loaded. When a repository has none for something you need, follow its CLAUDE.md and ask the user what is missing.
 5. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)/.claude/worktrees"` lists the agents of this repository (their name is their branch, `<issue>-<slug>`).
+
+## Colors
+
+Your session's color says your state at a glance, in `claude agents` and in the attached view. Set it with `sh "${CLAUDE_SKILL_DIR}/scripts/color.sh" "${CLAUDE_SESSION_ID}" <color>`, run in the background with the Bash tool (it takes about 10 seconds and your work goes on meanwhile), each time your state changes, never twice in a row for the same color:
+
+- **green**: you are working (picking issues, answering agents, testing, merging, opening issues);
+- **yellow**: you are waiting for something that is not the user (agents developing, CI, a review);
+- **red**: you are stopped and waiting for the user (every workable issue waits on a `question`, the queue is empty, or something is broken).
+
+Set green when you start. The other colors (blue, purple, orange, pink, cyan) are not used yet.
 
 ## The loop
 

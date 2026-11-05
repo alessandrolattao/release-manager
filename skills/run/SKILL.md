@@ -52,7 +52,7 @@ The user opens it with `claude attach "release manager"` (or from `claude agents
    - who does what (owners, guarded areas, people whose go-ahead is needed).
 
    They win over anything generic written below. Invoke the one for a step again when you get to that step (testing, merging, opening an issue), and say in the conversation which ones you loaded. When a repository has none for something you need, follow its CLAUDE.md and ask the user what is missing.
-5. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)/.claude/worktrees"` lists the agents of this repository (their name is their branch, `<issue>-<slug>`).
+5. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)/.claude/worktrees"` lists the agents of this repository (their name is `[<state>] <issue>-<slug>`).
 
 ## Colors
 
@@ -64,11 +64,24 @@ Your session's color says your state at a glance, in `claude agents` and in the 
 
 Set green when you start. The other colors (blue, purple, orange, pink, cyan) are not used yet.
 
+## Agent names
+
+Each agent's session name is its state and its branch, so `claude agents` reads like a board: `[dev] <branch>`. Rename it at every step with `sh "${CLAUDE_SKILL_DIR}/scripts/rename.sh" <agent session id> "[<state>] <branch>"`, in the background like the color (the session id is in `claude agents --json`):
+
+- `[dev]`: developing (it starts with this name);
+- `[review]`: its pull request is open and waits for CI and reviews;
+- `[test]`: you are testing it;
+- `[fix]`: your test failed and it is fixing;
+- `[ask]`: stopped on a question to the user;
+- `[done]`: merged.
+
+After a rename the old name no longer reaches the agent: always message it by its current name, the one you gave it last.
+
 ## The loop
 
 ### 1. Pick the next issue
 
-`sh "${CLAUDE_SKILL_DIR}/scripts/queue.sh"` prints the open issues assigned to the user, best first (Priority Urgent, High, Medium, Low; oldest first), one JSON line each. Take the first one that is `workable` and has no agent yet (no agent named `<number>-…`).
+`sh "${CLAUDE_SKILL_DIR}/scripts/queue.sh"` prints the open issues assigned to the user, best first (Priority Urgent, High, Medium, Low; oldest first), one JSON line each. Take the first one that is `workable` and has no agent yet (no agent whose name holds `<number>-`).
 
 An issue without Priority is in the **backlog** (`backlog: true`): it is not ready for development, and it probably lacks its technical analysis too. Never take it, never comment on it, never call the user for it.
 
@@ -80,7 +93,7 @@ Run `clessidra` (at most once a minute). Start a new agent only when fewer than 
 
 ### 3. Start the agent
 
-`sh "${CLAUDE_SKILL_DIR}/scripts/start-agent.sh" <n> "<your session name>"` creates the branch linked to the issue (`gh issue develop`, `<n>-<slug>`), a worktree in `.claude/worktrees/<branch>`, and a background session named after the branch, on this same account, with the brief in `${CLAUDE_SKILL_DIR}/agent-brief.md`. Move the issue to `In Progress` on the repository's board if it has one.
+`sh "${CLAUDE_SKILL_DIR}/scripts/start-agent.sh" <n> "<your session name>"` creates the branch linked to the issue (`gh issue develop`, `<n>-<slug>`), a worktree in `.claude/worktrees/<branch>`, and a background session named `[dev] <branch>`, on this same account, with the brief in `${CLAUDE_SKILL_DIR}/agent-brief.md`. Move the issue to `In Progress` on the repository's board if it has one.
 
 ### 4. Follow the agents
 

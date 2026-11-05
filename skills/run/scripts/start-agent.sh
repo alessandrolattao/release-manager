@@ -1,6 +1,6 @@
 #!/bin/sh
 # Starts the developer agent of one issue: the branch linked to the issue, a worktree of it, and a
-# background session named after the branch, on the same Claude Code account as this session.
+# background session named "[dev] <branch>", on the same Claude Code account as this session.
 #   start-agent.sh <issue-number> "<release-manager name and reference, e.g. release manager [b95743]>"
 # Run it from the main checkout. Prints the branch, the worktree and the agent id.
 set -eu
@@ -38,7 +38,7 @@ brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}
 unset_args=$(env | grep -o -E '^CLAUDE[A-Z_]*' | grep -v '^CLAUDE_CONFIG_DIR$' | sed 's/^/-u /' | tr '\n' ' ')
 cd "$worktree"
 # shellcheck disable=SC2086 # unset_args is a list of -u flags
-out=$(env $unset_args claude --bg --name "$branch" "$brief" 2>&1)
+out=$(env $unset_args claude --bg --name "[dev] $branch" "$brief" 2>&1)
 
 echo "branch   $branch"
 echo "worktree $worktree"

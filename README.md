@@ -8,7 +8,7 @@ A release manager for one repository, as a [Claude Code](https://code.claude.com
 
 and it works through your GitHub issues on its own:
 
-1. Takes the open issue assigned to you with the highest Priority (Urgent, High, Medium, Low) that nothing blocks (GitHub "blocked by" relationships) and that is not waiting on you (`question` label).
+1. Takes the open issue assigned to you with the highest Priority (Urgent, High, Medium, Low) that nothing blocks (GitHub "blocked by" relationships) and that is not waiting on you (`question` label). Issues without a Priority are the backlog: it leaves them alone.
 2. Checks that the technical decisions are in the issue's comments. If they are not, it does not start: it asks you.
 3. Creates the linked branch and a worktree, and starts a background developer agent named after the branch (`claude --bg --name <n>-<slug>`), at most 2 at once, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets.
 4. Answers the agent's questions only with what is written (issue comments, repository rules, product docs).

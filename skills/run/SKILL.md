@@ -50,7 +50,9 @@ When you need the user (missing or unclear technical decisions, a technical doub
 
 ### 1. Pick the next issue
 
-`sh "${CLAUDE_SKILL_DIR}/scripts/queue.sh"` prints the open issues assigned to the user, best first (Priority Urgent, High, Medium, Low, then none; oldest first), one JSON line each. Take the first one that is `workable` and has no agent yet (no agent named `<number>-…`).
+`sh "${CLAUDE_SKILL_DIR}/scripts/queue.sh"` prints the open issues assigned to the user, best first (Priority Urgent, High, Medium, Low; oldest first), one JSON line each. Take the first one that is `workable` and has no agent yet (no agent named `<number>-…`).
+
+An issue without Priority is in the **backlog** (`backlog: true`): it is not ready for development, and it probably lacks its technical analysis too. Never take it, never comment on it, never call the user for it.
 
 Read it whole: `gh issue view <n> --comments`. If the technical decisions are missing or anything technical is unclear, ask the user (see above) and take the next one.
 
@@ -85,7 +87,7 @@ The merge is where your work ends, whatever the repository does next. Releases, 
 
 ### 6. Queue empty
 
-When nothing is workable, call the user once ("The release manager of <repo> has run out of work: <n> issues are waiting for your answer."), then run `wait.sh 15` in the background and look at the queue again each time it ends. Start again on your own as soon as an issue is workable. Do not call again for the same empty queue.
+When nothing is workable, call the user once ("The release manager of <repo> has run out of work: <n> issues are waiting for your answer, <m> are in the backlog without a priority."), then run `wait.sh 15` in the background and look at the queue again each time it ends. Start again on your own as soon as an issue is workable. Do not call again for the same empty queue.
 
 ## Opening issues
 

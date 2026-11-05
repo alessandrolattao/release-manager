@@ -1,8 +1,9 @@
 #!/bin/sh
 # Lists the open issues of this repository assigned to you, best first, as one JSON object per line:
-#   {"number":12,"title":"...","priority":"High","effort":"Low","blockedBy":[34],"question":false,"workable":true}
-# Order: Priority Urgent, High, Medium, Low, then no priority; oldest first inside each.
-# workable is false when an open issue blocks it or it carries the question label.
+#   {"number":12,"title":"...","priority":"High","effort":"Low","blockedBy":[34],"question":false,"backlog":false,"workable":true}
+# Order: Priority Urgent, High, Medium, Low, then the backlog; oldest first inside each.
+# backlog is true when the issue has no Priority: it is not ready for development yet.
+# workable is false for the backlog, and when an open issue blocks it or it carries the question label.
 set -eu
 
 repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
@@ -41,6 +42,7 @@ gh api graphql --paginate -f query="$query" -F owner="$owner" -F name="$name" -F
 				| if .repository.nameWithOwner == $repo then .number else "\(.repository.nameWithOwner)#\(.number)" end],
 			question: ([.labels.nodes[].name] | index("question") != null)
 		}
-		| .workable = ((.blockedBy | length) == 0 and (.question | not))
+		| .backlog = (.priority == null)
+		| .workable = ((.backlog | not) and (.blockedBy | length) == 0 and (.question | not))
 	' |
 	jq -s -c 'sort_by((.priority | {"Urgent": 0, "High": 1, "Medium": 2, "Low": 3}[. // ""] // 4), .number) | .[]'

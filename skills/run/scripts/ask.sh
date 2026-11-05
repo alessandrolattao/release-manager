@@ -1,15 +1,16 @@
 #!/bin/sh
 # Asks the user on an issue: posts the comment from stdin, adds the question label, moves the
-# issue's agent (if any) to [ask], and calls the user out loud through TitTieS with the sentence.
-#   ask.sh <issue-number> <release-manager-session-id> "<one spoken sentence: who and what for>" <<'EOF'
+# issue's agent (if any) to [ask], updates the planner's 🙋 counter and has the planner say it out loud.
+#   ask.sh <issue-number> "<one spoken sentence: who and what for>" <<'EOF'
 #   the comment: what is missing or what to decide, with the options
 #   EOF
 set -eu
 
 issue=${1:?issue number}
-manager=${2:?release-manager session id}
-sentence=${3:?one spoken sentence}
+sentence=${2:?one spoken sentence}
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=skills/run/scripts/roles.sh
+. "$here/roles.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "nothing to ask: the comment comes on stdin" >&2
@@ -26,4 +27,12 @@ branch=$(claude agents --json 2>/dev/null | jq -r --arg n "$issue" \
 if [ -n "$branch" ]; then
 	sh "$here/set-state.sh" "$branch" ask
 fi
-printf '%s\n' "$sentence" | sh "$here/titties.sh" call "$manager"
+
+# The planner is the one who talks to the user: its counter goes up and it says the sentence.
+planner=$(session_of "$planner_prefix")
+if [ -z "$planner" ]; then
+	echo "no planner running for $repo_short: the question waits on GitHub"
+	exit 0
+fi
+sh "$here/sync-names.sh" planner "$(printf '%s' "$planner" | cut -f1)" >/dev/null 2>&1 || true
+printf '%s\n' "$sentence" | sh "$here/titties.sh" call "$(printf '%s' "$planner" | cut -f1)"

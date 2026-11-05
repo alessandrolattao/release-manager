@@ -1,6 +1,7 @@
 #!/bin/sh
 # Ends a passed test: back to the default branch, merges the pull request (merge commit), removes
-# the agent's worktree and local branch, and moves the agent to [done] without color.
+# the agent's worktree and local branch, moves the agent to [done] without color, and counts the
+# merge in the release manager's name (🚀).
 #   merge.sh <pr-number>
 set -eu
 
@@ -18,3 +19,9 @@ if [ -d "$root/.claude/worktrees/$branch" ]; then
 fi
 git branch -D "$branch" >/dev/null 2>&1 || true
 sh "$here/set-state.sh" "$branch" "done"
+
+# shellcheck source=skills/run/scripts/roles.sh
+. "$here/roles.sh"
+mkdir -p "$counters_dir"
+echo $(($(merged_today) + 1)) >"$counters_dir/merged-$(date +%F)"
+sh "$here/sync-names.sh" manager >/dev/null 2>&1 || true

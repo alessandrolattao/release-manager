@@ -3,14 +3,22 @@
     "PreToolUse": [
       {
         "hooks": [
-          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\" working", "async": true }
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\" working",
+            "async": true
+          }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\" idle", "async": true }
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\" idle",
+            "async": true
+          }
         ]
       }
     ],
@@ -18,7 +26,16 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-progress.sh\"", "async": true }
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-progress.sh\"",
+            "async": true
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-sync.sh\"",
+            "async": true
+          }
         ]
       }
     ]

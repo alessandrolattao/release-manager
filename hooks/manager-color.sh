@@ -1,7 +1,7 @@
 #!/bin/sh
 # Colors the release manager by its state, without the model: PreToolUse means it works (green);
 # Stop means its turn ended, so it waits: on its agents (yellow) or on the user (red).
-# Only for the background session named "release manager"; every other session exits at once.
+# Only for a background session whose name starts with "release manager"; every other session exits at once.
 #   manager-color.sh working|idle   (hook payload on stdin)
 set -eu
 
@@ -14,7 +14,10 @@ role="$state_dir/$sid.role"
 if [ ! -f "$role" ]; then
 	list=$(claude agents --json 2>/dev/null) || exit 0
 	name=$(printf '%s' "$list" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s) | .name][0] // empty')
-	if [ "$name" = "release manager" ]; then echo manager >"$role"; else echo other >"$role"; fi
+	case "$name" in
+	"release manager"*) echo manager >"$role" ;;
+	*) echo other >"$role" ;;
+	esac
 fi
 [ "$(cat "$role")" = manager ] || exit 0
 

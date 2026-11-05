@@ -1,13 +1,15 @@
 #!/bin/sh
 # Starts the developer agent of one issue: the branch linked to the issue, a worktree of it, and a
 # background session named "[dev] <branch>", on the same Claude Code account as this session.
-#   start-agent.sh <issue-number> "<release-manager name and reference, e.g. release manager [b95743]>"
+#   start-agent.sh <issue-number>
 # Run it from the main checkout. Prints the branch, the worktree and the agent id.
 set -eu
 
 issue=${1:?issue number}
-manager=${2:?name of the release-manager session}
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=skills/run/scripts/roles.sh
+. "$here/roles.sh"
+manager=$manager_prefix
 root=$(git rev-parse --show-toplevel)
 repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
 base=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)

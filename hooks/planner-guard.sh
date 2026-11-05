@@ -36,6 +36,25 @@ Bash) ;;
 esac
 
 command=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
+
+# Only this repository: no gh on another one, no search across them, no moving into another one.
+repo_cache="$state_dir/$sid.repo"
+if [ ! -f "$repo_cache" ]; then
+	url=$(git -C "$cwd" remote get-url origin 2>/dev/null || true)
+	top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || true)
+	own=$(printf '%s' "$url" | sed -E 's#\.git$##; s#^.*github\.com[:/]##' | tr '[:upper:]' '[:lower:]')
+	[ -n "$own" ] && [ -n "$top" ] && printf '%s\n%s\n' "$own" "$top" >"$repo_cache"
+fi
+if [ -f "$repo_cache" ]; then
+	own=$(sed -n 1p "$repo_cache")
+	top=$(sed -n 2p "$repo_cache")
+	if ! why=$(printf '%s' "$command" | python3 -I "${CLAUDE_PLUGIN_ROOT}/hooks/own-repo.py" "$own" "$top" "$cwd"); then
+		jq -n --arg r "$why" --arg own "$own" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny",
+			permissionDecisionReason: ("The planner works only on its own repository, " + $own + ": " + $r
+			+ ". Anything about another repository goes to that repository'"'"'s planner (SendMessage to planner · <repo>), or to the user.")}}'
+		exit 0
+	fi
+fi
 if printf '%s' "$command" | grep -q -E \
 	'git[[:space:]]+(commit|push|merge|rebase|cherry-pick|revert|am|apply|stash|restore|reset|checkout[[:space:]]+-b|switch[[:space:]]+(-c|--create)|branch[[:space:]]+[^-[:space:]]|worktree[[:space:]]+add)|gh[[:space:]]+pr[[:space:]]+(create|merge|edit|close|review)|gh[[:space:]]+issue[[:space:]]+develop|claude[[:space:]]+(--bg|-p)|(^|[;&|[:space:]])(sed|perl)[[:space:]]+-i'; then
 	deny "this command changes code, branches or pull requests"

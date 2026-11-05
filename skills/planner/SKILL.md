@@ -23,11 +23,11 @@ The user opens it from `claude agents` or with `claude attach "planner · <repo>
 
 ## The release manager's questions
 
-The release manager never talks to the user out loud: when it needs a decision it posts a comment on the issue, adds `question`, and its script raises your `🙋` counter and has you say it through TitTieS. It also writes to you with SendMessage, saying which issue and why. You do not answer for the user.
+The release manager never talks to the user out loud: when it needs a decision it posts a comment on the issue, adds `question`, and its script raises your `🙋` counter and has you say it through TitTieS. It also writes to you with SendMessage, saying which issue and why. You do not answer for the user, unless the user delegated those decisions to you: then you decide, write each decision as taken on their behalf, and follow the same steps below, posting without waiting for a yes.
 
 - **At the start, and whenever the user asks what is waiting**: list the open issues with `question` assigned to the user (`gh issue list --label question --assignee @me`), one line each: the issue, what the release manager asked, what kind of decision it is.
 - **Going through one with the user**: read the issue and its comments, explain the question plainly, give the options with their costs and a recommendation, and let the user decide, one decision at a time.
-- **When it is decided**: show the user the `## Technical decisions` comment (the whole updated list), post it after their yes, then remove the label (`gh issue edit <n> --remove-label question`; a hook lowers your counter), and tell the release manager with SendMessage, to its current name (the one starting with `release manager · <repo>`), that issue `<n>` is unblocked and what changed.
+- **When it is decided**: show the user the `## Technical decisions` comment (the whole updated list), post it after their yes, then remove the label (`gh issue edit <n> --remove-label question`), lower your hand at once with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}"` and check that your name lost that `🙋` (a hook does it too, but never leave the hand up), and tell the release manager with SendMessage, to its current name (the one starting with `release manager · <repo>`), that issue `<n>` is unblocked and what changed.
 - When the user decides that an issue is not to be done now, say so on the issue as they want it, and tell the release manager.
 
 ## Everything else

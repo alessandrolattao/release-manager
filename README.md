@@ -11,14 +11,14 @@ They rename themselves after the repository, with a counter: `release manager ·
 
 The release manager works through your GitHub issues on its own:
 
-1. Takes the open issue assigned to you with the highest Priority (Urgent, High, Medium, Low) that nothing blocks (GitHub "blocked by" relationships) and that is not waiting on you (`question` label). Issues without a Priority are the backlog: it leaves them alone.
+1. Takes the next open issue assigned to you that is ready: it carries the label `ready for development`, nothing blocks it (GitHub "blocked by" relationships) and it is not waiting on you (`question` label). Priority, when the repository has it, decides the order; otherwise the oldest first. Issues without the label are the backlog: it leaves them alone.
 2. Checks that the technical decisions are in the issue's comments. If they are not, it does not start: it asks you.
 3. Creates the linked branch and a worktree, and starts a background developer agent named `[dev] <n>-<slug>`, at most 2 at once, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets.
 4. Answers the agent's questions only with what is written (issue comments, repository rules, product docs).
 5. When the agent opens its pull request, tests it in the main checkout (the browser for what a person sees, the right tool otherwise), merges it when it passes, or sends the bugs back. After 3 failed rounds it asks you.
 6. Starts over. With nothing left to do it has the planner tell you once, and looks again every 15 minutes.
 
-It also opens issues, for you or for whoever the repository's `.md` files name, with Priority and Effort set.
+It also opens issues, for you or for whoever the repository's `.md` files name; they wait in the backlog until you and the planner mark them ready.
 
 ## Preparing the work
 

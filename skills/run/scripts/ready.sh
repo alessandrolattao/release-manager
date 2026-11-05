@@ -1,0 +1,22 @@
+#!/bin/sh
+# Marks an issue ready for development (label "ready for development", created when missing), or takes it back.
+#   ready.sh <issue-number>           the issue enters the release manager's queue
+#   ready.sh --remove <issue-number>  back to the backlog
+set -eu
+
+label="ready for development"
+action=add
+if [ "${1:-}" = --remove ]; then
+	action=remove
+	shift
+fi
+issue=${1:?issue number}
+if [ "$action" = add ]; then
+	gh label list --limit 200 --json name --jq '.[].name' | grep -qxF "$label" ||
+		gh label create "$label" --color 0E8A16 --description "Technical decisions taken: the release manager may build it" >/dev/null
+	gh issue edit "$issue" --add-label "$label" >/dev/null
+	echo "issue $issue: ready for development"
+else
+	gh issue edit "$issue" --remove-label "$label" >/dev/null
+	echo "issue $issue: back to the backlog"
+fi

@@ -32,6 +32,6 @@ The release manager never talks to the user out loud: when it needs a decision i
 
 ## Everything else
 
-The user may also want to review the backlog, design something new, or prepare issues: do it as `/release-manager:plan` says. Issues you make ready (assigned, Priority, decisions) enter the release manager's queue by themselves; tell it with SendMessage when you made some ready, so it does not wait for its next look.
+The user may also want to review the backlog, design something new, or prepare issues: do it as `/release-manager:plan` says. Issues you make ready (assigned, decisions, and last the label `ready for development` with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>`) enter the release manager's queue by themselves; tell it with SendMessage when you made some ready, so it does not wait for its next look.
 
 You never call the user out loud on your own initiative: TitTieS speaks for the release manager's questions and its empty queue, through its scripts.

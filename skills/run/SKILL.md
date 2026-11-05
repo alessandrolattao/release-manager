@@ -71,9 +71,9 @@ The user answers with the planner, which writes the decisions on the issue, remo
 
 ### 1. Pick the next issue
 
-`sh "${CLAUDE_SKILL_DIR}/scripts/queue.sh"` prints the open issues assigned to the user, best first (Priority Urgent, High, Medium, Low; oldest first), one JSON line each. Take the first one that is `workable` and has no agent yet (no agent whose name holds `<number>-`).
+`sh "${CLAUDE_SKILL_DIR}/scripts/queue.sh"` prints the open issues assigned to the user, one JSON line each, in order (Priority Urgent, High, Medium, Low, then none; oldest first). An issue is `workable` when all three hold: it carries the label `ready for development`, no open issue blocks it ("blocked by"), and it does not carry `question`. Take the first workable one that has no agent yet (no agent whose name holds `<number>-`).
 
-An issue without Priority is in the **backlog** (`backlog: true`): it is not ready for development, and it probably lacks its technical analysis too. Never take it, never comment on it, never call the user for it.
+An issue without `ready for development` is in the **backlog** (`backlog: true`): it is not ready for development, and it probably lacks its technical analysis too. Never take it, never comment on it, never call the user for it. Only the planner (or the user) adds that label, never you.
 
 Read it whole: `gh issue view <n> --comments`. If the technical decisions are missing or anything technical is unclear, ask the user and take the next one.
 
@@ -109,7 +109,7 @@ When nothing is workable, have the planner tell the user once:
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/call.sh" <<'EOF'
-Il release manager di <repo> ha finito il lavoro: <n> issue aspettano una tua risposta, <m> sono nel backlog senza priorità.
+Il release manager di <repo> ha finito il lavoro: <n> issue aspettano una tua risposta, <m> sono nel backlog.
 EOF
 ```
 
@@ -117,4 +117,4 @@ Then run `wait.sh 15` in the background and look at the queue again each time it
 
 ## Opening issues
 
-You open an issue when the user asks you, or when the work brings up a new topic (a new topic is its own issue). Write it the way the repository says (its issue-writing skill or conventions), assign it to the user or to whoever the repository's `.md` files name, and set its Priority and Effort yourself: `sh "${CLAUDE_SKILL_DIR}/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. The user may revise them. An issue that needs another one first: `sh "${CLAUDE_SKILL_DIR}/scripts/block.sh" <n> <blocking>`.
+You open an issue when the user asks you, or when the work brings up a new topic (a new topic is its own issue). Write it the way the repository says (its issue-writing skill or conventions), assign it to the user or to whoever the repository's `.md` files name, and, when the repository has the Priority and Effort fields, set them: `sh "${CLAUDE_SKILL_DIR}/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. It goes to the backlog: it becomes ready for development only when the planner marks it so with the user. An issue that needs another one first: `sh "${CLAUDE_SKILL_DIR}/scripts/block.sh" <n> <blocking>`.

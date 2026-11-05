@@ -30,7 +30,6 @@ want=$prefix
 [ "${n:-0}" -gt 0 ] && want="$prefix $icon$n"
 
 id=${2:-}
-current=""
 if [ -z "$id" ]; then
 	found=$(session_of "$prefix")
 	[ -n "$found" ] || {
@@ -38,9 +37,11 @@ if [ -z "$id" ]; then
 		exit 0
 	}
 	id=$(printf '%s' "$found" | cut -f1)
-	current=$(printf '%s' "$found" | cut -f2)
-else
-	current=$(claude agents --json 2>/dev/null | jq -r --arg s "$id" '[.[] | select(.sessionId == $s) | .name][0] // empty')
 fi
+# The current name is the last one the session recorded in its transcript (what /rename writes);
+# `claude agents` can lag behind a rename, so it is only the fallback.
+config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+current=$(cat "$config"/projects/*/"$id".jsonl 2>/dev/null | grep '"custom-title"' | tail -1 | jq -r '.customTitle // empty' 2>/dev/null || true)
+[ -n "$current" ] || current=$(claude agents --json 2>/dev/null | jq -r --arg s "$id" '[.[] | select(.sessionId == $s) | .name][0] // empty')
 [ "$current" = "$want" ] && exit 0
 sh "$here/rename.sh" "$id" "$want"

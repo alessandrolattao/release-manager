@@ -17,6 +17,11 @@ session_of() {
 # merged_today: pull requests the release manager merged today.
 merged_today() { cat "$counters_dir/merged-$(date +%F)" 2>/dev/null || echo 0; }
 
+# backlog_open: open issues assigned to the user without "ready for development": the ones to prepare.
+backlog_open() {
+	gh issue list --assignee @me --state open --limit 500 --search '-label:"ready for development"' --json number --jq length 2>/dev/null || echo 0
+}
+
 # questions_open: open issues assigned to the user that wait on an answer (label question).
 # Through the REST list of issues, never `gh issue list`: with a label and an assignee that one goes
 # through GitHub's search, whose index lags a few seconds behind a label just removed, so a counter

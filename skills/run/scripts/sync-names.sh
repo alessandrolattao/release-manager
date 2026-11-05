@@ -1,7 +1,8 @@
 #!/bin/sh
 # Gives the release manager or the planner of this repository its name with its counter:
-#   release manager · <repo> 🚀<merged today>      planner · <repo> 🙋<questions waiting for the user>
-# The counter is left out at zero. The name changes only when it differs.
+#   release manager · <repo> 🚀<merged today>
+#   planner · <repo> 🙋<questions waiting for the user> 🧠<issues to prepare, not ready for development>
+# A counter is left out at zero. The name changes only when it differs.
 #   sync-names.sh manager|planner [session-id]   (without an id, the session already named after the role)
 set -eu
 
@@ -13,21 +14,24 @@ here=$(cd "$(dirname "$0")" && pwd)
 case "$role" in
 manager)
 	prefix=$manager_prefix
+	counters=""
 	n=$(merged_today)
-	icon="🚀"
+	[ "${n:-0}" -gt 0 ] && counters=" 🚀$n"
 	;;
 planner)
 	prefix=$planner_prefix
+	counters=""
 	n=$(questions_open)
-	icon="🙋"
+	[ "${n:-0}" -gt 0 ] && counters=" 🙋$n"
+	m=$(backlog_open)
+	[ "${m:-0}" -gt 0 ] && counters="$counters 🧠$m"
 	;;
 *)
 	echo "usage: sync-names.sh manager|planner [session-id]" >&2
 	exit 2
 	;;
 esac
-want=$prefix
-[ "${n:-0}" -gt 0 ] && want="$prefix $icon$n"
+want="$prefix$counters"
 
 id=${2:-}
 if [ -z "$id" ]; then

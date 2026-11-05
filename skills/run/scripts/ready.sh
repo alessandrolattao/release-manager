@@ -26,3 +26,5 @@ else
 	gh issue edit "$issue" --remove-label "$label" >/dev/null
 	echo "issue $issue: back to the backlog"
 fi
+# The planner's 🧠 counts the issues still to prepare.
+sh "$(dirname "$0")/sync-names.sh" planner >/dev/null 2>&1 || true

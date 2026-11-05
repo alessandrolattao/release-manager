@@ -38,4 +38,11 @@ The release manager never talks to the user out loud: when it needs a decision i
 
 The user may also want to review the backlog, design something new, or prepare issues: do it as `/release-manager:plan` says. Issues you make ready (assigned, decisions, and last the label `ready for development` with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>`) enter the release manager's queue by themselves; tell it with SendMessage when you made some ready, so it does not wait for its next look.
 
+## At the end of every piece of work
+
+When a piece of work with the user is over (a review, an analysis, a batch of issues, a question settled), before you stop:
+
+1. Bring your name up to date: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}"`.
+2. Tell the user in one line what is left, questions first: "Restano 2 domande e 14 issue da preparare." (the same counts as your 🙋 and 🧠).
+
 You never call the user out loud on your own initiative: TitTieS speaks for the release manager's questions and its empty queue, through its scripts.

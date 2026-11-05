@@ -17,6 +17,14 @@ and it works through your GitHub issues on its own:
 
 It also opens issues, for you or for whoever the repository's `.md` files name, with Priority and Effort set.
 
+## Preparing the work
+
+```
+/release-manager:plan
+```
+
+The other half: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, shows you everything before publishing, writes only the decisions you took, and ends by telling you which issues are ready and which are not.
+
 ## It never decides how
 
 Engineering manager, delivery manager, QA and release manager, yes; tech lead and product owner, no. Every technical doubt stops the work on that point and becomes a question for you: a comment on the issue, the `question` label, and a call out loud through [TitTieS](https://github.com/alessandrolattao/titties) (only for decisions and blocks, never for progress). You answer in the issue and remove `question`; it picks the issue up again.

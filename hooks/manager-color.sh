@@ -1,6 +1,6 @@
 #!/bin/sh
-# Colors the release manager by its state, without the model: PreToolUse means it works (green);
-# Stop means its turn ended, so it waits: on its agents (yellow) or on the user (red).
+# Colors the release manager by its state, without the model: PreToolUse means it works (cyan, like
+# its agents); Stop means its turn ended: idle while its agents work (green), or waiting for the user (orange).
 # Only for a background session whose name starts with "release manager"; every other session exits at once.
 #   manager-color.sh working|idle   (hook payload on stdin)
 set -eu
@@ -12,12 +12,12 @@ mode=${1:?working or idle}
 role_is "release manager" is-manager || exit 0
 
 if [ "$mode" = working ]; then
-	want=green
+	want=cyan
 else
 	root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$cwd")
 	busy=$(claude agents --json --cwd "$root/.claude/worktrees" 2>/dev/null |
 		jq '[.[] | select((.name // "") | test("^\\[(dev|review|test|fix)\\]"))] | length' 2>/dev/null || echo 0)
-	if [ "${busy:-0}" -gt 0 ]; then want=yellow; else want=red; fi
+	if [ "${busy:-0}" -gt 0 ]; then want=green; else want=orange; fi
 fi
 
 # One color change at a time; a later one waits its turn so the last state always wins.

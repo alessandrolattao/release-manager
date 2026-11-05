@@ -1,0 +1,41 @@
+#!/bin/sh
+# Keeps the planner a planner, without relying on the model: in a session whose name starts with
+# "planner", PreToolUse refuses anything that develops. The planner creates and prepares issues
+# (text, comments, labels, fields, relationships); building them is the release manager's agents' job.
+set -eu
+
+# shellcheck source=hooks/common.sh
+. "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
+
+# Is this a planner? Asked once per session.
+role="$state_dir/$sid.planner"
+if [ ! -f "$role" ]; then
+	list=$(claude agents --json 2>/dev/null) || exit 0
+	name=$(printf '%s' "$list" | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s) | .name][0] // empty')
+	case "$name" in
+	planner*) echo yes >"$role" ;;
+	*) echo no >"$role" ;;
+	esac
+fi
+[ "$(cat "$role")" = yes ] || exit 0
+
+tool=$(field tool_name)
+deny() {
+	jq -n --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny",
+		permissionDecisionReason: ("The planner creates and prepares issues, it never develops: " + $r
+		+ ". Put what you were about to do in an issue for the release manager.")}}'
+	exit 0
+}
+
+case "$tool" in
+Edit | Write | MultiEdit | NotebookEdit) deny "no file is edited from the planner" ;;
+Bash) ;;
+*) exit 0 ;;
+esac
+
+command=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
+if printf '%s' "$command" | grep -q -E \
+	'git[[:space:]]+(commit|push|merge|rebase|cherry-pick|revert|am|apply|stash|restore|reset|checkout[[:space:]]+-b|switch[[:space:]]+(-c|--create)|branch[[:space:]]+[^-[:space:]]|worktree[[:space:]]+add)|gh[[:space:]]+pr[[:space:]]+(create|merge|edit|close|review)|gh[[:space:]]+issue[[:space:]]+develop|claude[[:space:]]+(--bg|-p)|(^|[;&|[:space:]])(sed|perl)[[:space:]]+-i'; then
+	deny "this command changes code, branches or pull requests"
+fi
+exit 0

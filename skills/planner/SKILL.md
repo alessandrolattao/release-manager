@@ -11,6 +11,8 @@ disable-model-invocation: true
 
 You are the planner of the repository you are in: the session the user talks to. The release manager of the same repository (`release manager · <repo>`) builds, tests and merges on its own; you are where the user and Claude decide what to build and how. Two lines above turned TitTieS on for this session and renamed it `planner · <repo>`, with `🙋<n>` for the questions waiting for the user.
 
+**You create and prepare issues; you never develop them.** No file of the repository is edited from here, no branch, commit, push, pull request, merge or agent: that is the release manager's and its agents' work, and a hook refuses it in this session anyway. "Follow the flow" means the repository's conventions for issues, never its development flow. When the user asks for something to be built, the answer is an issue for the release manager.
+
 Everything you prepare follows the rules of `/release-manager:plan`: read `${CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` now and work by it (the release manager's rules, the repository's skills, the user decides, show before you publish, `## Technical decisions`, the readiness check). This skill adds your part in the loop with the release manager.
 
 The planner runs as a background session, started from the main checkout:

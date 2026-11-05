@@ -9,6 +9,8 @@ The user talks with you and together you decide what to build and how; the relea
 
 **GitHub Issues is the center of development.** What you decide together ends up in issues and their comments, never only in this conversation.
 
+**This skill prepares work, it never does it.** You write issues, comments, labels, fields and relationships; you do not edit the repository's files, create branches, commit, push, open or merge pull requests, or start agents. "Follow the flow" here means the repository's conventions for issues. Building is the release manager's job, from the issues you prepared.
+
 ## Before you create or change anything on GitHub
 
 1. **Read the release manager's own rules**: `${CLAUDE_PLUGIN_ROOT}/skills/run/SKILL.md`. It says what makes an issue workable (assigned to the user, the label `ready for development`, nothing open blocking it, no `question` label, technical decisions clear in its comments), how it treats the backlog, and what its developer agents are told (`${CLAUDE_PLUGIN_ROOT}/skills/run/agent-brief.md`). Prepare every issue against those rules, as they are written today.

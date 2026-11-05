@@ -99,7 +99,7 @@ One test at a time. When an agent sends `PR ready` or `fixed`:
 
 1. `sh "${CLAUDE_SKILL_DIR}/scripts/qa-start.sh" <branch>`: the main checkout goes on the pushed code (detached) and the agent to `[test]`.
 2. Test the way the repository says (its testing skills): every acceptance criterion of the issue, in the browser for what a person sees, with the right tool otherwise (tests, API calls, commands). Stop whatever you started.
-3. **Passed**, with the PR's CI green and its review handled: `sh "${CLAUDE_SKILL_DIR}/scripts/merge.sh" <pr>` goes back to the default branch, merges (merge commit), removes the worktree and local branch, and moves the agent to `[done]` without color. Write on the PR what you tried. Then back to step 1.
+3. **Passed**, with the PR's CI green and its review handled: `sh "${CLAUDE_SKILL_DIR}/scripts/merge.sh" <pr>` goes back to the default branch, merges (merge commit), removes the worktree and local branch, and moves the agent to `[done]` without color. Write on the PR what you tried, then tell the agent with SendMessage, to its new name, `merged: #<pr>, your work is done`: it answers with its `result:` line and stops, so it stays listed with what it did instead of waiting for input. Then back to step 1.
 4. **Failed**: `sh "${CLAUDE_SKILL_DIR}/scripts/qa-fail.sh" <branch>` goes back to the default branch and moves the agent to `[fix]`; then send the agent, by its new name, what fails with the steps to see it. Test again on `fixed`. After 3 failed rounds on the same issue, ask the user.
 
 The merge is where your work ends, whatever the repository does next. Releases, tags, versions and deploys are the user's: you never cut a release, push a tag or check a deploy.

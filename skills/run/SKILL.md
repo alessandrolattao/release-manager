@@ -64,9 +64,9 @@ sh "${CLAUDE_SKILL_DIR}/scripts/ask.sh" <issue> "<one spoken sentence>" <<'EOF'
 EOF
 ```
 
-It posts the comment, adds `question`, moves the issue's agent to `[ask]`, raises the planner's `🙋` counter and has the planner say the sentence out loud. The sentence says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Then tell the planner, with SendMessage to its current name, which issue and why, so it can take it up with the user. Leave that issue and go on with the others.
+It posts the comment, adds `question`, moves the issue's agent to `[ask]`, leaves the details in the planner's inbox, raises its `🙋` counter and has the planner say the sentence out loud. The sentence says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Leave that issue and go on with the others.
 
-The user answers with the planner, which writes the decisions on the issue, removes `question` and tells you. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided.
+The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided.
 
 ## The loop
 
@@ -88,7 +88,9 @@ Run `clessidra` (at most once a minute). Start a new agent only when fewer than 
 
 ### 4. Follow the agents
 
-Agents write to you with SendMessage: questions, `PR ready: #<pr>`, `fixed: #<pr>`; the planner writes when it unblocks an issue. Between messages, run `sh "${CLAUDE_SKILL_DIR}/scripts/wait.sh" 15` with the Bash tool in the background: it ends when one of the agents changes state, when a question gets answered, or after 15 minutes, and its end wakes you. Then look at what changed (`claude logs <name>` shows an agent's output) and go on with the loop: pick more work if capacity allows.
+Agents write to you with SendMessage: questions, `PR ready: #<pr>`, `fixed: #<pr>`. The planner never interrupts you: it leaves messages in your inbox (`unblocked`, `info`), and your name shows `📨<n>` while some are unread. Between messages, run `sh "${CLAUDE_SKILL_DIR}/scripts/wait.sh" 15` with the Bash tool in the background: it ends when one of the agents changes state, when a question gets answered, when a message reaches your inbox, or after 15 minutes, and its end wakes you. Each time you wake, read your inbox first (`sh "${CLAUDE_SKILL_DIR}/scripts/inbox.sh" read manager`), then look at what changed (`claude logs <name>` shows an agent's output) and go on with the loop: pick more work if capacity allows.
+
+You never write to the planner with SendMessage: to tell it something, `sh "${CLAUDE_SKILL_DIR}/scripts/tell.sh" planner info <<'EOF'` with the message and `EOF`.
 
 - **A question:** answer it with SendMessage (`to:` the agent's current name) only from what is written, quoting where. If the answer is not written, ask the user, and tell the agent to wait on that point.
 - **An agent blocked on a permission or stuck:** ask the user.

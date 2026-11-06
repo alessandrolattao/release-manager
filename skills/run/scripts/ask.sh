@@ -29,6 +29,11 @@ if [ -n "$branch" ]; then
 fi
 
 # The planner is the one who talks to the user: its counter goes up and it says the sentence.
+# The details go to the planner's inbox, to read when its current topic is over.
+{
+	printf 'Issue #%s needs the user: %s\n\n' "$issue" "$sentence"
+	printf '%s\n' "$body"
+} | sh "$here/tell.sh" planner question >/dev/null 2>&1 || true
 planner=$(session_of "$planner_prefix")
 if [ -z "$planner" ]; then
 	echo "no planner running for $repo_short: the question waits on GitHub"

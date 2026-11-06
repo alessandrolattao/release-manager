@@ -1,7 +1,7 @@
 #!/bin/sh
-# Waits until one of this repository's agents changes state (finishes, blocks, fails), or a question
-# is answered (fewer issues with the question label), or the minutes run out; then prints the agents
-# and exits. Run it in the background: its exit wakes you.
+# Waits until one of this repository's agents changes state (finishes, blocks, fails), a question is
+# answered (fewer issues with the question label), a message reaches the release manager's inbox, or
+# the minutes run out; then prints the agents and exits. Run it in the background: its exit wakes you.
 #   wait.sh [minutes]   default 15
 set -eu
 
@@ -18,6 +18,7 @@ agents() {
 
 before=$(agents)
 asked=$(questions_open)
+mailed=$(inbox_new manager)
 checks=0
 end=$(($(date +%s) + minutes * 60))
 while [ "$(date +%s)" -lt "$end" ]; do
@@ -26,6 +27,10 @@ while [ "$(date +%s)" -lt "$end" ]; do
 	if [ "$now" != "$before" ]; then
 		echo "agents changed"
 		echo "$now" | jq '.'
+		exit 0
+	fi
+	if [ "$(inbox_new manager)" -gt "$mailed" ]; then
+		echo "a message reached your inbox: read it with inbox.sh read manager"
 		exit 0
 	fi
 	# Every 2 minutes, see whether the user answered a question.

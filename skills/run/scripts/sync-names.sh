@@ -2,6 +2,7 @@
 # Gives the release manager or the planner of this repository its name with its counter:
 #   release manager · <repo> 🚀<merged today>
 #   planner · <repo> 🙋<questions waiting for the user> 🧠<issues to prepare, not ready for development>
+#   📨<unread messages in its inbox> on either
 # A counter is left out at zero. The name changes only when it differs.
 #   sync-names.sh manager|planner [session-id]   (without an id, the session already named after the role)
 set -eu
@@ -17,6 +18,8 @@ manager)
 	counters=""
 	n=$(merged_today)
 	[ "${n:-0}" -gt 0 ] && counters=" 🚀$n"
+	k=$(inbox_new manager)
+	[ "${k:-0}" -gt 0 ] && counters="$counters 📨$k"
 	;;
 planner)
 	prefix=$planner_prefix
@@ -25,6 +28,8 @@ planner)
 	[ "${n:-0}" -gt 0 ] && counters=" 🙋$n"
 	m=$(backlog_open)
 	[ "${m:-0}" -gt 0 ] && counters="$counters 🧠$m"
+	k=$(inbox_new planner)
+	[ "${k:-0}" -gt 0 ] && counters="$counters 📨$k"
 	;;
 *)
 	echo "usage: sync-names.sh manager|planner [session-id]" >&2

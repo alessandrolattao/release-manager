@@ -8,6 +8,15 @@ manager_prefix="release manager · $repo_short"
 planner_prefix="planner · $repo_short"
 counters_dir="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/$(printf '%s' "$repo_full" | tr '/' '_')"
 
+# inbox_dir <role> [owner/name]: the Maildir-style inbox of a role (planner or manager) of a repository.
+inbox_dir() {
+	printf '%s/release-manager/inbox/%s/%s' "${XDG_DATA_HOME:-$HOME/.local/share}" \
+		"$(printf '%s' "${2:-$repo_full}" | tr '/' '_')" "$1"
+}
+
+# inbox_new <role>: messages waiting, unread, in this repository's inbox of that role.
+inbox_new() { find "$(inbox_dir "$1")/new" -type f 2>/dev/null | wc -l | tr -d ' '; }
+
 # session_of <prefix>: "<session id><TAB><name>" of the background session named <prefix> or "<prefix> …".
 session_of() {
 	claude agents --json 2>/dev/null | jq -r --arg p "$1" \

@@ -28,6 +28,10 @@ The planner works by `/release-manager:plan`, which you can also use in any sess
 
 Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent, moves the board and calls you through TitTieS.
 
+## One thread at a time
+
+The release manager and the planner never interrupt each other, or another repository's planner: they leave messages in an inbox (one file per message, Maildir style, under `~/.local/share/release-manager/inbox/`), typed `question`, `unblocked` or `info`, and the receiver's name shows `📨<n>`. The release manager reads its inbox each time it wakes; the planner only when you ask or when a topic is over, so a message never pulls a discussion off course. Only the developer agents talk to the release manager directly.
+
 ## It never decides how
 
 Engineering manager, delivery manager, QA and release manager, yes; tech lead and product owner, no. Every technical doubt stops the work on that point and becomes a question for you: a comment on the issue and the `question` label. The planner raises its 🙋 counter and calls you out loud through [TitTieS](https://github.com/alessandrolattao/titties) (only for decisions and blocks, never for progress); you go through the question with the planner, which writes your decisions on the issue, removes `question` and tells the release manager, which picks the issue up again.

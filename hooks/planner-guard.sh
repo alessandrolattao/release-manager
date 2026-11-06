@@ -51,7 +51,7 @@ if [ -f "$repo_cache" ]; then
 	if ! why=$(printf '%s' "$command" | python3 -I "${CLAUDE_PLUGIN_ROOT}/hooks/own-repo.py" "$own" "$top" "$cwd"); then
 		jq -n --arg r "$why" --arg own "$own" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny",
 			permissionDecisionReason: ("The planner works only on its own repository, " + $own + ": " + $r
-			+ ". Anything about another repository goes to that repository'"'"'s planner (SendMessage to planner · <repo>), or to the user.")}}'
+			+ ". Anything about another repository goes to that repository'"'"'s planner, as a message in its inbox (tell.sh planner <kind> --to-repo <owner/name>), or to the user.")}}'
 		exit 0
 	fi
 fi

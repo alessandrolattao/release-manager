@@ -1,11 +1,13 @@
 ---
 name: plan
-description: Prepares work for the release-manager while the user and you talk it through - creating issues, reviewing the backlog, designing a new project, a technical analysis, anything that ends in GitHub issues. Use when the user wants to create, review, split, prioritise or analyse issues, so that each one comes out ready for /release-manager:run.
+description: Prepares work for the release-manager while the user and you talk it through - creating issues, reviewing the backlog, designing a new project, and the technical analysis of an issue when the user asks for it. Use when the user wants to create, review, split, prioritise or analyse issues for /release-manager:run.
 ---
 
 # Preparing work for the release manager
 
-The user talks with you and together you decide what to build and how; the release manager (`/release-manager:run`) then builds it on its own. There is no fixed flow here: follow the conversation, whether it is a backlog review, the design of a new project, a technical analysis of one issue or a batch of new ones. What is fixed is the result: issues the release manager can work on without asking.
+The user talks with you and together you decide what to build and, when they want, how; the release manager (`/release-manager:run`) then builds it on its own. There is no fixed flow here: follow the conversation, whether it is a backlog review, the design of a new project, a batch of new issues or the technical analysis of one.
+
+**Creating issues and analysing them are two separate moments, and the second is the user's call.** An issue can be created with no technical analysis at all: it goes to the backlog, and that is normal. The technical analysis of an issue happens only when the user asks for it, issue by issue; never start it, propose it or slip technical decisions into an issue on your own because you are creating it.
 
 **GitHub Issues is the center of development.** What you decide together ends up in issues and their comments, never only in this conversation.
 
@@ -25,15 +27,22 @@ The user talks with you and together you decide what to build and how; the relea
 - **Show before you publish.** Before creating an issue, writing a decisions comment or changing fields or relationships, show the user the full text or the change and wait for their yes.
 - **One topic, one issue.** Split what is too big the way the repository's issue rules say, and link the pieces with relationships.
 
-## What a ready issue has
+## Creating an issue
 
-- Written with the repository's conventions (title, body, acceptance criteria that can be tried, language).
+- Written with the repository's conventions (title, body, acceptance criteria that can be tried, language): what must become true, not how.
 - Assigned: to the user when the release manager should build it; to whoever the repository's `.md` files name when it is someone else's area (then it is not the release manager's).
 - **Priority and Effort**, when the repository has those fields: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. They only order the queue.
 - **Relationships**: an issue that needs another one first is blocked by it: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/block.sh" <n> <blocking>` (`--remove` to undo).
+
+That is all an issue needs to exist. Without technical decisions and the label it stays in the backlog until the user asks for its analysis.
+
+## The technical analysis, when the user asks for it
+
+For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. What comes out:
+
 - **Technical decisions in a comment that starts with `## Technical decisions`**, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the release manager and its agents tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
 - **The label `ready for development`, last of all**: only after the `## Technical decisions` comment is posted, with everything above in place, and the user says yes: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). The label is what lets the release manager take the issue, so it never goes on before the decisions; the script refuses it while the issue has no `## Technical decisions` comment.
 
 ## Before you finish
 
-Check each issue you prepared or touched against the release manager's rules, with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/queue.sh"` and by reading it back (`gh issue view <n> --comments`). Tell the user, one line per issue, which are ready for the release manager and which are not, and why (no `ready for development` label, blocked by #x, a decision still open, assigned to someone else).
+Read back each issue you created or touched (`gh issue view <n> --comments`, and `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/queue.sh"` for how the release manager sees it). Tell the user, one line per issue, where it stands: ready for the release manager, or in the backlog and why (its technical analysis not done yet, a decision still open, blocked by #x, assigned to someone else). An issue just created without analysis is simply in the backlog: say so, do not offer to analyse it.

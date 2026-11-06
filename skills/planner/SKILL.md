@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Runs this session as the planner of the current repository, the release manager's counterpart that the user talks to. It collects the release manager's questions, calls the user out loud through TitTieS, reviews the questions and the backlog with them, writes their technical decisions on the issues and tells the release manager when an issue is unblocked.
+description: Runs this session as the planner of the current repository, the release manager's counterpart that the user talks to. It collects the release manager's questions, calls the user out loud through TitTieS, reviews the questions and the backlog with them, creates issues, does a technical analysis when the user asks for one, and tells the release manager when an issue is unblocked.
 disable-model-invocation: true
 ---
 
@@ -38,7 +38,7 @@ The release manager never talks to the user out loud: when it needs a decision i
 
 ## Everything else
 
-The user may also want to review the backlog, design something new, or prepare issues: do it as `/release-manager:plan` says. Issues you make ready (assigned, decisions, and last the label `ready for development` with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>`) enter the release manager's queue by themselves; tell it with SendMessage when you made some ready, so it does not wait for its next look.
+The user may also want to review the backlog, design something new, or create issues: do it as `/release-manager:plan` says. Creating an issue does not mean analysing it: the technical analysis of an issue is done only when the user asks for it. Issues you make ready (assigned, decisions, and last the label `ready for development` with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>`) enter the release manager's queue by themselves; tell it with SendMessage when you made some ready, so it does not wait for its next look.
 
 ## At the end of every piece of work
 

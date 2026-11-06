@@ -16,7 +16,8 @@ The release manager works through your GitHub issues on its own:
 3. Creates the linked branch and a worktree, and starts a background developer agent named `[dev] <n>-<slug>`, at most 2 at once, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets.
 4. Answers the agent's questions only with what is written (issue comments, repository rules, product docs).
 5. When the agent opens its pull request, tests it in the main checkout (the browser for what a person sees, the right tool otherwise), merges it when it passes, or sends the bugs back. After 3 failed rounds it asks you.
-6. Starts over. With nothing left to do it has the planner tell you once, and looks again every 15 minutes.
+6. Watches the CI of the default branch after every merge. When it turns red it opens an urgent bug issue and merges nothing else until it is green again, except the fix.
+7. Starts over. With nothing left to do it has the planner tell you once, and looks again every 15 minutes.
 
 It also opens issues, for you or for whoever the repository's `.md` files name; they wait in the backlog until you and the planner mark them ready.
 

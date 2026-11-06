@@ -1,7 +1,7 @@
 #!/bin/sh
 # Colors the release manager by its state, without the model: PreToolUse means it works (cyan, like
 # its agents); Stop means its turn ended: orange when it needs the user (an issue waits on a question,
-# an agent is stuck in [ask]), green otherwise (all is well: agents at work, CI running, or nothing to do).
+# an agent is stuck in [ask], the default branch's CI is red), green otherwise (all is well: agents at work, CI running, or nothing to do).
 # Only for a background session whose name starts with "release manager"; every other session exits at once.
 #   manager-color.sh working|idle   (hook payload on stdin)
 set -eu
@@ -19,7 +19,8 @@ else
 	asking=$(claude agents --json --cwd "$root/.claude/worktrees" 2>/dev/null |
 		jq '[.[] | select((.name // "") | startswith("[ask]"))] | length' 2>/dev/null || echo 0)
 	questions=$(cd "$cwd" && gh issue list --label question --assignee @me --state open --limit 200 --json number --jq length 2>/dev/null || echo 0)
-	if [ "${asking:-0}" -gt 0 ] || [ "${questions:-0}" -gt 0 ]; then want=orange; else want=green; fi
+	red_main="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/$(git -C "$cwd" remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#^.*github\.com[:/]##' | tr '/' '_')/main-red"
+	if [ "${asking:-0}" -gt 0 ] || [ "${questions:-0}" -gt 0 ] || [ -f "$red_main" ]; then want=orange; else want=green; fi
 fi
 
 # One color change at a time; a later one waits its turn so the last state always wins.

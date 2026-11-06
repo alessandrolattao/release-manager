@@ -2,10 +2,11 @@
 # Leaves a message in the inbox of a planner or a release manager, instead of interrupting it:
 # it reads its inbox when its current topic is over. The message is a file, written atomically
 # (Maildir: tmp/ then new/), and the receiver's 📨 counter goes up.
-#   tell.sh <planner|manager> <question|unblocked|info> [--to-repo owner/name] <<'EOF'
+#   tell.sh <planner|manager> <question|unblocked|info> [--to-repo owner/name] [--from "<sender>"] <<'EOF'
 #   the message
 #   EOF
 # Without --to-repo the receiver is this repository's; with it, another repository's (planner to planner).
+# --from names the sender when it is not a role session, such as a Pulse check ("Pulse · monthly audit").
 set -eu
 
 to=${1:?planner or manager}
@@ -15,9 +16,23 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=skills/run/scripts/roles.sh
 . "$here/roles.sh"
 target=$repo_full
-if [ "${1:-}" = --to-repo ]; then
-	target=${2:?owner/name}
-fi
+sender=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--to-repo)
+		target=${2:?owner/name}
+		shift 2
+		;;
+	--from)
+		sender=${2:?sender}
+		shift 2
+		;;
+	*)
+		echo "unknown option '$1'" >&2
+		exit 2
+		;;
+	esac
+done
 case "$to" in planner | manager) ;; *)
 	echo "unknown receiver '$to': planner or manager" >&2
 	exit 2
@@ -41,6 +56,7 @@ case "$name" in
 "planner"*) from="planner · $repo_short" ;;
 "release manager"*) from="release manager · $repo_short" ;;
 esac
+[ -n "$sender" ] && from=$sender
 
 box=$(inbox_dir "$to" "$target")
 mkdir -p "$box/tmp" "$box/new" "$box/cur"

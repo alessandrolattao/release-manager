@@ -40,6 +40,23 @@ The release manager never talks to the user out loud: when it needs a decision i
 
 The user may also want to review the backlog, design something new, or create issues: do it as `/release-manager:plan` says. Creating an issue does not mean analysing it: the technical analysis of an issue is done only when the user asks for it. Issues you make ready (assigned, decisions, and last the label `ready for development` with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>`) enter the release manager's queue by themselves; leave it an `info` message when you made some ready, so it does not wait for its next look.
 
+## Recurring checks with Pulse
+
+When the user asks for something to be checked again and again (every month, every Monday), set it up with the `pulse` skill as it says (try it with the user, scope `project`), and make its report come back to **you, this planner, and nobody else**. The check must not depend on remembering it: write the report step into the check itself.
+
+- In the check's text, end with: "When done, whatever the outcome, leave it in the planner's inbox with the last step of the method."
+- In `--method`, as the **last step**, the exact command, with the absolute paths and this repository spelled out:
+
+  ```sh
+  cd "<this repository's main checkout>" && sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/tell.sh" planner <info, or question when the user must decide> --to-repo <owner/name> --from "Pulse · <check name>" <<'EOF'
+  <outcome: ok, found or error, and the findings in a few lines>
+  EOF
+  ```
+
+- Try that step too during the trial run, so you see the message arrive (`📨` in your name, `inbox.sh list planner`).
+
+The report then waits in your inbox like any other message, while Pulse also notifies the user as usual. What the check found becomes work only the way the user decides with you: an issue, created as `/release-manager:plan` says.
+
 ## Your inbox: one thread at a time
 
 Other sessions (the release manager, other repositories' planners) never interrupt you: they leave messages in your inbox, and your name shows `📨<n>` while some are unread. **While you and the user are on a topic, the inbox does not exist**: you do not read it, you do not switch to it, even when a hook or your name says it has mail. You read it (`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/inbox.sh" read planner`) only when the user asks, or at the end of a piece of work (below). When the user comes back after a pause, a hook may tell you how many messages wait: say it in one line and answer what the user asked.

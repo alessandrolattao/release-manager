@@ -1,6 +1,7 @@
 #!/bin/sh
 # Colors the release manager by its state, without the model: PreToolUse means it works (cyan, like
-# its agents); Stop means its turn ended: idle while its agents work (green), or waiting for the user (orange).
+# its agents); Stop means its turn ended: orange when it needs the user (an issue waits on a question,
+# an agent is stuck in [ask]), green otherwise (all is well: agents at work, CI running, or nothing to do).
 # Only for a background session whose name starts with "release manager"; every other session exits at once.
 #   manager-color.sh working|idle   (hook payload on stdin)
 set -eu
@@ -15,9 +16,10 @@ if [ "$mode" = working ]; then
 	want=cyan
 else
 	root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$cwd")
-	busy=$(claude agents --json --cwd "$root/.claude/worktrees" 2>/dev/null |
-		jq '[.[] | select((.name // "") | test("^\\[(dev|review|test|fix)\\]"))] | length' 2>/dev/null || echo 0)
-	if [ "${busy:-0}" -gt 0 ]; then want=green; else want=orange; fi
+	asking=$(claude agents --json --cwd "$root/.claude/worktrees" 2>/dev/null |
+		jq '[.[] | select((.name // "") | startswith("[ask]"))] | length' 2>/dev/null || echo 0)
+	questions=$(cd "$cwd" && gh issue list --label question --assignee @me --state open --limit 200 --json number --jq length 2>/dev/null || echo 0)
+	if [ "${asking:-0}" -gt 0 ] || [ "${questions:-0}" -gt 0 ]; then want=orange; else want=green; fi
 fi
 
 # One color change at a time; a later one waits its turn so the last state always wins.

@@ -2,7 +2,10 @@
 
 Used by planner-guard.sh: prints a reason and exits 1 when the command points gh at another
 repository (-R/--repo, gh api repos/..., github.com/... links), searches across repositories
-(gh search), or moves into another repository (cd, git -C). Exits 0 when it stays home.
+(gh search), or does anything but read in another repository (cd, git -C). Reading another
+repository with git (log, show, diff, grep, branch listing, fetch...) is allowed, for ports;
+switching its branches is not, since that moves its main checkout under its own sessions.
+Exits 0 when the command is fine.
     python3 -I own-repo.py <owner/name> <repo root> <cwd>   (command on stdin)
 """
 
@@ -62,16 +65,57 @@ def toplevel(path):
     return os.path.realpath(out.stdout.strip()) if out.returncode == 0 else None
 
 
-for i, w in enumerate(words):
-    target = None
-    if w == "cd" and i + 1 < len(words):
-        target = words[i + 1]
-    elif w == "-C" and i > 0 and words[i - 1] == "git" and i + 1 < len(words):
-        target = words[i + 1]
-    if not target or target.startswith("-"):
-        continue
-    path = os.path.realpath(os.path.join(cwd, os.path.expanduser(target)))
-    top = toplevel(path)
-    if top and top != root and not top.startswith(root + os.sep):
-        outside(f"it moves into another repository ({top})")
+READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "branch", "fetch", "status",
+            "rev-parse", "rev-list", "cat-file", "describe", "shortlog", "remote", "config", "worktree", "tag"}
+WRITE_TOOLS = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate",
+               "npm", "npx", "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst",
+               "terraform", "cdk", "patch"}
+
+
+def elsewhere():
+    """The other repository the command enters, if any."""
+    for i, w in enumerate(words):
+        target = None
+        if w == "cd" and i + 1 < len(words):
+            target = words[i + 1]
+        elif w == "-C" and i > 0 and words[i - 1] == "git" and i + 1 < len(words):
+            target = words[i + 1]
+        if not target or target.startswith("-"):
+            continue
+        path = os.path.realpath(os.path.join(cwd, os.path.expanduser(target)))
+        top = toplevel(path)
+        if top and top != root and not top.startswith(root + os.sep):
+            return top
+    return None
+
+
+other = elsewhere()
+if other:
+    # Only reading: every git subcommand must be a reading one, no file is written, nothing is built.
+    for i, w in enumerate(words):
+        if w != "git":
+            continue
+        j = i + 1
+        while j < len(words) and words[j].startswith("-"):
+            j += 2 if words[j] in ("-C", "-c") else 1
+        sub = words[j] if j < len(words) else ""
+        rest = words[j + 1:j + 4]
+        if sub in ("switch", "checkout", "restore"):
+            outside(f"it switches branches in another repository ({other}); read another branch with "
+                    f"git -C <repo> show <branch>:<file>, git log <branch> or git diff main..<branch>")
+        if sub not in READ_GIT:
+            outside(f"git {sub} changes another repository ({other}); there you may only read")
+        if sub == "branch" and any(not a.startswith("-") or a in ("-d", "-D", "-m", "-M", "-c", "-C", "--delete", "--move", "--copy") for a in rest if a not in ("-a", "-r", "-v", "-vv", "--list", "--all", "--remotes", "--contains", "--merged", "--no-merged")):
+            outside(f"git branch would change another repository ({other}); listing is fine")
+        if sub == "worktree" and (not rest or rest[0] != "list"):
+            outside(f"git worktree changes another repository ({other}); git worktree list is fine")
+        if sub in ("remote", "config", "tag") and rest and rest[0] not in ("-v", "--get", "--list", "-l", "show", "get-url"):
+            outside(f"git {sub} {rest[0]} changes another repository ({other}); there you may only read")
+    for w in words:
+        if os.path.basename(w) in WRITE_TOOLS:
+            outside(f"{w} could change another repository ({other}); there you may only read")
+        if w in ("-i", "--in-place") or w.startswith("-i."):
+            outside(f"an in-place edit in another repository ({other})")
+    if re.search(r"(^|[^0-9&>])>{1,2}\s*(?!/dev/null)[^&\s]", command):
+        outside(f"it writes a file while in another repository ({other})")
 sys.exit(0)

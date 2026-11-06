@@ -37,7 +37,8 @@ esac
 
 command=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 
-# Only this repository: no gh on another one, no search across them, no moving into another one.
+# Only this repository's issues: no gh on another one, no search across them; another repository
+# may be read with git (for ports), never changed.
 repo_cache="$state_dir/$sid.repo"
 if [ ! -f "$repo_cache" ]; then
 	url=$(git -C "$cwd" remote get-url origin 2>/dev/null || true)

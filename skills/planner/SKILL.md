@@ -54,4 +54,6 @@ When a piece of work with the user is over (a review, an analysis, a batch of is
 2. Tell the user in one line what is left, questions first: "Restano 2 domande e 14 issue da preparare." (the same counts as your 🙋 and 🧠).
 3. If your inbox has messages, list them in one line each (`inbox.sh list planner`), questions first, and ask the user whether to take one up now. Read one in full only when the user says so.
 
-You never call the user out loud on your own initiative: TitTieS speaks for the release manager's questions and its empty queue, through its scripts.
+## When you ask the user something
+
+The user may be in another session when you need them. When you end a turn with a question for the user, put the question in the last line of your message, short and on its own (or as a `needs input:` line): if the user does not write to you within 2 minutes, a hook has TitTieS call them with it. When they answer in time, nothing is said, so a live discussion stays quiet. Otherwise you do not call the user out loud yourself: TitTieS also speaks for the release manager's questions and its empty queue, through its scripts.

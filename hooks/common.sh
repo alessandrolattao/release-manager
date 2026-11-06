@@ -28,16 +28,17 @@ session_name() {
 }
 
 # role_is <name prefix> <cache tag>: true when this session's name starts with the prefix.
-# The answer is cached for the session, but only once a name was read: no name, ask again next time.
+# Only a yes is cached: a session can start under another name and rename itself a few seconds
+# later (the skills do), so until it matches, the name is read again at every event.
 role_is() {
 	cache="$state_dir/$sid.$2"
-	if [ ! -f "$cache" ]; then
-		current=$(session_name)
-		[ -n "$current" ] || return 1
-		case "$current" in
-		"$1"*) echo yes >"$cache" ;;
-		*) echo no >"$cache" ;;
-		esac
-	fi
-	[ "$(cat "$cache")" = yes ]
+	[ "$(cat "$cache" 2>/dev/null)" = yes ] && return 0
+	current=$(session_name)
+	case "$current" in
+	"$1"*)
+		echo yes >"$cache"
+		return 0
+		;;
+	esac
+	return 1
 }

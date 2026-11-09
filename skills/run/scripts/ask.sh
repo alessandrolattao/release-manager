@@ -1,13 +1,13 @@
 #!/bin/sh
 # Asks the user on an issue: posts the comment from stdin, adds the question label, moves the
-# issue's agent (if any) to [ask], updates the planner's 🙋 counter and has the planner say it out loud.
-#   ask.sh <issue-number> "<one spoken sentence: who and what for>" <<'EOF'
+# issue's agent (if any) to [ask], leaves the details in the planner's inbox and updates its 🙋 counter.
+#   ask.sh <issue-number> "<one line: who asks and what for>" <<'EOF'
 #   the comment: what is missing or what to decide, with the options
 #   EOF
 set -eu
 
 issue=${1:?issue number}
-sentence=${2:?one spoken sentence}
+sentence=${2:?one line: who asks and what for}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=skills/run/scripts/roles.sh
 . "$here/roles.sh"
@@ -28,8 +28,8 @@ if [ -n "$branch" ]; then
 	sh "$here/set-state.sh" "$branch" ask
 fi
 
-# The planner is the one who talks to the user: its counter goes up and it says the sentence.
-# The details go to the planner's inbox, to read when its current topic is over.
+# The planner is the one who talks to the user: its counter goes up, and the details go to its
+# inbox, to read when its current topic is over.
 {
 	printf 'Issue #%s needs the user: %s\n\n' "$issue" "$sentence"
 	printf '%s\n' "$body"
@@ -40,4 +40,3 @@ if [ -z "$planner" ]; then
 	exit 0
 fi
 sh "$here/sync-names.sh" planner "$(printf '%s' "$planner" | cut -f1)" >/dev/null 2>&1 || true
-printf '%s\n' "$sentence" | sh "$here/titties.sh" call "$(printf '%s' "$planner" | cut -f1)"

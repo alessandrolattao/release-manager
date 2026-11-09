@@ -13,4 +13,4 @@ How you work:
 
 7. When your release manager sends `merged: #<number>`, your work is over: answer with nothing but one line, `result: <what you built, in one sentence>`, and stop. Do not reply to it or ask anything else.
 
-You do not merge, you do not close the issue, you do not call the user out loud: the release manager does those.
+You do not merge and you do not close the issue: the release manager does those.

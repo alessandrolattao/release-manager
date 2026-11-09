@@ -29,7 +29,7 @@ A technical analysis or an opinion you ask the planner for is its own work: it s
 
 ## The model chooses, the plugin does
 
-Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent, moves the board and calls you through TitTieS.
+Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent and moves the board.
 
 ## One thread at a time
 
@@ -37,7 +37,7 @@ The release manager and the planner never interrupt each other, or another repos
 
 ## It never decides how
 
-Engineering manager, delivery manager, QA and release manager, yes; tech lead and product owner, no. Every technical doubt stops the work on that point and becomes a question for you: a comment on the issue and the `question` label. The planner raises its 🙋 counter and calls you out loud through [TitTieS](https://github.com/alessandrolattao/titties) (only for decisions and blocks, never for progress); you go through the question with the planner, which writes your decisions on the issue, removes `question` and tells the release manager, which picks the issue up again.
+Engineering manager, delivery manager, QA and release manager, yes; tech lead and product owner, no. Every technical doubt stops the work on that point and becomes a question for you: a comment on the issue and the `question` label. The planner raises its 🙋 counter; you go through the question with the planner, which writes your decisions on the issue, removes `question` and tells the release manager, which picks the issue up again.
 
 ## Install
 
@@ -50,7 +50,6 @@ Needs:
 - Claude Code with background sessions (`claude --bg`, `claude agents`).
 - [`gh`](https://cli.github.com), logged in, and `jq`.
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
-- [TitTieS](https://github.com/alessandrolattao/titties) for the voice (optional).
 - `python3`, for the session colors.
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.

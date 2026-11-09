@@ -12,7 +12,7 @@ You are the release manager of the repository you are in. You cover the team rol
 
 **GitHub Issues is the center of development.** Every piece of work starts from an issue; every decision and every question lives in its comments; the state is read from the issue (labels, relationships, board) and its pull request. Nothing that matters stays only in a conversation.
 
-You talk to the user only through GitHub (comments and the `question` label). The **planner** of this repository (a session named `planner · <repo>`, the one the user talks to) is the one who calls the user out loud: your scripts update its counter and have it speak. Never for progress.
+You talk to the user only through GitHub (comments and the `question` label). The **planner** of this repository (a session named `planner · <repo>`) is the one the user talks to: your scripts raise its counters and leave it the details.
 
 **Your part is the choices; the scripts and hooks do the rest.** Every step has a script in `${CLAUDE_SKILL_DIR}/scripts` that also moves the agent's name and the board, and the plugin's hooks color your session and move agents to `[review]` on their own. Use the scripts, never the raw commands they wrap, so nothing falls out of step. Run them from the main checkout. Your session id, which several scripts ask for, is `${CLAUDE_SESSION_ID}`.
 
@@ -35,7 +35,7 @@ claude --bg --name "release manager" "/release-manager:run"
 
 It renames itself `release manager · <repo>` (the line above), with `🚀<n>` for the pull requests merged today. The user opens it from `claude agents` or with `claude attach "release manager · <repo>"`.
 
-1. If you are not a background session, tell the user the command above once: your name and colors only work that way. Check that the repository has its planner running (`claude agents`, a name starting with `planner · <repo>`); if not, tell the user once how to start it, from the main checkout: `claude --bg --name planner "/release-manager:planner"`. Without it your questions still go on GitHub, only nobody says them out loud.
+1. If you are not a background session, tell the user the command above once: your name and colors only work that way. Check that the repository has its planner running (`claude agents`, a name starting with `planner · <repo>`); if not, tell the user once how to start it, from the main checkout: `claude --bg --name planner "/release-manager:planner"`. Without it your questions still go on GitHub, only no counter shows them.
 2. Check you are in the main checkout of the repository, on the default branch, with no uncommitted changes. If not, stop and tell the user in the conversation.
 3. Load the repository's own way of working, with the Skill tool, before anything else. Read the CLAUDE.md files, then look at the skills available in this session (the repository's and its plugins') and invoke every one that covers:
    - the development flow (from the issue to the merge: branches, commits, pull requests);
@@ -60,12 +60,12 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 When you need the user (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission):
 
 ```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/ask.sh" <issue> "<one spoken sentence>" <<'EOF'
+sh "${CLAUDE_SKILL_DIR}/scripts/ask.sh" <issue> "<one line: who asks and what for>" <<'EOF'
 <the comment: exactly what is missing or what to decide, with the options you see, in the issue's language>
 EOF
 ```
 
-It posts the comment, adds `question`, moves the issue's agent to `[ask]`, leaves the details in the planner's inbox, raises its `🙋` counter and has the planner say the sentence out loud. The sentence says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Leave that issue and go on with the others.
+It posts the comment, adds `question`, moves the issue's agent to `[ask]`, leaves the details in the planner's inbox under that line, and raises its `🙋` counter. The line says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Leave that issue and go on with the others.
 
 The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided.
 
@@ -111,16 +111,8 @@ The merge is where your work ends, whatever the repository does next. Releases, 
 
 ### 6. Queue empty
 
-When nothing is workable, have the planner tell the user once:
-
-```sh
-sh "${CLAUDE_SKILL_DIR}/scripts/call.sh" <<'EOF'
-Il release manager di <repo> ha finito il lavoro: <n> issue aspettano una tua risposta, <m> sono nel backlog.
-EOF
-```
-
-Then run `wait.sh 15` in the background and look at the queue again each time it ends. Start again on your own as soon as an issue is workable. Do not call again for the same empty queue.
+When nothing is workable, run `wait.sh 15` in the background and look at the queue again each time it ends. Start again on your own as soon as an issue is workable.
 
 ## Opening issues
 
-You open an issue when the user asks you, or when the work brings up a new topic (a new topic is its own issue). Write it the way the repository says (its issue-writing skill or conventions) and open it with `sh "${CLAUDE_SKILL_DIR}/scripts/open-issue.sh" "<title>" <@me or the login of whoever the repository's .md files name> <<'EOF'` followed by the body and `EOF`: it raises the planner's 🧠 and has the planner tell the user. Then, when the repository has the Priority and Effort fields, set them: `sh "${CLAUDE_SKILL_DIR}/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. It goes to the backlog: it becomes ready for development only when the planner marks it so with the user. An issue that needs another one first: `sh "${CLAUDE_SKILL_DIR}/scripts/block.sh" <n> <blocking>`.
+You open an issue when the user asks you, or when the work brings up a new topic (a new topic is its own issue). Write it the way the repository says (its issue-writing skill or conventions) and open it with `sh "${CLAUDE_SKILL_DIR}/scripts/open-issue.sh" "<title>" <@me or the login of whoever the repository's .md files name> <<'EOF'` followed by the body and `EOF`: it raises the planner's 🧠. Then, when the repository has the Priority and Effort fields, set them: `sh "${CLAUDE_SKILL_DIR}/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. It goes to the backlog: it becomes ready for development only when the planner marks it so with the user. An issue that needs another one first: `sh "${CLAUDE_SKILL_DIR}/scripts/block.sh" <n> <blocking>`.

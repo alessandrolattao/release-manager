@@ -1,19 +1,26 @@
 #!/bin/sh
 # Keeps the planner a planner, without relying on the model: in a session whose name starts with
-# "planner", PreToolUse refuses anything that develops. The planner creates and prepares issues
-# (text, comments, labels, fields, relationships); building them is the release manager's agents' job.
+# "planner", or in one of its consultants ("[plan] <topic>"), PreToolUse refuses anything that
+# develops. The planner creates and prepares issues (text, comments, labels, fields, relationships)
+# and its consultants only read; building is the release manager's agents' job.
 set -eu
 
 # shellcheck source=hooks/common.sh
 . "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
 
-role_is "planner" is-planner || exit 0
+if role_is "planner" is-planner; then
+	who="The planner creates and prepares issues, it never develops"
+elif role_is "[plan]" is-consultant; then
+	who="A consultant of the planner only reads and thinks, it never develops"
+else
+	exit 0
+fi
 
 tool=$(field tool_name)
 deny() {
-	jq -n --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny",
-		permissionDecisionReason: ("The planner creates and prepares issues, it never develops: " + $r
-		+ ". Put what you were about to do in an issue for the release manager.")}}'
+	jq -n --arg r "$1" --arg who "$who" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny",
+		permissionDecisionReason: ($who + ": " + $r
+		+ ". Put what you were about to do in an issue for the release manager, or in your report.")}}'
 	exit 0
 }
 
@@ -60,4 +67,16 @@ if printf '%s' "$command" | grep -q -E \
 	'git[[:space:]]+(commit|push|merge|rebase|cherry-pick|revert|am|apply|stash|restore|reset|checkout[[:space:]]+-b|switch[[:space:]]+(-c|--create)|branch[[:space:]]+[^-[:space:]]|worktree[[:space:]]+add)|gh[[:space:]]+pr[[:space:]]+(create|merge|edit|close|review)|gh[[:space:]]+issue[[:space:]]+develop|claude[[:space:]]+(--bg|-p)|(^|[;&|[:space:]])(sed|perl)[[:space:]]+-i'; then
 	deny "this command changes code, branches or pull requests"
 fi
+# A consultant works in the main checkout, where the release manager tests: it never moves it to
+# another commit, and it answers its question itself, starting no other consultant.
+case "$who" in
+"A consultant"*)
+	if printf '%s' "$command" | grep -q -E 'git[[:space:]]+(checkout|switch|pull)([[:space:]]|$)'; then
+		deny "the main checkout stays where it is (read another branch with git show <branch>:<path>)"
+	fi
+	if printf '%s' "$command" | grep -q 'consult\.sh'; then
+		deny "a consultant starts no other consultant"
+	fi
+	;;
+esac
 exit 0

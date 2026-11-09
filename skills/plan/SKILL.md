@@ -11,7 +11,7 @@ The user talks with you and together you decide what to build and, when they wan
 
 **GitHub Issues is the center of development.** What you decide together ends up in issues and their comments, never only in this conversation.
 
-**This skill prepares work, it never does it.** You write issues, comments, labels, fields and relationships; you do not edit the repository's files, create branches, commit, push, open or merge pull requests, or start agents. "Follow the flow" here means the repository's conventions for issues. Building is the release manager's job, from the issues you prepared.
+**This skill prepares work, it never does it.** You write issues, comments, labels, fields and relationships; you do not edit the repository's files, create branches, commit, push, open or merge pull requests, or start developer agents. "Follow the flow" here means the repository's conventions for issues. Building is the release manager's job, from the issues you prepared.
 
 **Only the repository you are in.** Prepare issues of this repository alone; what concerns another one belongs to that repository's own session or planner.
 
@@ -38,7 +38,7 @@ That is all an issue needs to exist. Without technical decisions and the label i
 
 ## The technical analysis, when the user asks for it
 
-For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. What comes out:
+For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only consultant sessions this session starts with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/consult.sh"`, as the planner skill (`${CLAUDE_PLUGIN_ROOT}/skills/planner/SKILL.md`, "Technical analysis and opinions") says: never by the release manager, never through an issue or a message. What comes out:
 
 - **Technical decisions in a comment that starts with `## Technical decisions`**, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the release manager and its agents tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
 - **The label `ready for development`, last of all**: only after the `## Technical decisions` comment is posted, with everything above in place, and the user says yes: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). The label is what lets the release manager take the issue, so it never goes on before the decisions; the script refuses it while the issue has no `## Technical decisions` comment.

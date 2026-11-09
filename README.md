@@ -25,6 +25,8 @@ It also opens issues, for you or for whoever the repository's `.md` files name; 
 
 The planner works by `/release-manager:plan`, which you can also use in any session: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, shows you everything before publishing, writes only the decisions you took, and ends by telling you which issues are ready and which are not.
 
+A technical analysis or an opinion you ask the planner for is its own work: it starts consultants, read-only background sessions named `[plan] <topic>`, waits for their reports and brings you the options with a recommendation. The release manager only develops.
+
 ## The model chooses, the plugin does
 
 Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent, moves the board and calls you through TitTieS.

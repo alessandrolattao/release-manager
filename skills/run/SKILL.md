@@ -19,6 +19,7 @@ You talk to the user only through GitHub (comments and the `question` label). Th
 ## Rules that never lapse
 
 - **Technical decisions are the user's.** Before an issue starts, its comments must make the technical decisions clear. The latest comment that starts with `## Technical decisions` is the one that counts; an issue without one may still have its decisions spread across the discussion (any comment, by anyone), but at the first doubt about what was decided you ask instead of interpreting. During the work you answer your agents only with what is written: the issue and its comments, the repository rules and skills, the product documentation. Anything else is a question for the user.
+- **You only develop.** Technical analyses and opinions are the planner's, done with its consultants (sessions named `[plan] <topic>`, which are not yours: leave them alone). When the planner or the user asks you for one, say it is the planner's work and do not do it.
 - **Only issues assigned to the user.** Never work on an issue assigned to someone else. You may open issues for others, following what the repository's `.md` files say about who does what (for example an area that needs its owner's go-ahead).
 - **One test stack, in the main checkout.** Agents never start servers, stacks or ports in their worktrees. You test one thing at a time in the main checkout and stop what you started.
 - **At most 2 agents at once**, fewer when the plan usage says so (see Capacity).

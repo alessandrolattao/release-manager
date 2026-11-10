@@ -1,14 +1,14 @@
 #!/bin/sh
-# Moves an agent to a state: renames its session "[state]<icons> <branch>" and, for done, takes its color away.
-#   set-state.sh <branch> <dev|review|test|fix|ask|done>
+# Moves an agent to a state: renames its session "[state]<icons> <branch>".
+#   set-state.sh <branch> <dev|review|test|fix|ask>
 set -eu
 
 branch=${1:?branch}
 state=${2:?state}
 case "$state" in
-dev | review | test | fix | ask | done) ;;
+dev | review | test | fix | ask) ;;
 *)
-	echo "unknown state '$state': dev, review, test, fix, ask or done" >&2
+	echo "unknown state '$state': dev, review, test, fix or ask" >&2
 	exit 2
 	;;
 esac
@@ -23,6 +23,3 @@ id=$(claude agents --json 2>/dev/null | jq -r --arg b "$branch" \
 }
 name=$(sh "$here/agent-name.sh" "$branch" "$state")
 sh "$here/rename.sh" "$id" "$name"
-if [ "$state" = "done" ]; then
-	sh "$here/color.sh" "$id" default
-fi

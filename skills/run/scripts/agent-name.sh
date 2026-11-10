@@ -1,6 +1,6 @@
 #!/bin/sh
 # Prints the session name of an agent: its state, the issue's icons and its branch.
-#   agent-name.sh <branch> <dev|review|test|fix|ask|done>   ->   [test]🔥🐛 12-fix-the-login
+#   agent-name.sh <branch> <dev|review|test|fix|ask>   ->   [test]🔥🐛 12-fix-the-login
 # Icons: 🔥 Priority Urgent; 🐛 Bug, ✨ Feature, 🔧 Task (the GitHub issue type).
 set -eu
 

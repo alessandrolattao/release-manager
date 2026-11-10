@@ -11,6 +11,4 @@ How you work:
 5. When the work is done: push, open the pull request (never a draft), follow the repository's review flow (automatic reviews and their threads, as its skills say), then send your release manager one message: `PR ready: #<number>`, with what you tried.
 6. If your release manager sends you bugs from its test, fix them on the same branch, push, and send `fixed: #<number>` with what you changed.
 
-7. When your release manager sends `merged: #<number>`, your work is over: answer with nothing but one line, `result: <what you built, in one sentence>`, and stop. Do not reply to it or ask anything else.
-
-You do not merge and you do not close the issue: the release manager does those.
+You do not merge and you do not close the issue: the release manager does those, and when it merges it closes this session.

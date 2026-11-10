@@ -7,7 +7,7 @@ claude --bg --name "release manager" "/release-manager:run"   # builds, tests, m
 claude --bg --name planner "/release-manager:planner"          # the one you talk to
 ```
 
-They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (questions waiting for you). Open either from `claude agents`. The release manager's color tells you its state: cyan while it works (like its agents), green when all is well (its agents or CI at work, or nothing to do), orange when it needs you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, `[done]`, with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work, finished ones lose their color and stay out of the way, and the planner is purple.
+They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (questions waiting for you). Open either from `claude agents`. The release manager's color tells you its state: cyan while it works (like its agents), green when all is well (its agents or CI at work, or nothing to do), orange when it needs you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when their pull request is merged; the planner is purple.
 
 The release manager works through your GitHub issues on its own:
 

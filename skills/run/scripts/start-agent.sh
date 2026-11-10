@@ -44,7 +44,7 @@ out=$(env $unset_args claude --bg --name "$(sh "$here/agent-name.sh" "$branch" d
 
 sh "$here/board.sh" "$issue" "In Progress" || true
 
-# Agents are cyan while they work (they lose it at [done]); find the new session by its name.
+# Agents are cyan while they work (they go away at the merge); find the new session by its name.
 name=$(sh "$here/agent-name.sh" "$branch" dev)
 for _ in 1 2 3 4 5 6 7 8 9 10; do
 	agent=$(claude agents --json 2>/dev/null | jq -r --arg n "$name" '[.[] | select(.name == $n) | .sessionId][0] // empty')

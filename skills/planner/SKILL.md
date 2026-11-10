@@ -28,7 +28,7 @@ The user opens it from `claude agents` or with `claude attach "planner · <repo>
 
 ## The release manager's questions
 
-When the release manager needs a decision it posts a comment on the issue, adds `question`, and its script raises your `🙋` counter. The details (which issue and why) wait in your inbox. You do not answer for the user, unless the user delegated those decisions to you: then you decide, write each decision as taken on their behalf, and follow the same steps below, posting without waiting for a yes.
+When the release manager needs a decision it posts a comment on the issue, adds `question`, and its script raises your `🙋` counter. The details (which issue and why) wait in your inbox. You do not answer for the user, unless the user delegated those decisions to you: then you decide, write each decision under `### Decided autonomously` in the format `/release-manager:plan` gives, and follow the same steps below, posting without waiting for a yes.
 
 - **At the start, and whenever the user asks what is waiting**: first the questions, the open issues with `question` assigned to the user (`gh issue list --label question --assignee @me`), one line each: the issue, what the release manager asked, what kind of decision it is. Then the issues to prepare, the user's open issues without `ready for development` (`gh issue list --assignee @me --search '-label:"ready for development"'`), newest first, one line each: say which ones the release manager opened while working (new bugs and topics), since those are usually the ones to look at first.
 - **Going through one with the user**: read the issue and its comments, explain the question plainly, give the options with their costs and a recommendation, and let the user decide, one decision at a time.

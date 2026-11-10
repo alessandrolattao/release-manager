@@ -41,6 +41,11 @@ That is all an issue needs to exist. Without technical decisions and the label i
 For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only consultant sessions this session starts with `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/consult.sh"`, as the planner skill (`${CLAUDE_PLUGIN_ROOT}/skills/planner/SKILL.md`, "Technical analysis and opinions") says: never by the release manager, never through an issue or a message. What comes out:
 
 - **Technical decisions in a comment that starts with `## Technical decisions`**, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the release manager and its agents tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
+- **Every architectural choice you take on your own goes in that comment too**, under a section `### Decided autonomously`, one line each, always in this format:
+
+  ```
+  - <decision>. Why: <the previous decision or the rule it follows>. (planner, decided autonomously, <YYYY-MM-DD>)
+  ```
 - **The label `ready for development`, last of all**: only after the `## Technical decisions` comment is posted, with everything above in place, and the user says yes: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). The label is what lets the release manager take the issue, so it never goes on before the decisions; the script refuses it while the issue has no `## Technical decisions` comment.
 
 ## Before you finish

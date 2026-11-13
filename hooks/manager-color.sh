@@ -12,8 +12,11 @@ set -eu
 role_is "release manager" is-manager || exit 0
 
 root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$cwd")
-asking=$(claude agents --json --cwd "$root/.claude/worktrees" 2>/dev/null |
-	jq '[.[] | select((.name // "") | startswith("[ask]"))] | length' 2>/dev/null || echo 0)
+# `--cwd` takes the repository (given the worktrees folder it lists nothing); the agents are the
+# sessions under .claude/worktrees.
+asking=$(claude agents --json --cwd "$root" 2>/dev/null |
+	jq --arg w "$root/.claude/worktrees/" \
+		'[.[] | select((.cwd | startswith($w)) and ((.name // "") | startswith("[ask]")))] | length' 2>/dev/null || echo 0)
 questions=$(cd "$cwd" && gh issue list --label question --assignee @me --state open --limit 200 --json number --jq length 2>/dev/null || echo 0)
 red_main="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/$(git -C "$cwd" remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#^.*github\.com[:/]##' | tr '/' '_')/main-red"
 if [ "${asking:-0}" -gt 0 ] || [ "${questions:-0}" -gt 0 ] || [ -f "$red_main" ]; then want=orange; else want=green; fi

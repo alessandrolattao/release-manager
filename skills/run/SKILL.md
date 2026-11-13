@@ -45,7 +45,7 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
    - who does what (owners, guarded areas, people whose go-ahead is needed).
 
    They win over anything generic written below. Invoke the one for a step again when you get to that step (testing, merging, opening an issue), and say in the conversation which ones you loaded. When a repository has none for something you need, follow its CLAUDE.md and ask the user what is missing.
-4. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)/.claude/worktrees"` lists the agents of this repository. Agents that are not running any more (a restart of the machine stops every session) come back with `sh "${CLAUDE_SKILL_DIR}/scripts/resume-agents.sh"`: each one in its worktree, with its conversation, told to go on from where it stopped.
+4. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)"` lists the sessions of this repository, and its agents are the ones whose `cwd` is under `.claude/worktrees/` (given the worktrees folder itself, `--cwd` lists nothing). Agents that are not running any more (a restart of the machine stops every session) come back with `sh "${CLAUDE_SKILL_DIR}/scripts/resume-agents.sh"`: each one in its worktree, with its conversation, told to go on from where it stopped.
 
 ## What the hooks show on their own
 

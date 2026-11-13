@@ -11,9 +11,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=skills/run/scripts/roles.sh
 . "$here/roles.sh"
 
+# `--cwd` takes the repository (given the worktrees folder it lists nothing); the agents are the
+# sessions under .claude/worktrees.
 agents() {
-	claude agents --json --cwd "$root/.claude/worktrees" 2>/dev/null |
-		jq -c 'sort_by(.name) | map({name, state, status, id})' 2>/dev/null || echo '[]'
+	claude agents --json --cwd "$root" 2>/dev/null |
+		jq -c --arg w "$root/.claude/worktrees/" \
+			'[.[] | select(.cwd | startswith($w))] | sort_by(.name) | map({name, state, status, id})' 2>/dev/null || echo '[]'
 }
 
 before=$(agents)

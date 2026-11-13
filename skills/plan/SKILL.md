@@ -7,7 +7,13 @@ description: "Prepares work for the release manager while the user and Claude ta
 
 The user talks with you and together you decide what to build and, when they want, how; the release manager (`/release-manager:run`) then builds it on its own. There is no fixed flow here: follow the conversation, whether it is a backlog review, the design of a new project, a batch of new issues or the technical analysis of one.
 
-**Creating issues and analysing them are two separate moments, and the second is the user's call.** An issue can be created with no technical analysis at all: it goes to the backlog, and that is normal. The technical analysis of an issue happens only when the user asks for it, issue by issue; never start it, propose it or slip technical decisions into an issue on your own because you are creating it.
+**Creating issues and analysing them are two separate moments.** An issue can be created with no technical analysis at all: it goes to the backlog, and that is normal. Never slip technical decisions into an issue because you are creating it.
+
+**New issues and the first technical decision are always taken with the user**, unless the user told you explicitly that you may take them on your own:
+
+- **A new issue** is created only when the user asks for it or says yes to it. Something mentioned in a conversation is not a request: do not design it, analyse it or open an issue for it; at most say once that it could become one.
+- **Design from scratch** is done together: an issue with no technical decision yet gets its first one only from the user, one decision at a time.
+- **On your own** you only carry on what already exists: on issues that already have technical decisions taken and discussed with the user, you take the next ones (the second, the third) when they follow from those and you have no doubt about them, each under `### Decided autonomously`, saying which decision it follows. At the first doubt, stop and ask the user.
 
 **GitHub Issues is the center of development.** What you decide together ends up in issues and their comments, never only in this conversation.
 
@@ -24,8 +30,8 @@ The user talks with you and together you decide what to build and, when they wan
 
 - **The user decides, you propose.** For every technical choice, give the options you see, with what each costs, and a recommendation; the user picks. One decision at a time.
 - **Only what the user decided becomes a technical decision** in an issue. A proposal they did not answer is not a decision: leave it as an open question on the issue, with the `question` label.
-- **Alone on what is mechanical or already discussed, with the user on the rest.** Go on without waiting for a yes when the work is mechanical (labels, fields, relationships, lowering your hand, messages to the release manager, an issue or a comment that only writes down what the user already said) or was already discussed and decided with the user (in this conversation, in the issue's comments, in your notes). Stop and ask for anything else: a technical choice nobody discussed, a trade-off, a change of scope, anything you are not sure counts as decided. Say in one line what you did alone.
-- **Show before you publish what is new.** Before publishing anything the user has not seen in substance (an issue they did not shape, a decision they did not take), show the full text or the change and wait for their yes.
+- **Alone on what is mechanical or already decided, with the user on the rest.** On issues that already exist, go on without waiting for a yes when the work is mechanical (labels, fields, relationships, lowering your hand, messages to the release manager, a comment that only writes down what the user decided) or follows from technical decisions already taken and discussed with the user (in the issue's comments, your notes, this conversation). Stop and ask for anything else: a new issue, an issue's first technical decision, a technical choice nobody discussed, a trade-off, a change of scope, anything you are not sure counts as decided. Say in one line what you did alone.
+- **Show before you publish what is new.** Before publishing anything the user has not seen in substance (the text of an issue they asked for, a decision they did not take), show the full text or the change and wait for their yes.
 - **One topic, one issue.** Split what is too big the way the repository's issue rules say, and link the pieces with relationships.
 
 ## Creating an issue

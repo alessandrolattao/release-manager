@@ -1,5 +1,17 @@
 {
+  "modules": ["./sessions.tsx"],
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/revive.sh\"",
+            "async": true
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "hooks": [
@@ -9,15 +21,6 @@
             "timeout": 15
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\" working",
-            "async": true
-          }
-        ]
       }
     ],
     "Stop": [
@@ -25,13 +28,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\" idle",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\"",
+            "async": true
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-asks.sh\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-blocked.sh\" ask",
             "async": true
           }
         ]
       }
     ],
     "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-blocked.sh\" go",
+            "async": true
+          }
+        ]
+      },
       {
         "matcher": "Bash",
         "hooks": [

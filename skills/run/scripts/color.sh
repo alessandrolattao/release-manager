@@ -1,7 +1,8 @@
 #!/bin/sh
-# Sets the color of a background session, the one /color sets, from inside it or from anywhere else.
+# Sets the color of a session, the one /color sets, from inside it or from anywhere else.
 #   color.sh <session-id> <red|blue|green|yellow|purple|orange|pink|cyan|default>
-# Works for background sessions (claude --bg); the session keeps working while its color changes.
+# Nothing is typed into the session: the plugin's hooks module, inside it, applies the color as soon as
+# the session is between turns (a color asked mid-turn shows when the turn ends) and hides /color's rows.
 set -eu
 
 id=${1:?session id}
@@ -19,8 +20,6 @@ case "$id" in
 	exit 2
 	;;
 esac
-claude=$(command -v claude) || {
-	echo "claude not found" >&2
-	exit 1
-}
-exec python3 -I "$(dirname "$0")/ui.py" "$claude" "$id" color "$color"
+# shellcheck source=skills/run/scripts/session-dir.sh
+. "$(dirname "$0")/session-dir.sh"
+want "$id" color "$color"

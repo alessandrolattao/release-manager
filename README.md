@@ -7,7 +7,9 @@ claude --bg --name "release manager" "/release-manager:run"   # builds, tests, m
 claude --bg --name planner "/release-manager:planner"          # the one you talk to
 ```
 
-They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (questions waiting for you). Open either from `claude agents`. The release manager's color tells you its state: cyan while it works (like its agents), green when all is well (its agents or CI at work, or nothing to do), orange when it needs you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when their pull request is merged; the planner is purple.
+They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (questions waiting for you). Open either from `claude agents`. The release manager's color tells you its state when its turn ends: green when all is well (its agents or CI at work, or nothing to do), orange when it needs you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when their pull request is merged; the planner is purple. Names and colors change between turns, through the plugin's hooks module: nothing is typed into a session, so a message you are writing there is never touched, and no row is left in its conversation.
+
+Each one gets a goal (`/goal`) at every start: the release manager triages and tests every issue the planner assigns to it, coordinating with the planner and the developers; the planner does the technical analyses and sets up the work so the release manager can coordinate development. The goals never come true while the project lives: they keep both awake, waiting for work. After a restart of the machine, the first Claude Code session that starts resumes the release managers and planners that were running when it went down, and each release manager resumes its developer agents.
 
 The release manager works through your GitHub issues on its own:
 
@@ -23,7 +25,9 @@ It also opens issues, for you or for whoever the repository's `.md` files name; 
 
 ## Preparing the work
 
-The planner works by `/release-manager:plan`, which you can also use in any session: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, shows you everything before publishing, writes only the decisions you took, and ends by telling you which issues are ready and which are not.
+The planner works by `/release-manager:plan`, which you can also use in any session: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, goes on alone with what is mechanical or already discussed with you (labels, fields, writing down your decisions, `ready for development` when every decision of the issue was discussed), stops and asks for anything else, and ends by telling you which issues are ready and which are not.
+
+When something has waited for you for 30 minutes (a question of the planner or of the release manager, a permission prompt that stops the release manager), the planner says it out loud through [TitTieS](https://github.com/alessandrolattao/titties), once, in one short sentence.
 
 A technical analysis or an opinion you ask the planner for is its own work: it starts consultants, read-only background sessions named `[plan] <topic>`, waits for their reports and brings you the options with a recommendation. The release manager only develops.
 
@@ -47,10 +51,11 @@ Engineering manager, delivery manager, QA and release manager, yes; tech lead an
 
 Needs:
 
-- Claude Code with background sessions (`claude --bg`, `claude agents`).
+- Claude Code with background sessions (`claude --bg`, `claude agents`), `/goal` and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
 - [`gh`](https://cli.github.com), logged in, and `jq`.
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
-- `python3`, for the session colors.
+- TitTieS, optional, for the planner's voice (without it, nothing is said out loud).
+- `python3`, for the planner's guard on other repositories.
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.
 

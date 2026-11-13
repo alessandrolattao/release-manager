@@ -1,6 +1,8 @@
 #!/bin/sh
-# Renames a background session, as /rename does, from inside it or from anywhere else.
+# Renames a session, as /rename does, from inside it or from anywhere else.
 #   rename.sh <session-id> "<new name>"
+# Nothing is typed into the session: the plugin's hooks module, inside it, applies the name as soon as
+# the session is between turns (a name asked mid-turn shows when the turn ends) and hides /rename's rows.
 # After a rename the old name no longer reaches the session: message it by the new one.
 set -eu
 
@@ -19,8 +21,6 @@ case "$name" in
 	exit 2
 	;;
 esac
-claude=$(command -v claude) || {
-	echo "claude not found" >&2
-	exit 1
-}
-exec python3 -I "$(dirname "$0")/ui.py" "$claude" "$id" rename "$name"
+# shellcheck source=skills/run/scripts/session-dir.sh
+. "$(dirname "$0")/session-dir.sh"
+want "$id" name "$name"

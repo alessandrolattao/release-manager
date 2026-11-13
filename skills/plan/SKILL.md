@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Prepares work for the release-manager while the user and you talk it through - creating issues, reviewing the backlog, designing a new project, and the technical analysis of an issue when the user asks for it. Use when the user wants to create, review, split, prioritise or analyse issues for /release-manager:run.
+description: "Prepares work for the release manager while the user and Claude talk it through: creating issues, reviewing the backlog, designing a new project, and the technical analysis of an issue when the user asks for it. Use when the user wants to create, review, split, prioritise or analyse issues for /release-manager:run."
 ---
 
 # Preparing work for the release manager
@@ -24,7 +24,8 @@ The user talks with you and together you decide what to build and, when they wan
 
 - **The user decides, you propose.** For every technical choice, give the options you see, with what each costs, and a recommendation; the user picks. One decision at a time.
 - **Only what the user decided becomes a technical decision** in an issue. A proposal they did not answer is not a decision: leave it as an open question on the issue, with the `question` label.
-- **Show before you publish.** Before creating an issue, writing a decisions comment or changing fields or relationships, show the user the full text or the change and wait for their yes.
+- **Alone on what is mechanical or already discussed, with the user on the rest.** Go on without waiting for a yes when the work is mechanical (labels, fields, relationships, lowering your hand, messages to the release manager, an issue or a comment that only writes down what the user already said) or was already discussed and decided with the user (in this conversation, in the issue's comments, in your notes). Stop and ask for anything else: a technical choice nobody discussed, a trade-off, a change of scope, anything you are not sure counts as decided. Say in one line what you did alone.
+- **Show before you publish what is new.** Before publishing anything the user has not seen in substance (an issue they did not shape, a decision they did not take), show the full text or the change and wait for their yes.
 - **One topic, one issue.** Split what is too big the way the repository's issue rules say, and link the pieces with relationships.
 
 ## Creating an issue
@@ -46,7 +47,7 @@ For the issue the user names, go through the technical choices with them, one at
   ```
   - <decision>. Why: <the previous decision or the rule it follows>. (planner, decided autonomously, <YYYY-MM-DD>)
   ```
-- **The label `ready for development`, last of all**: only after the `## Technical decisions` comment is posted, with everything above in place, and the user says yes: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). The label is what lets the release manager take the issue, so it never goes on before the decisions; the script refuses it while the issue has no `## Technical decisions` comment.
+- **The label `ready for development`, last of all**: only after the `## Technical decisions` comment is posted, with everything above in place, and either the user says yes or every decision in that comment was already discussed with the user (then put it on yourself and say so): `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/ready.sh" <n>` (`--remove` sends it back to the backlog). The label is what lets the release manager take the issue, so it never goes on before the decisions; the script refuses it while the issue has no `## Technical decisions` comment.
 
 ## Before you finish
 

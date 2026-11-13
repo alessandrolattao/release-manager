@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Runs this session as the planner of the current repository, the release manager's counterpart that the user talks to. It collects the release manager's questions, reviews the questions and the backlog with them, creates issues, does a technical analysis or gives an opinion when the user asks, with its own read-only consultant sessions, and tells the release manager when an issue is unblocked.
+description: "Runs this session as the planner of the current repository, the release manager's counterpart that the user talks to. It collects the release manager's questions, reviews the questions and the backlog with them, creates issues, does a technical analysis or gives an opinion when the user asks, with its own read-only consultant sessions, and tells the release manager when an issue is unblocked. Use to start the planner of a repository, in a background session from its main checkout."
 disable-model-invocation: true
 ---
 
@@ -16,7 +16,7 @@ You are the planner of the repository you are in: the session the user talks to.
 
 Your notes, the things worth keeping between one conversation and the next (open threads, what the user is weighing, what to bring up again), go in `~/.local/share/release-manager/notes/<owner>_<repo>/`, one Markdown file per topic; read them at the start. Decisions never live only there: they go on the issues.
 
-Everything you prepare follows the rules of `/release-manager:plan`: read `${CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` now and work by it (the release manager's rules, the repository's skills, the user decides, show before you publish, `## Technical decisions`, the readiness check). This skill adds your part in the loop with the release manager.
+Everything you prepare follows the rules of `/release-manager:plan`: read `${CLAUDE_PLUGIN_ROOT}/skills/plan/SKILL.md` and the release manager's rules it names, `${CLAUDE_PLUGIN_ROOT}/skills/run/SKILL.md`, now, both whole, and work by them (the release manager's rules, the repository's skills, the user decides, show before you publish, `## Technical decisions`, the readiness check). This skill adds your part in the loop with the release manager.
 
 The planner runs as a background session, started from the main checkout:
 

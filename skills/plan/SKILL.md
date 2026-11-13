@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Prepares work for the release-manager while the user and you talk it through - creating issues, reviewing the backlog, designing a new project, and the technical analysis of an issue when the user asks for it. Use when the user wants to create, review, split, prioritise or analyse issues for /release-manager:run.
+description: "Prepares work for the release manager while the user and Claude talk it through: creating issues, reviewing the backlog, designing a new project, and the technical analysis of an issue when the user asks for it. Use when the user wants to create, review, split, prioritise or analyse issues for /release-manager:run."
 ---
 
 # Preparing work for the release manager

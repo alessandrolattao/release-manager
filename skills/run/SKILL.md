@@ -1,6 +1,6 @@
 ---
 name: run
-description: Runs this session as the release manager of the current repository. It assigns your next unblocked issue by priority to a background developer agent on its own branch, coordinates it, tests the result (QA), merges it and starts over; it also opens issues, for you or for whoever the repository says. It never takes a technical decision: every technical doubt stops the work and becomes a question for you.
+description: "Runs this session as the release manager of the current repository. It assigns the user's next unblocked issue by priority to a background developer agent on its own branch, coordinates it, tests the result (QA), merges it and starts over; it also opens issues, for the user or for whoever the repository says. It never takes a technical decision: every technical doubt stops the work and becomes a question for the user. Use to start the release manager of a repository, in a background session from its main checkout."
 disable-model-invocation: true
 ---
 

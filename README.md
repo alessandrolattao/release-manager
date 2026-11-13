@@ -25,7 +25,9 @@ It also opens issues, for you or for whoever the repository's `.md` files name; 
 
 ## Preparing the work
 
-The planner works by `/release-manager:plan`, which you can also use in any session: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, shows you everything before publishing, writes only the decisions you took, and ends by telling you which issues are ready and which are not.
+The planner works by `/release-manager:plan`, which you can also use in any session: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, goes on alone with what is mechanical or already discussed with you (labels, fields, writing down your decisions, `ready for development` when every decision of the issue was discussed), stops and asks for anything else, and ends by telling you which issues are ready and which are not.
+
+When something has waited for you for 30 minutes (a question of the planner or of the release manager, a permission prompt that stops the release manager), the planner says it out loud through [TitTieS](https://github.com/alessandrolattao/titties), once, in one short sentence.
 
 A technical analysis or an opinion you ask the planner for is its own work: it starts consultants, read-only background sessions named `[plan] <topic>`, waits for their reports and brings you the options with a recommendation. The release manager only develops.
 
@@ -52,6 +54,7 @@ Needs:
 - Claude Code with background sessions (`claude --bg`, `claude agents`), `/goal` and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
 - [`gh`](https://cli.github.com), logged in, and `jq`.
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
+- TitTieS, optional, for the planner's voice (without it, nothing is said out loud).
 - `python3`, for the planner's guard on other repositories.
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.

@@ -11,6 +11,7 @@ import type { ApiContentBlock, EngineInterface, Register } from 'claude-code'
 //
 // A session with a role (the release manager or the planner) also writes `alive`, the time in seconds,
 // every minute: hooks/revive.sh resumes after a restart the ones that were alive when the machine went down.
+// In the planner, every 5 minutes, hooks/remind.sh says out loud what has waited 30 minutes for the user.
 
 const WANTS = [
   { file: 'color', command: 'color', isHidden: true },
@@ -20,11 +21,14 @@ const WANTS = [
 
 const TICK_MS = 2000
 const ALIVE_EVERY_TICKS = 30
+const REMIND_EVERY_TICKS = 150
+const REMIND_TIMEOUT_MS = 120000
 const EXPECT_MS = 15000
 
 let sessionsDir: string | undefined
 let isBusy = false
 let isSyncing = false
+let isReminding = false
 let ticks = 0
 // What this process applied, by file: a value applied once is not applied again until it changes.
 const applied = new Map<string, string>()
@@ -56,6 +60,22 @@ async function runWant($: EngineInterface, command: string, args: string): Promi
   }
 }
 
+async function remind($: EngineInterface, folder: string): Promise<void> {
+  if (isReminding) {
+    return
+  }
+  isReminding = true
+  try {
+    const cwd = (await readWant($, `${folder}/cwd`)) || (await $.session.cwd())
+    const script = `${$.plugin.root}/hooks/remind.sh`
+    await $.process.run(['sh', script, await $.session.id()], { cwd, timeoutMs: REMIND_TIMEOUT_MS })
+  } catch (err) {
+    $.ui.log(`remind: ${String(err)}`)
+  } finally {
+    isReminding = false
+  }
+}
+
 async function tick($: EngineInterface): Promise<void> {
   if (isSyncing) {
     return
@@ -65,8 +85,15 @@ async function tick($: EngineInterface): Promise<void> {
     const folder = await folderOf($)
     const now = await $.clock.now()
     expected = expected.filter(x => x.until > now)
-    if (ticks++ % ALIVE_EVERY_TICKS === 0 && (await $.fs.exists(`${folder}/role`))) {
-      await $.fs.write(`${folder}/alive`, `${Math.floor(now / 1000)}\n`)
+    const tickNumber = ticks++
+    if (tickNumber % ALIVE_EVERY_TICKS === 0) {
+      const role = await readWant($, `${folder}/role`)
+      if (role !== '') {
+        await $.fs.write(`${folder}/alive`, `${Math.floor(now / 1000)}\n`)
+      }
+      if (role === 'planner' && tickNumber % REMIND_EVERY_TICKS === 0) {
+        void remind($, folder)
+      }
     }
     for (const want of WANTS) {
       if (isBusy) {

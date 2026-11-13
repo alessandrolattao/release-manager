@@ -35,11 +35,11 @@ backlog_open() {
 # Through the REST list of issues, never `gh issue list`: with a label and an assignee that one goes
 # through GitHub's search, whose index lags a few seconds behind a label just removed, so a counter
 # synced right after the removal still counted it.
-questions_open() {
-	login=$(gh api user --jq .login 2>/dev/null) || {
-		echo 0
-		return
-	}
+questions_open() { questions_list | wc -l | tr -d ' '; }
+
+# questions_list: their numbers, one per line (nothing when GitHub cannot be read).
+questions_list() {
+	login=$(gh api user --jq .login 2>/dev/null) || return 0
 	gh api --paginate "repos/$repo_full/issues?labels=question&assignee=$login&state=open&per_page=100" \
-		--jq '.[] | select(.pull_request == null) | .number' 2>/dev/null | wc -l | tr -d ' '
+		--jq '.[] | select(.pull_request == null) | .number' 2>/dev/null || true
 }

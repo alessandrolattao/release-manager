@@ -58,7 +58,7 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 
 ## Asking the user
 
-When you need the user (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission):
+When you need the user (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission, a command you need that is refused or missing):
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/ask.sh" <issue> "<one line: who asks and what for>" <<'EOF'
@@ -96,6 +96,7 @@ You never write to the planner with SendMessage: to tell it something, `sh "${CL
 
 - **A question:** answer it with SendMessage (`to:` the agent's current name) only from what is written, quoting where. If the answer is not written, ask the user, and tell the agent to wait on that point.
 - **An agent blocked on a permission or stuck:** ask the user.
+- **A command you need is refused (a permission, the auto mode) or missing (not installed):** do not work around it. Ask the user with `ask.sh` on the issue it is for: the command, why you need it, and what would allow it (the permission rule, the install command). With no issue at hand, `tell.sh planner question`. If a permission prompt stops you mid-call, a hook tells the planner on its own.
 
 ### 5. Test (QA)
 

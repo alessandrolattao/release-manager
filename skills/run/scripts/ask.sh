@@ -21,6 +21,11 @@ gh label list --limit 200 --json name --jq '.[].name' | grep -qx question ||
 printf '%s\n' "$body" | gh issue comment "$issue" --body-file - >/dev/null
 gh issue edit "$issue" --add-label question >/dev/null
 echo "issue $issue: question asked"
+# When it asked and what for: if the question is still open 30 minutes later, the planner says this line
+# out loud (hooks/remind.sh).
+mkdir -p "$counters_dir/waiting"
+printf '%s\n%s\n' "$(date +%s)" "$sentence" >"$counters_dir/waiting/question-$issue"
+rm -f "$counters_dir/waiting/question-$issue.called"
 
 branch=$(claude agents --json 2>/dev/null | jq -r --arg n "$issue" \
 	'[.[] | (.name // "") | select(test("^\\[[a-z]+\\][^ ]* " + $n + "-")) | sub("^\\[[a-z]+\\][^ ]* "; "")][0] // empty')

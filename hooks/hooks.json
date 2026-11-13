@@ -30,11 +30,36 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\"",
             "async": true
+          },
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-asks.sh\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-blocked.sh\" ask",
+            "async": true
           }
         ]
       }
     ],
     "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-blocked.sh\" go",
+            "async": true
+          }
+        ]
+      },
       {
         "matcher": "Bash",
         "hooks": [

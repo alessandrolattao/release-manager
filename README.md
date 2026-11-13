@@ -7,7 +7,9 @@ claude --bg --name "release manager" "/release-manager:run"   # builds, tests, m
 claude --bg --name planner "/release-manager:planner"          # the one you talk to
 ```
 
-They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (questions waiting for you). Open either from `claude agents`. The release manager's color tells you its state: cyan while it works (like its agents), green when all is well (its agents or CI at work, or nothing to do), orange when it needs you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when their pull request is merged; the planner is purple.
+They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (questions waiting for you). Open either from `claude agents`. The release manager's color tells you its state when its turn ends: green when all is well (its agents or CI at work, or nothing to do), orange when it needs you. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when their pull request is merged; the planner is purple. Names and colors change between turns, through the plugin's hooks module: nothing is typed into a session, so a message you are writing there is never touched, and no row is left in its conversation.
+
+Each one gets a goal (`/goal`) at every start: the release manager triages and tests every issue the planner assigns to it, coordinating with the planner and the developers; the planner does the technical analyses and sets up the work so the release manager can coordinate development. The goals never come true while the project lives: they keep both awake, waiting for work. After a restart of the machine, the first Claude Code session that starts resumes the release managers and planners that were running when it went down, and each release manager resumes its developer agents.
 
 The release manager works through your GitHub issues on its own:
 
@@ -47,10 +49,10 @@ Engineering manager, delivery manager, QA and release manager, yes; tech lead an
 
 Needs:
 
-- Claude Code with background sessions (`claude --bg`, `claude agents`).
+- Claude Code with background sessions (`claude --bg`, `claude agents`), `/goal` and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
 - [`gh`](https://cli.github.com), logged in, and `jq`.
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
-- `python3`, for the session colors.
+- `python3`, for the planner's guard on other repositories.
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.
 

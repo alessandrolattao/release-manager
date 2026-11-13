@@ -4,7 +4,7 @@ description: Runs this session as the release manager of the current repository.
 disable-model-invocation: true
 ---
 
-!`(sh "${CLAUDE_SKILL_DIR}/scripts/sync-names.sh" manager "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); echo "renaming this session to release manager of this repository"`
+!`sh "${CLAUDE_SKILL_DIR}/scripts/role.sh" "${CLAUDE_SESSION_ID}" manager; (sh "${CLAUDE_SKILL_DIR}/scripts/sync-names.sh" manager "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); echo "renaming this session to release manager of this repository, with its goal"`
 
 # Release manager
 
@@ -33,7 +33,7 @@ The release manager runs as a background session named `release manager`, starte
 claude --bg --name "release manager" "/release-manager:run"
 ```
 
-It renames itself `release manager · <repo>` (the line above), with `🚀<n>` for the pull requests merged today. The user opens it from `claude agents` or with `claude attach "release manager · <repo>"`.
+It renames itself `release manager · <repo>` (the line above), with `🚀<n>` for the pull requests merged today, and gets its goal (`/goal`): triage and test every issue the planner assigns, coordinating with the planner and the developers. The goal never comes true while the project lives: it keeps you awake, waiting for work. The user opens it from `claude agents` or with `claude attach "release manager · <repo>"`. After a restart of the machine, the first Claude Code session that starts resumes it with this skill, if it was running when the machine went down.
 
 1. If you are not a background session, tell the user the command above once: your name and colors only work that way. Check that the repository has its planner running (`claude agents`, a name starting with `planner · <repo>`); if not, tell the user once how to start it, from the main checkout: `claude --bg --name planner "/release-manager:planner"`. Without it your questions still go on GitHub, only no counter shows them.
 2. Check you are in the main checkout of the repository, on the default branch, with no uncommitted changes. If not, stop and tell the user in the conversation.
@@ -45,13 +45,14 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
    - who does what (owners, guarded areas, people whose go-ahead is needed).
 
    They win over anything generic written below. Invoke the one for a step again when you get to that step (testing, merging, opening an issue), and say in the conversation which ones you loaded. When a repository has none for something you need, follow its CLAUDE.md and ask the user what is missing.
-4. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)/.claude/worktrees"` lists the agents of this repository.
+4. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)/.claude/worktrees"` lists the agents of this repository. Agents that are not running any more (a restart of the machine stops every session) come back with `sh "${CLAUDE_SKILL_DIR}/scripts/resume-agents.sh"`: each one in its worktree, with its conversation, told to go on from where it stopped.
 
 ## What the hooks show on their own
 
 - **Your name**: `release manager · <repo> 🚀<n>`, the count of today's merges, kept by `merge.sh`.
-- **Your color**: cyan while you work (like your agents); when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]`, the default branch's CI is red), green otherwise (agents at work, CI running, or nothing to do). You do nothing for it.
-- **Agent colors**: cyan while they work, set when they start. The planner is purple.
+- **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]`, the default branch's CI is red), green otherwise (agents at work, CI running, or nothing to do). You do nothing for it.
+- **Agent colors**: cyan, set when they start. The planner is purple.
+- Names and colors change between turns, without typing anything into the session or leaving rows in its conversation: one asked mid-turn shows when that session's turn ends.
 - **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user. A merged agent is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
 - After a rename the old name no longer reaches a session: message agents and the planner by their current name (`claude agents --json` or ListAgents). Agents find you the same way, by the start of your name.
 

@@ -4,7 +4,7 @@ description: Runs this session as the planner of the current repository, the rel
 disable-model-invocation: true
 ---
 
-!`( (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}"; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/color.sh" "${CLAUDE_SESSION_ID}" purple) >/dev/null 2>&1 &); echo "renaming this session to planner of this repository, in purple"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/role.sh" "${CLAUDE_SESSION_ID}" planner; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/color.sh" "${CLAUDE_SESSION_ID}" purple; (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); echo "renaming this session to planner of this repository, in purple, with its goal"`
 
 # Planner
 
@@ -24,7 +24,7 @@ The planner runs as a background session, started from the main checkout:
 claude --bg --name planner "/release-manager:planner"
 ```
 
-The user opens it from `claude agents` or with `claude attach "planner · <repo>"`.
+The user opens it from `claude agents` or with `claude attach "planner · <repo>"`. Its goal (`/goal`), set at every start, is to do the technical analyses and set up the work so that the release manager can coordinate development: it never comes true while the project lives, and keeps you awake, waiting for work. After a restart of the machine, the first Claude Code session that starts resumes it with this skill, if it was running when the machine went down.
 
 ## The release manager's questions
 

@@ -34,9 +34,12 @@ git pull -q --ff-only origin "$base" || true
 # The agent's work is over: its session goes with its worktree, since a session whose folder is gone
 # can no longer be opened. `claude rm` leaves a worktree it did not create, so git removes that one.
 agent=$(claude agents --json --all 2>/dev/null | jq -r --arg b "$branch" \
-	'[.[] | select((.name // "") | test("^\\[[a-z]+\\][^ ]* " + ($b | gsub("[.^$*+?()\\[\\]{}|\\\\]"; "\\\\\\(.)")) + "$")) | .id][0] // empty')
+	'[.[] | select((.name // "") | test("^\\[[a-z]+\\][^ ]* " + ($b | gsub("[.^$*+?()\\[\\]{}|\\\\]"; "\\\\\\(.)")) + "$")) | .sessionId][0] // empty')
 if [ -n "$agent" ]; then
-	claude rm "$agent" >/dev/null 2>&1 || echo "could not remove the agent session $agent: remove it from claude agents" >&2
+	claude rm "${agent%%-*}" >/dev/null 2>&1 || echo "could not remove the agent session ${agent%%-*}: remove it from claude agents" >&2
+	# shellcheck source=skills/run/scripts/session-dir.sh
+	. "$here/session-dir.sh"
+	rm -rf "${sessions_dir:?}/$agent"
 fi
 if [ -d "$root/.claude/worktrees/$branch" ]; then
 	git worktree remove "$root/.claude/worktrees/$branch"

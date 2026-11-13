@@ -47,10 +47,10 @@ if [ -z "$id" ]; then
 	}
 	id=$(printf '%s' "$found" | cut -f1)
 fi
-# The current name is the last one the session recorded in its transcript (what /rename writes);
-# `claude agents` can lag behind a rename, so it is only the fallback.
-config=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-current=$(cat "$config"/projects/*/"$id".jsonl 2>/dev/null | grep '"custom-title"' | tail -1 | jq -r '.customTitle // empty' 2>/dev/null || true)
-[ -n "$current" ] || current=$(claude agents --json 2>/dev/null | jq -r --arg s "$id" '[.[] | select(.sessionId == $s) | .name][0] // empty')
-[ "$current" = "$want" ] && exit 0
+# Compared with the last name asked for the session (rename.sh's file, which the hooks module applies),
+# never with its transcript: a session resumed as a copy inherits the old one's title there while
+# showing another name.
+# shellcheck source=skills/run/scripts/session-dir.sh
+. "$here/session-dir.sh"
+[ "$(cat "$sessions_dir/$id/name" 2>/dev/null || true)" = "$want" ] && exit 0
 sh "$here/rename.sh" "$id" "$want"

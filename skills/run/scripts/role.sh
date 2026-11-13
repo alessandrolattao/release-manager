@@ -16,7 +16,7 @@ esac
 # The goals never come true while the project lives: they keep the session awake, waiting for work.
 case "$role" in
 manager) goal="Triage and test every issue the planner assigns to you, coordinating with the planner and the developers." ;;
-planner) goal="Do the technical analyses and set up the work so that the release manager can coordinate development." ;;
+planner) goal="Do the technical analyses of the issues that exist and set up the work so that the release manager can coordinate development. New issues and the first technical decision of an issue are taken only with the user, unless they explicitly said otherwise; with nothing to carry on, wait for the user." ;;
 *)
 	echo "usage: role.sh <session-id> manager|planner" >&2
 	exit 2

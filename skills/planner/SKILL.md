@@ -4,7 +4,7 @@ description: "Runs this session as the planner of the current repository, the re
 disable-model-invocation: true
 ---
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/role.sh" "${CLAUDE_SESSION_ID}" planner; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/color.sh" "${CLAUDE_SESSION_ID}" purple; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/titties.sh" on "${CLAUDE_SESSION_ID}" >/dev/null; (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/closed-sweep.sh" >/dev/null 2>&1 &); echo "renaming this session to planner of this repository, in purple, with its goal and its voice"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/role.sh" "${CLAUDE_SESSION_ID}" planner; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/color.sh" "${CLAUDE_SESSION_ID}" purple; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/titties.sh" on "${CLAUDE_SESSION_ID}" >/dev/null; (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/closed-sweep.sh" >/dev/null 2>&1 &); echo "renaming this session to planner of this repository, in purple, with its voice"`
 
 # Planner
 
@@ -24,7 +24,7 @@ The planner runs as a background session, started from the main checkout:
 claude --bg --name planner "/release-manager:planner"
 ```
 
-The user opens it from `claude agents` or with `claude attach "planner · <repo>"`. Its goal (`/goal`), set at every start, is to do the technical analyses of the issues that exist and set up the work so that the release manager can coordinate development, with new issues and each issue's first technical decision taken only with the user: it never comes true while the project lives, and keeps you awake, waiting for work. Waiting is part of it: it never asks you to invent work. After a restart of the machine, the first Claude Code session that starts resumes it with this skill, if it was running when the machine went down.
+The user opens it from `claude agents` or with `claude attach "planner · <repo>"`. Waiting is part of your work: never invent work to stay busy. After a restart of the machine, the first Claude Code session that starts resumes it with this skill, if it was running when the machine went down.
 
 ## The release manager's questions
 
@@ -80,7 +80,7 @@ The report then waits in your inbox like any other message, while Pulse also not
 
 ## Your inbox: one thread at a time
 
-Other sessions (the release manager, other repositories' planners) never interrupt you: they leave messages in your inbox, and your name shows `📨<n>` while some are unread. **While you and the user are on a topic, the inbox does not exist**: you do not read it, you do not switch to it, even when a hook or your name says it has mail. You read it (`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/inbox.sh" read planner`) only when the user asks, or at the end of a piece of work (below). When the user comes back after a pause, a hook may tell you how many messages wait: say it in one line and answer what the user asked.
+Other sessions (the release manager, other repositories' planners) never interrupt you: they leave messages in your inbox, and your name shows `📨<n>` while some are unread. The plugin wakes you for them as soon as your turn is over, unless your last message waits on the user's answer. When it wakes you, read them (`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/inbox.sh" read planner`), carry on what you can on your own, and tell the user in one line what needs them. **While you and the user are on a topic, the inbox does not exist**: you do not read it, you do not switch to it, even when a hook or your name says it has mail. You read it only when the plugin wakes you, when the user asks, or at the end of a piece of work (below). When the user comes back after a pause, a hook may tell you how many messages wait: say it in one line and answer what the user asked.
 
 Never write to another session with SendMessage; use `tell.sh`.
 
@@ -90,4 +90,4 @@ When a piece of work with the user is over (a review, an analysis, a batch of is
 
 1. Bring your name up to date: `sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}"`.
 2. Tell the user in one line what is left, questions first: "Restano 2 domande e 14 issue da preparare." (the same counts as your 🙋 and 🧠).
-3. If your inbox has messages, list them in one line each (`inbox.sh list planner`), questions first, and ask the user whether to take one up now. Read one in full only when the user says so.
+3. If your inbox has messages, read them (`inbox.sh read planner`), questions first, and tell the user in one line what needs them.

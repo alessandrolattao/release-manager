@@ -26,6 +26,13 @@ id=$(claude agents --json 2>/dev/null | jq -r --arg b "$branch" \
 	echo "no agent session for branch $branch" >&2
 	exit 1
 }
+# shellcheck source=skills/run/scripts/session-dir.sh
+. "$here/session-dir.sh"
+if [ "$state" = done ] && waiting_in_chat "$id"; then
+	echo "the agent of $branch still waits for an answer in its chat: $(sed -n 4p "$sessions_dir/$id/asked")" >&2
+	echo "answer it first (SendMessage), or ask the user: it is not done" >&2
+	exit 1
+fi
 pr=""
 if [ "$state" = ready ]; then
 	pr=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')

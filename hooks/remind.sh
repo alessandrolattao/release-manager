@@ -7,7 +7,8 @@
 #     a labelled issue it did not record counts from when it is first seen here);
 #   - a question left in the planner's inbox with no issue, while it is unread (tell.sh records it);
 #   - a pull request in [ready], until the user tests or merges it (set-state.sh records it);
-#   - the release manager stopped on a permission prompt (manager-blocked.sh records it).
+#   - the release manager or a developer agent stopped on a permission prompt (session-blocked.sh records it);
+#   - a developer agent waiting for an answer in its own chat (agent-asks.sh records it).
 # Silent without TitTieS or when the session has it off.
 #   remind.sh <session-id>   (from the repository's main checkout)
 set -eu
@@ -90,6 +91,14 @@ manager=$(session_of "$manager_prefix" | cut -f1)
 if [ -n "$manager" ] && due "$sessions_dir/$manager/blocked"; then
 	take "$sessions_dir/$manager/blocked"
 fi
+
+# The developer agents stopped on a permission prompt, or waiting for an answer in their own chat.
+top=$(git rev-parse --show-toplevel)
+for agent in $(claude agents --json --cwd "$top" 2>/dev/null |
+	jq -r --arg w "$top/.claude/worktrees/" '.[] | select(.cwd | startswith($w)) | .sessionId' 2>/dev/null); do
+	if due "$sessions_dir/$agent/blocked"; then take "$sessions_dir/$agent/blocked"; fi
+	if waiting_in_chat "$agent" && due "$sessions_dir/$agent/asked"; then take "$sessions_dir/$agent/asked"; fi
+done
 
 [ -n "$said" ] || exit 0
 said=$(printf '%s' "$said" | cut -c1-180)

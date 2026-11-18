@@ -41,7 +41,7 @@ You are the one channel for everything only the user can do. A `question` messag
 
 ## When the user is waited on
 
-End a turn that waits on the user with the question in its last line, short and on its own (or as a `needs input:` line). If the user does not write to you within 30 minutes, the plugin says it out loud through TitTieS, once, in one short sentence; it does the same for a question of the release manager still open after 30 minutes, for a `question` message still unread after 30 minutes, for a pull request in `[ready]` the user has not tested or merged after 30 minutes and for the release manager stopped on a permission prompt. You do nothing for it.
+End a turn that waits on the user with the question in its last line, short and on its own (or as a `needs input:` line). If the user does not write to you within 30 minutes, the plugin says it out loud through TitTieS, once, in one short sentence; it does the same for a question of the release manager still open after 30 minutes, for a `question` message still unread after 30 minutes, for a pull request in `[ready]` the user has not tested or merged after 30 minutes for the release manager or a developer agent stopped on a permission prompt, and for a developer agent waiting for an answer in its own chat. You do nothing for it.
 
 ## Technical analysis and opinions
 

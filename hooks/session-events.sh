@@ -3,8 +3,8 @@
 # It wakes the release manager and the planner when there is something for them, and only between their
 # turns, so a turn is never interrupted and the next piece of work starts as soon as the last one ends.
 #   - both: new messages in their inbox;
-#   - the release manager: an agent changed state or ended, a question was answered, an issue became
-#     workable, the default branch's CI is green again.
+#   - the release manager: an agent changed state, ended or waits for an answer in its own chat, a question
+#     was answered, an issue became workable, the default branch's CI is green again.
 # The planner is not woken while its last message waits on the user's answer. Each thing is said once.
 # Claude Code starts this in every session of the plugin: any other session ends here within a minute,
 # since a running monitor makes the session look busy in `claude agents`.
@@ -70,6 +70,23 @@ changes() {
 			else empty end] | join(", ")' 2>/dev/null
 }
 
+# waiting_agents: the agents whose turn ended asking something 5 minutes ago, with nobody answering since
+# (the user may be talking to the agent right then), one per line and once per question.
+waiting_agents() {
+	claude agents --json --cwd "$top" 2>/dev/null |
+		jq -r --arg w "$top/.claude/worktrees/" '.[] | select(.cwd | startswith($w)) | .sessionId' 2>/dev/null |
+		while read -r agent; do
+			record="$sessions_dir/$agent/asked"
+			waiting_in_chat "$agent" || continue
+			[ ! -f "$record.told" ] || continue
+			at=$(sed -n 1p "$record")
+			case "$at" in "" | *[!0-9]*) continue ;; esac
+			[ $(($(date +%s) - at)) -ge 300 ] || continue
+			touch "$record.told"
+			printf '#%s: %s\n' "$(sed -n 3p "$record")" "$(sed -n 4p "$record")"
+		done
+}
+
 # workable: the numbers of the issues that can be started, one per line.
 workable() { sh "$scripts/queue.sh" 2>/dev/null | jq -r 'select(.workable) | "#\(.number)"' 2>/dev/null; }
 
@@ -132,6 +149,8 @@ while :; do
 		if [ $((tick % 10)) -eq 0 ]; then
 			now=$(agents)
 			[ -z "$now" ] || seen=$now
+			asking=$(waiting_agents | tr '\n' ';')
+			[ -z "$asking" ] || note "agents waiting for an answer in their own chat, read them with claude logs and answer with SendMessage from what is written, otherwise ask the user: ${asking%;}"
 		fi
 		[ $((tick % 40)) -ne 0 ] || look_github
 	fi

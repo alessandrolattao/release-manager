@@ -19,6 +19,8 @@ agents() {
 			'[.[] | select(.cwd | startswith($w))] | sort_by(.name) | map({name, state, status, id})' 2>/dev/null || echo '[]'
 }
 
+# Before the first look: an agent that ended wakes this wait, and the next wait shows it closed.
+sh "$here/closed-sweep.sh" >/dev/null 2>&1 || true
 before=$(agents)
 asked=$(questions_open)
 mailed=$(inbox_new manager)

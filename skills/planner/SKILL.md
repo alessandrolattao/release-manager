@@ -4,7 +4,7 @@ description: "Runs this session as the planner of the current repository, the re
 disable-model-invocation: true
 ---
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/role.sh" "${CLAUDE_SESSION_ID}" planner; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/color.sh" "${CLAUDE_SESSION_ID}" purple; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/titties.sh" on "${CLAUDE_SESSION_ID}" >/dev/null; (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); echo "renaming this session to planner of this repository, in purple, with its goal and its voice"`
+!`sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/role.sh" "${CLAUDE_SESSION_ID}" planner; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/color.sh" "${CLAUDE_SESSION_ID}" purple; sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/titties.sh" on "${CLAUDE_SESSION_ID}" >/dev/null; (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/sync-names.sh" planner "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); (sh "${CLAUDE_PLUGIN_ROOT}/skills/run/scripts/closed-sweep.sh" >/dev/null 2>&1 &); echo "renaming this session to planner of this repository, in purple, with its goal and its voice"`
 
 # Planner
 

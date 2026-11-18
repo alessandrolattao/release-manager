@@ -77,6 +77,8 @@ done
 
 # The pull requests in [ready]: the merged ones move to [done] first.
 sh "$scripts/ready-sweep.sh" >/dev/null 2>&1 || true
+# The sessions that ended since the last look lose their color and show their real state.
+sh "$scripts/closed-sweep.sh" >/dev/null 2>&1 || true
 for record in "$waiting"/ready-*; do
 	[ -f "$record" ] || continue
 	case "$record" in *.called | *.tested) continue ;; esac

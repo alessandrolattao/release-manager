@@ -32,7 +32,8 @@ claude agents --json --all --cwd "$root" 2>/dev/null | jq -r --arg w "$root/.cla
 	| "\(.sessionId)\t\(.cwd)\t\(.name // "")"' |
 	while IFS="$(printf '\t')" read -r id dir listed; do
 		[ -d "$dir" ] || continue
-		# The last name asked wins over the listed one, which lags behind until the session applies it.
+		# The last name asked wins over the listed one, which lags behind until the session applies it
+		# and reads [closed] once closed-sweep.sh has seen the session dead.
 		name=$(cat "$sessions_dir/$id/name" 2>/dev/null || true)
 		[ -n "$name" ] || name=$listed
 		case "$name" in

@@ -4,7 +4,7 @@ description: "Runs this session as the release manager of the current repository
 disable-model-invocation: true
 ---
 
-!`sh "${CLAUDE_SKILL_DIR}/scripts/role.sh" "${CLAUDE_SESSION_ID}" manager; (sh "${CLAUDE_SKILL_DIR}/scripts/sync-names.sh" manager "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); echo "renaming this session to release manager of this repository, with its goal"`
+!`sh "${CLAUDE_SKILL_DIR}/scripts/role.sh" "${CLAUDE_SESSION_ID}" manager; (sh "${CLAUDE_SKILL_DIR}/scripts/sync-names.sh" manager "${CLAUDE_SESSION_ID}" >/dev/null 2>&1 &); (sh "${CLAUDE_SKILL_DIR}/scripts/closed-sweep.sh" >/dev/null 2>&1 &); echo "renaming this session to release manager of this repository, with its goal"`
 
 # Release manager
 
@@ -51,9 +51,9 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 
 - **Your name**: `release manager · <repo> 🚀<n>`, the count of today's merges, kept by `merge.sh`.
 - **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]` or `[ready]`, the default branch's CI is red), yellow if work is under way (an agent of yours is running, you are testing a pull request, the default branch's CI is running), green if there is nothing to do. You do nothing for it.
-- **Agent colors**: cyan, set when they start. The planner is purple.
+- **Agent colors**: cyan, set when they start, and none once their session is closed. The planner is purple.
 - Names and colors change between turns, without typing anything into the session or leaving rows in its conversation: one asked mid-turn shows when that session's turn ends.
-- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user (a hook moves it back to `[dev]` as soon as the agent edits or commits again, wherever the user answered), `[ready]` pull request ready, the user tests and/or merges it, `[done]` the user merged it. An agent you merge is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
+- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user (a hook moves it back to `[dev]` as soon as the agent edits or commits again, wherever the user answered), `[ready]` pull request ready, the user tests and/or merges it, `[done]` the user merged it, `[closed]` its session ended with no merged pull request. A session that ends (stopped, crashed, finished) loses its color and becomes `[done]` when its pull request was merged, `[closed]` otherwise: `closed-sweep.sh` does it from the agent list when you start, before every `wait.sh` and every few minutes in the planner, and a resumed session gets its live name and color back. An agent you merge is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
 - After a rename the old name no longer reaches a session: message agents and the planner by their current name (`claude agents --json` or ListAgents). Agents find you the same way, by the start of your name.
 
 ## Asking the user
@@ -97,7 +97,7 @@ Read it whole: `gh issue view <n> --comments`. If the technical decisions are mi
 
 ### 2. Capacity
 
-Run `clessidra` (at most once a minute). Start a new agent only when fewer than 2 agents of this repository are working (`[ready]` and `[done]` agents are not) and both the `5h` and `7d` lines say `lasts until reset` or `too early to estimate`. When a line says `runs out in`, start nothing new and let the running agents finish. When `clessidra` fails, run at most 1 agent and do not call the user for it.
+Run `clessidra` (at most once a minute). Start a new agent only when fewer than 2 agents of this repository are working (`[ready]`, `[done]` and `[closed]` agents are not) and both the `5h` and `7d` lines say `lasts until reset` or `too early to estimate`. When a line says `runs out in`, start nothing new and let the running agents finish. When `clessidra` fails, run at most 1 agent and do not call the user for it.
 
 ### 3. Start the agent
 

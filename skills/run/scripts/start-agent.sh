@@ -33,7 +33,7 @@ if [ ! -d "$worktree" ]; then
 fi
 
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}|$repo|g" \
-	-e "s|{{MANAGER}}|$manager|g" -e "s|{{WORKTREE}}|$worktree|g" "$here/../agent-brief.md")
+	-e "s|{{MANAGER}}|$manager|g" -e "s|{{WORKTREE}}|$worktree|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../agent-brief.md")
 
 # Same account as this session: keep CLAUDE_CONFIG_DIR, drop every other CLAUDE* variable so the
 # agent and its supervisor do not inherit this session's identity.

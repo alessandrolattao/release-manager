@@ -5,6 +5,8 @@
 #   - the planner's own question in the chat, with no user prompt since (planner-asks.sh records it);
 #   - a question of the release manager on an issue, while the label `question` is on (ask.sh records it;
 #     a labelled issue it did not record counts from when it is first seen here);
+#   - a question left in the planner's inbox with no issue, while it is unread (tell.sh records it);
+#   - a pull request in [ready], until the user tests or merges it (set-state.sh records it);
 #   - the release manager stopped on a permission prompt (manager-blocked.sh records it).
 # Silent without TitTieS or when the session has it off.
 #   remind.sh <session-id>   (from the repository's main checkout)
@@ -60,6 +62,25 @@ for n in $open; do
 	record="$waiting/question-$n"
 	[ -f "$record" ] || printf '%s\nIl release manager di %s aspetta una tua risposta sulla issue %s.\n' "$now" "$repo_short" "$n" >"$record"
 	if due "$record"; then take "$record"; fi
+done
+
+# The questions with no issue: once the planner has read one, it is the planner's own question to the user.
+for record in "$waiting"/told-*; do
+	[ -f "$record" ] || continue
+	case "$record" in *.called) continue ;; esac
+	if [ ! -f "$(inbox_dir planner)/new/${record##*told-}" ]; then
+		rm -f "$record" "$record.called"
+	elif due "$record"; then
+		take "$record"
+	fi
+done
+
+# The pull requests in [ready]: the merged ones move to [done] first.
+sh "$scripts/ready-sweep.sh" >/dev/null 2>&1 || true
+for record in "$waiting"/ready-*; do
+	[ -f "$record" ] || continue
+	case "$record" in *.called | *.tested) continue ;; esac
+	if [ ! -f "$record.tested" ] && due "$record"; then take "$record"; fi
 done
 
 # The release manager stopped on a permission prompt.

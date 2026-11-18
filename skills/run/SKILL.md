@@ -45,20 +45,22 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
    - who does what (owners, guarded areas, people whose go-ahead is needed).
 
    They win over anything generic written below. Invoke the one for a step again when you get to that step (testing, merging, opening an issue), and say in the conversation which ones you loaded. When a repository has none for something you need, follow its CLAUDE.md and ask the user what is missing.
-4. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)"` lists the sessions of this repository, and its agents are the ones whose `cwd` is under `.claude/worktrees/` (given the worktrees folder itself, `--cwd` lists nothing). Agents that are not running any more (a restart of the machine stops every session) come back with `sh "${CLAUDE_SKILL_DIR}/scripts/resume-agents.sh"`: each one in its worktree, with its conversation, told to go on from where it stopped.
+4. Resume what is already running: `claude agents --json --cwd "$(git rev-parse --show-toplevel)"` lists the sessions of this repository, and its agents are the ones whose `cwd` is under `.claude/worktrees/` (given the worktrees folder itself, `--cwd` lists nothing). Agents whose session died (a restart of the machine or a crash) come back with `sh "${CLAUDE_SKILL_DIR}/scripts/resume-agents.sh"`: each one in its worktree, with its conversation and its current name, told to go on from where it stopped. It resumes only the ones that were working (`[dev]`, `[fix]`, `[test]`, `[review]`): never a live session, even an idle one, an agent waiting for the user (`[ask]`, `[ready]`), a session someone stopped on purpose, or an issue the user parked (closed, or without `ready for development`). Running it again changes nothing.
 
 ## What the hooks show on their own
 
 - **Your name**: `release manager · <repo> 🚀<n>`, the count of today's merges, kept by `merge.sh`.
-- **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]`, the default branch's CI is red), yellow if work is under way (an agent of yours is running, you are testing a pull request, the default branch's CI is running), green if there is nothing to do. You do nothing for it.
+- **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]` or `[ready]`, the default branch's CI is red), yellow if work is under way (an agent of yours is running, you are testing a pull request, the default branch's CI is running), green if there is nothing to do. You do nothing for it.
 - **Agent colors**: cyan, set when they start. The planner is purple.
 - Names and colors change between turns, without typing anything into the session or leaving rows in its conversation: one asked mid-turn shows when that session's turn ends.
-- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user. A merged agent is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
+- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user (a hook moves it back to `[dev]` as soon as the agent edits or commits again, wherever the user answered), `[ready]` pull request ready, the user tests and/or merges it, `[done]` the user merged it. An agent you merge is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
 - After a rename the old name no longer reaches a session: message agents and the planner by their current name (`claude agents --json` or ListAgents). Agents find you the same way, by the start of your name.
 
 ## Asking the user
 
-When you need the user (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission, a command you need that is refused or missing):
+**You never wait on the user in silence.** The planner is the one channel for everything only the user can do: approve a login, say yes to a privileged profile, take a decision. Each of these goes to the planner at once, before you wait for anything or move on to other work.
+
+When it concerns an issue (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission, a command you need that is refused or missing):
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/ask.sh" <issue> "<one line: who asks and what for>" <<'EOF'
@@ -68,7 +70,20 @@ EOF
 
 It posts the comment, adds `question`, moves the issue's agent to `[ask]`, leaves the details in the planner's inbox under that line, and raises its `🙋` counter. The line says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Leave that issue and go on with the others.
 
-The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided.
+When no issue is involved:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/tell.sh" planner question <<'EOF'
+<first line: who asks and what the user has to do, in the user's language>
+<the details>
+EOF
+```
+
+It raises the planner's `🙋` until the planner reads it. Either way, what is still unanswered after 30 minutes is said out loud to the user.
+
+**A login only the user can approve** (a cloud CLI, a registry, any device or browser flow): start the login in the background, and as soon as it prints its code or link, tell the planner, with `ask.sh` when an issue is waiting on it and `tell.sh planner question` otherwise. The first line carries what the user has to do, including the device code when there is one and the address to enter it: "Il release manager di my-app aspetta il login cloud: approva il codice ABCD-EFGH su https://example.com/device." Then go on with what does not need the login. If the code expires before the user approves it, start the login again and send the new code the same way.
+
+The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided. When the user answers the agent directly in its own chat, the agent goes back to `[dev]` by itself and tells the planner what was decided; the planner then writes it on the issue and removes `question`.
 
 ## The loop
 
@@ -82,7 +97,7 @@ Read it whole: `gh issue view <n> --comments`. If the technical decisions are mi
 
 ### 2. Capacity
 
-Run `clessidra` (at most once a minute). Start a new agent only when fewer than 2 agents of this repository are working and both the `5h` and `7d` lines say `lasts until reset` or `too early to estimate`. When a line says `runs out in`, start nothing new and let the running agents finish. When `clessidra` fails, run at most 1 agent and do not call the user for it.
+Run `clessidra` (at most once a minute). Start a new agent only when fewer than 2 agents of this repository are working (`[ready]` and `[done]` agents are not) and both the `5h` and `7d` lines say `lasts until reset` or `too early to estimate`. When a line says `runs out in`, start nothing new and let the running agents finish. When `clessidra` fails, run at most 1 agent and do not call the user for it.
 
 ### 3. Start the agent
 
@@ -95,7 +110,7 @@ Agents write to you with SendMessage: questions, `PR ready: #<pr>`, `fixed: #<pr
 You never write to the planner with SendMessage: to tell it something, `sh "${CLAUDE_SKILL_DIR}/scripts/tell.sh" planner info <<'EOF'` with the message and `EOF`.
 
 - **A question:** answer it with SendMessage (`to:` the agent's current name) only from what is written, quoting where. If the answer is not written, ask the user, and tell the agent to wait on that point.
-- **An agent blocked on a permission or stuck:** ask the user.
+- **An agent blocked on a permission or stuck, or anything else only the user can do:** ask the user at once, as "Asking the user" says.
 - **A command you need is refused (a permission, the auto mode) or missing (not installed):** do not work around it. Ask the user with `ask.sh` on the issue it is for: the command, why you need it, and what would allow it (the permission rule, the install command). With no issue at hand, `tell.sh planner question`. If a permission prompt stops you mid-call, a hook tells the planner on its own.
 
 ### 5. Test (QA)
@@ -106,6 +121,7 @@ One test at a time. When an agent sends `PR ready` or `fixed`:
 2. Test the way the repository says (its testing skills): every acceptance criterion of the issue, in the browser for what a person sees, with the right tool otherwise (tests, API calls, commands). Stop whatever you started.
 3. **Passed**, with the PR's CI green and its review handled: `sh "${CLAUDE_SKILL_DIR}/scripts/merge.sh" <pr>` goes back to the default branch, merges (merge commit), and removes the agent: its session, its worktree and its local branch. Write on the PR what you tried. Then back to step 1.
 4. **Failed**: `sh "${CLAUDE_SKILL_DIR}/scripts/qa-fail.sh" <branch>` goes back to the default branch and moves the agent to `[fix]`; then send the agent, by its new name, what fails with the steps to see it. Test again on `fixed`. After 3 failed rounds on the same issue, ask the user.
+5. **The user keeps the pull request** (the issue or the user says they test and/or merge it themselves): do not merge it. `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> ready` moves the agent to `[ready]` and is your message to the planner: it tells the user `PR #<n> ready, your turn` and keeps it in its `🙋` until the user tests or merges it. After the user's merge the tag becomes `[done]` by itself (`wait.sh` and the planner look). If the user finds bugs, `set-state.sh <branch> fix` and send them to the agent.
 
 **After every merge, the CI of the default branch**: run `sh "${CLAUDE_SKILL_DIR}/scripts/main-ci.sh" --wait` with the Bash tool in the background; it waits for every workflow run of the merged commit and ends with `GREEN` or `RED`. On `RED` it has already opened a bug issue (Urgent, in the backlog, so the planner sees it) and recorded the broken branch: from then on `merge.sh` refuses every merge except the pull request that closes that issue, and your color is orange. Go on developing and testing what you can, merge nothing else, and run `main-ci.sh` (without `--wait`) each time you wake to see whether it is green again. A broken default branch is never left without that issue.
 

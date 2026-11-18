@@ -38,7 +38,7 @@ fi
 {
 	printf 'Issue #%s needs the user: %s\n\n' "$issue" "$sentence"
 	printf '%s\n' "$body"
-} | sh "$here/tell.sh" planner question >/dev/null 2>&1 || true
+} | sh "$here/tell.sh" planner question --recorded >/dev/null 2>&1 || true
 planner=$(session_of "$planner_prefix")
 if [ -z "$planner" ]; then
 	echo "no planner running for $repo_short: the question waits on GitHub"

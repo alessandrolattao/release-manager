@@ -2,11 +2,13 @@
 # Leaves a message in the inbox of a planner or a release manager, instead of interrupting it:
 # it reads its inbox when its current topic is over. The message is a file, written atomically
 # (Maildir: tmp/ then new/), and the receiver's 📨 counter goes up.
-#   tell.sh <planner|manager> <question|unblocked|info> [--to-repo owner/name] [--from "<sender>"] <<'EOF'
+#   tell.sh <planner|manager> <question|unblocked|info> [--to-repo owner/name] [--from "<sender>"] [--recorded] <<'EOF'
 #   the message
 #   EOF
 # Without --to-repo the receiver is this repository's; with it, another repository's (planner to planner).
 # --from names the sender when it is not a role session, such as a Pulse check ("Pulse · monthly audit").
+# A question for the planner counts in its 🙋 until it is read, and its first line is said out loud if it
+# is still unread after 30 minutes (hooks/remind.sh). --recorded is for a caller that keeps its own record.
 set -eu
 
 to=${1:?planner or manager}
@@ -17,8 +19,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/roles.sh"
 target=$repo_full
 sender=""
+recorded=no
 while [ $# -gt 0 ]; do
 	case "$1" in
+	--recorded)
+		recorded=yes
+		shift
+		;;
 	--to-repo)
 		target=${2:?owner/name}
 		shift 2
@@ -67,6 +74,12 @@ file="$(date +%Y%m%dT%H%M%S)-$$-$kind.md"
 } >"$box/tmp/$file"
 mv "$box/tmp/$file" "$box/new/$file"
 echo "message left for the $to of $target ($kind)"
+
+if [ "$to" = planner ] && [ "$kind" = question ] && [ "$recorded" = no ]; then
+	waiting="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/$(printf '%s' "$target" | tr '/' '_')/waiting"
+	mkdir -p "$waiting"
+	printf '%s\n%s\n' "$(date +%s)" "$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1)" >"$waiting/told-$file"
+fi
 
 # The receiver's 📨 counter: only for this repository, where the names are kept.
 if [ "$target" = "$repo_full" ]; then

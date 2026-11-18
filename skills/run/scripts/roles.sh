@@ -37,6 +37,20 @@ backlog_open() {
 # synced right after the removal still counted it.
 questions_open() { questions_list | wc -l | tr -d ' '; }
 
+# told_open: questions left in the planner's inbox with no issue (tell.sh), until the planner reads them.
+told_open() {
+	told=0
+	for record in "$counters_dir/waiting"/told-*; do
+		[ -f "$record" ] || continue
+		case "$record" in *.called) continue ;; esac
+		if [ -f "$(inbox_dir planner)/new/${record##*told-}" ]; then told=$((told + 1)); fi
+	done
+	echo "$told"
+}
+
+# waiting_user: everything only the user can move on, the planner's 🙋.
+waiting_user() { echo $(($(questions_open) + $(told_open))); }
+
 # questions_list: their numbers, one per line (nothing when GitHub cannot be read).
 questions_list() {
 	login=$(gh api user --jq .login 2>/dev/null) || return 0

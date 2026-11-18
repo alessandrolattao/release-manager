@@ -28,4 +28,4 @@ cd "$cwd"
 want "$sid" blocked "$(printf '%s\nIl release manager di %s è fermo su un permesso: %s.' "$(date +%s)" "$repo_short" "${what:-$tool}")"
 rm -f "$record.called"
 printf 'The release manager is stopped on a permission prompt and waits for the user to answer it in its session (claude attach "%s").\nTool: %s\nWhat: %s\n' \
-	"$manager_prefix" "$tool" "${what:-?}" | sh "$scripts/tell.sh" planner question --from "$manager_prefix" >/dev/null 2>&1 || true
+	"$manager_prefix" "$tool" "${what:-?}" | sh "$scripts/tell.sh" planner question --recorded --from "$manager_prefix" >/dev/null 2>&1 || true

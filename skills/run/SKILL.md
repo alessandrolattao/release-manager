@@ -58,7 +58,9 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 
 ## Asking the user
 
-When you need the user (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission, a command you need that is refused or missing):
+**You never wait on the user in silence.** The planner is the one channel for everything only the user can do: approve a login, say yes to a privileged profile, take a decision. Each of these goes to the planner at once, before you wait for anything or move on to other work.
+
+When it concerns an issue (missing or unclear technical decisions, a technical doubt from an agent, 3 failed test rounds, an agent stuck on a permission, a command you need that is refused or missing):
 
 ```sh
 sh "${CLAUDE_SKILL_DIR}/scripts/ask.sh" <issue> "<one line: who asks and what for>" <<'EOF'
@@ -67,6 +69,19 @@ EOF
 ```
 
 It posts the comment, adds `question`, moves the issue's agent to `[ask]`, leaves the details in the planner's inbox under that line, and raises its `🙋` counter. The line says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Leave that issue and go on with the others.
+
+When no issue is involved:
+
+```sh
+sh "${CLAUDE_SKILL_DIR}/scripts/tell.sh" planner question <<'EOF'
+<first line: who asks and what the user has to do, in the user's language>
+<the details>
+EOF
+```
+
+It raises the planner's `🙋` until the planner reads it. Either way, what is still unanswered after 30 minutes is said out loud to the user.
+
+**A login only the user can approve** (a cloud CLI, a registry, any device or browser flow): start the login in the background, and as soon as it prints its code or link, tell the planner, with `ask.sh` when an issue is waiting on it and `tell.sh planner question` otherwise. The first line carries what the user has to do, including the device code when there is one and the address to enter it: "Il release manager di my-app aspetta il login cloud: approva il codice ABCD-EFGH su https://example.com/device." Then go on with what does not need the login. If the code expires before the user approves it, start the login again and send the new code the same way.
 
 The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided. When the user answers the agent directly in its own chat, the agent goes back to `[dev]` by itself and tells the planner what was decided; the planner then writes it on the issue and removes `question`.
 
@@ -95,7 +110,7 @@ Agents write to you with SendMessage: questions, `PR ready: #<pr>`, `fixed: #<pr
 You never write to the planner with SendMessage: to tell it something, `sh "${CLAUDE_SKILL_DIR}/scripts/tell.sh" planner info <<'EOF'` with the message and `EOF`.
 
 - **A question:** answer it with SendMessage (`to:` the agent's current name) only from what is written, quoting where. If the answer is not written, ask the user, and tell the agent to wait on that point.
-- **An agent blocked on a permission or stuck:** ask the user.
+- **An agent blocked on a permission or stuck, or anything else only the user can do:** ask the user at once, as "Asking the user" says.
 - **A command you need is refused (a permission, the auto mode) or missing (not installed):** do not work around it. Ask the user with `ask.sh` on the issue it is for: the command, why you need it, and what would allow it (the permission rule, the install command). With no issue at hand, `tell.sh planner question`. If a permission prompt stops you mid-call, a hook tells the planner on its own.
 
 ### 5. Test (QA)

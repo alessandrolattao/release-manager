@@ -9,7 +9,7 @@ claude --bg --name planner "/release-manager:planner"          # the one you tal
 
 They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (what only you can move on). Open either from `claude agents`. The release manager's color tells you its state when its turn ends: orange when it needs you, yellow while work is under way (its agents, a test, the default branch's CI), green when there is nothing to do. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, `[ready]` (the pull request is ready and you test and/or merge it), `[done]` (you merged it), `[closed]` (its session ended with no merged pull request), with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when the release manager merges their pull request; a session that ends any other way, a Pulse check's included, loses its color and shows `[done]` or `[closed]` as soon as the release manager or the planner looks at the list, and gets its live name and color back if it is resumed; the planner is purple. Names and colors change between turns, through the plugin's hooks module: nothing is typed into a session, so a message you are writing there is never touched, and no row is left in its conversation.
 
-Each one gets a goal (`/goal`) at every start: the release manager triages and tests every issue the planner assigns to it, coordinating with the planner and the developers; the planner does the technical analyses of the issues that exist and sets up the work so the release manager can coordinate development, with new issues and each issue's first technical decision taken only with you. The goals never come true while the project lives: they keep both awake, waiting for work. After a restart of the machine, the first Claude Code session that starts resumes the release managers and planners that were running when it went down, and each release manager resumes the developer agents that were working and whose session died; live idle agents, agents waiting for you and parked issues are left alone.
+Neither is ever interrupted during a turn. As soon as a turn is over, the plugin's monitor wakes them when a message waits in their inbox, and the release manager also when an agent changes state or ends, a question is answered, an issue becomes workable or the default branch's CI is green again. The planner is not woken while its last message waits for your answer. After a restart of the machine, the first Claude Code session that starts resumes the release managers and planners that were running when it went down, and each release manager resumes the developer agents that were working and whose session died; live idle agents, agents waiting for you and parked issues are left alone.
 
 The release manager works through your GitHub issues on its own:
 
@@ -19,7 +19,7 @@ The release manager works through your GitHub issues on its own:
 4. Answers the agent's questions only with what is written (issue comments, repository rules, product docs).
 5. When the agent opens its pull request, tests it in the main checkout (the browser for what a person sees, the right tool otherwise), merges it when it passes, or sends the bugs back. After 3 failed rounds it asks you. A pull request you keep for yourself goes to `[ready]` instead: the planner tells you it is your turn and counts it in its 🙋 until you test or merge it.
 6. Watches the CI of the default branch after every merge. When it turns red it opens an urgent bug issue and merges nothing else until it is green again, except the fix.
-7. Starts over. With nothing left to do it has the planner tell you once, and looks again every 15 minutes.
+7. Starts over. With nothing left to do it has the planner tell you once, and starts again as soon as an issue is workable.
 
 It also opens issues, for you or for whoever the repository's `.md` files name; they wait in the backlog until you and the planner mark them ready.
 
@@ -37,7 +37,7 @@ Claude only makes the choices: which issue, what to answer, whether a test passe
 
 ## One thread at a time
 
-The release manager and the planner never interrupt each other, or another repository's planner: they leave messages in an inbox (one file per message, Maildir style, under `~/.local/share/release-manager/inbox/`), typed `question`, `unblocked` or `info`, and the receiver's name shows `📨<n>`. The release manager reads its inbox each time it wakes; the planner only when you ask or when a topic is over, so a message never pulls a discussion off course. Only the developer agents talk to the release manager directly.
+The release manager and the planner never interrupt each other, or another repository's planner: they leave messages in an inbox (one file per message, Maildir style, under `~/.local/share/release-manager/inbox/`), typed `question`, `unblocked` or `info`, and the receiver's name shows `📨<n>`. Both read it as soon as their turn is over; the planner waits while its last message waits for your answer, so a message never pulls a discussion off course. Only the developer agents talk to the release manager directly.
 
 ## It never decides how
 
@@ -51,7 +51,7 @@ Engineering manager, delivery manager, QA and release manager, yes; tech lead an
 
 Needs:
 
-- Claude Code with background sessions (`claude --bg`, `claude agents`), `/goal` and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
+- Claude Code with background sessions (`claude --bg`, `claude agents`), plugin monitors (`monitors/monitors.json`) and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
 - [`gh`](https://cli.github.com), logged in, and `jq`.
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
 - TitTieS, optional, for the planner's voice (without it, nothing is said out loud).

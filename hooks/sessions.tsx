@@ -1,22 +1,23 @@
 import type { ApiContentBlock, EngineInterface, Register } from 'claude-code'
 
-// A session's look and goal, set without typing into it.
+// A session's look, set without typing into it.
 //
 // color.sh, rename.sh and role.sh write what a session should be in its own folder,
 // <state>/release-manager/sessions/<session id>/ (see skills/run/scripts/session-dir.sh). This module
-// runs inside every session: while its session is between turns it applies what changed with /color,
-// /rename and /goal through the engine, so nothing reaches the prompt box where the user may be
+// runs inside every session: while its session is between turns it applies what changed with /color
+// and /rename through the engine, so nothing reaches the prompt box where the user may be
 // writing. A command run mid-turn would wait in the queue until the turn ends, so the module waits
-// itself. The rows /color and /rename leave in the conversation are emptied and hidden; /goal's stay.
+// itself. The rows /color and /rename leave in the conversation are emptied and hidden.
 //
 // A session with a role (the release manager or the planner) also writes `alive`, the time in seconds,
 // every minute: hooks/revive.sh resumes after a restart the ones that were alive when the machine went down.
+// It writes `idle` too, the time its last turn ended, empty during a turn: hooks/session-events.sh wakes
+// the session only between turns.
 // In the planner, every 5 minutes, hooks/remind.sh says out loud what has waited 30 minutes for the user.
 
 const WANTS = [
-  { file: 'color', command: 'color', isHidden: true },
-  { file: 'name', command: 'rename', isHidden: true },
-  { file: 'goal', command: 'goal', isHidden: false },
+  { file: 'color', command: 'color' },
+  { file: 'name', command: 'rename' },
 ] as const
 
 const TICK_MS = 2000
@@ -76,6 +77,19 @@ async function remind($: EngineInterface, folder: string): Promise<void> {
   }
 }
 
+// Records whether the model of a session with a role is stopped, and since when.
+async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
+  try {
+    const folder = await folderOf($)
+    if ((await readWant($, `${folder}/role`)) === '') {
+      return
+    }
+    await $.fs.write(`${folder}/idle`, isRunning ? '' : `${Math.floor((await $.clock.now()) / 1000)}\n`)
+  } catch (err) {
+    $.ui.log(`idle: ${String(err)}`)
+  }
+}
+
 async function tick($: EngineInterface): Promise<void> {
   if (isSyncing) {
     return
@@ -104,12 +118,15 @@ async function tick($: EngineInterface): Promise<void> {
         continue
       }
       applied.set(want.file, value)
-      if (want.isHidden) {
-        expected.push({ command: want.command, args: value, until: now + EXPECT_MS })
-        hidden.push(`${want.command} ${value}`)
-        hidden.splice(0, Math.max(0, hidden.length - 50))
-      }
+      expected.push({ command: want.command, args: value, until: now + EXPECT_MS })
+      hidden.push(`${want.command} ${value}`)
+      hidden.splice(0, Math.max(0, hidden.length - 50))
       await runWant($, want.command, value)
+    }
+    // A session started when the roles still had a goal loses it, once.
+    if (!isBusy && (await readWant($, `${folder}/goal`)) !== '') {
+      await $.fs.write(`${folder}/goal`, '')
+      await runWant($, 'goal', 'clear')
     }
   } catch (err) {
     $.ui.log(`sessions: ${String(err)}`)
@@ -139,15 +156,19 @@ function emptied(content: readonly ApiContentBlock[]): ApiContentBlock[] {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    if (!isBusy) {
+      await markTurn($, false)
+    }
     $.clock.every(TICK_MS, () => {
       void tick($)
     })
     return result
   })
 
-  on('turn.start', ($, e, next) => {
+  on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       isBusy = true
+      await markTurn($, true)
     }
     return next(e)
   })
@@ -156,6 +177,7 @@ export const register: Register = on => {
     const result = await next(e)
     if (e.agentId === undefined) {
       isBusy = false
+      await markTurn($, false)
       void tick($)
     }
     return result

@@ -48,8 +48,28 @@ told_open() {
 	echo "$told"
 }
 
+# ready_open: pull requests in [ready] the user has not tested or merged yet (set-state.sh, ready-sweep.sh).
+ready_open() {
+	ready=0
+	for record in "$counters_dir/waiting"/ready-*; do
+		[ -f "$record" ] || continue
+		case "$record" in *.called | *.tested) continue ;; esac
+		if [ ! -f "$record.tested" ]; then ready=$((ready + 1)); fi
+	done
+	echo "$ready"
+}
+
+# ready_forget <branch>: the branch's pull request no longer waits for the user.
+ready_forget() {
+	for record in "$counters_dir/waiting"/ready-*; do
+		[ -f "$record" ] || continue
+		case "$record" in *.called | *.tested) continue ;; esac
+		if [ "$(sed -n 3p "$record")" = "$1" ]; then rm -f "$record" "$record.called" "$record.tested"; fi
+	done
+}
+
 # waiting_user: everything only the user can move on, the planner's 🙋.
-waiting_user() { echo $(($(questions_open) + $(told_open))); }
+waiting_user() { echo $(($(questions_open) + $(told_open) + $(ready_open))); }
 
 # questions_list: their numbers, one per line (nothing when GitHub cannot be read).
 questions_list() {

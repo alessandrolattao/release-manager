@@ -50,10 +50,10 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 ## What the hooks show on their own
 
 - **Your name**: `release manager · <repo> 🚀<n>`, the count of today's merges, kept by `merge.sh`.
-- **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]`, the default branch's CI is red), yellow if work is under way (an agent of yours is running, you are testing a pull request, the default branch's CI is running), green if there is nothing to do. You do nothing for it.
+- **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]` or `[ready]`, the default branch's CI is red), yellow if work is under way (an agent of yours is running, you are testing a pull request, the default branch's CI is running), green if there is nothing to do. You do nothing for it.
 - **Agent colors**: cyan, set when they start. The planner is purple.
 - Names and colors change between turns, without typing anything into the session or leaving rows in its conversation: one asked mid-turn shows when that session's turn ends.
-- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user (a hook moves it back to `[dev]` as soon as the agent edits or commits again, wherever the user answered). A merged agent is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
+- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user (a hook moves it back to `[dev]` as soon as the agent edits or commits again, wherever the user answered), `[ready]` pull request ready, the user tests and/or merges it, `[done]` the user merged it. An agent you merge is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
 - After a rename the old name no longer reaches a session: message agents and the planner by their current name (`claude agents --json` or ListAgents). Agents find you the same way, by the start of your name.
 
 ## Asking the user
@@ -97,7 +97,7 @@ Read it whole: `gh issue view <n> --comments`. If the technical decisions are mi
 
 ### 2. Capacity
 
-Run `clessidra` (at most once a minute). Start a new agent only when fewer than 2 agents of this repository are working and both the `5h` and `7d` lines say `lasts until reset` or `too early to estimate`. When a line says `runs out in`, start nothing new and let the running agents finish. When `clessidra` fails, run at most 1 agent and do not call the user for it.
+Run `clessidra` (at most once a minute). Start a new agent only when fewer than 2 agents of this repository are working (`[ready]` and `[done]` agents are not) and both the `5h` and `7d` lines say `lasts until reset` or `too early to estimate`. When a line says `runs out in`, start nothing new and let the running agents finish. When `clessidra` fails, run at most 1 agent and do not call the user for it.
 
 ### 3. Start the agent
 
@@ -121,6 +121,7 @@ One test at a time. When an agent sends `PR ready` or `fixed`:
 2. Test the way the repository says (its testing skills): every acceptance criterion of the issue, in the browser for what a person sees, with the right tool otherwise (tests, API calls, commands). Stop whatever you started.
 3. **Passed**, with the PR's CI green and its review handled: `sh "${CLAUDE_SKILL_DIR}/scripts/merge.sh" <pr>` goes back to the default branch, merges (merge commit), and removes the agent: its session, its worktree and its local branch. Write on the PR what you tried. Then back to step 1.
 4. **Failed**: `sh "${CLAUDE_SKILL_DIR}/scripts/qa-fail.sh" <branch>` goes back to the default branch and moves the agent to `[fix]`; then send the agent, by its new name, what fails with the steps to see it. Test again on `fixed`. After 3 failed rounds on the same issue, ask the user.
+5. **The user keeps the pull request** (the issue or the user says they test and/or merge it themselves): do not merge it. `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> ready` moves the agent to `[ready]` and is your message to the planner: it tells the user `PR #<n> ready, your turn` and keeps it in its `🙋` until the user tests or merges it. After the user's merge the tag becomes `[done]` by itself (`wait.sh` and the planner look). If the user finds bugs, `set-state.sh <branch> fix` and send them to the agent.
 
 **After every merge, the CI of the default branch**: run `sh "${CLAUDE_SKILL_DIR}/scripts/main-ci.sh" --wait` with the Bash tool in the background; it waits for every workflow run of the merged commit and ends with `GREEN` or `RED`. On `RED` it has already opened a bug issue (Urgent, in the backlog, so the planner sees it) and recorded the broken branch: from then on `merge.sh` refuses every merge except the pull request that closes that issue, and your color is orange. Go on developing and testing what you can, merge nothing else, and run `main-ci.sh` (without `--wait`) each time you wake to see whether it is green again. A broken default branch is never left without that issue.
 

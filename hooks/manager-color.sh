@@ -1,10 +1,10 @@
 #!/bin/sh
 # Colors the release manager by its state when its turn ends (Stop), without the model (a color can only
 # change between turns), the first that holds:
-#   orange  it needs the user: an issue waits on a question, an agent is stuck in [ask], the default
-#           branch's CI is red;
-#   yellow  work is under way: one of its agents is running, it is testing a pull request (the main
-#           checkout is detached), the default branch's CI is running;
+#   orange  it needs the user: an issue waits on a question, an agent is stuck in [ask] or waits in
+#           [ready], the default branch's CI is red;
+#   yellow  work is under way: one of its agents is running ([done] ones are over), it is testing a
+#           pull request (the main checkout is detached), the default branch's CI is running;
 #   green   nothing to do.
 # Only for a session whose name starts with "release manager"; every other session exits at once.
 #   manager-color.sh   (hook payload on stdin)
@@ -20,8 +20,8 @@ root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$cwd"
 # running sessions under .claude/worktrees.
 agents=$(claude agents --json --cwd "$root" 2>/dev/null |
 	jq -c --arg w "$root/.claude/worktrees/" '[.[] | select(.cwd | startswith($w)) | (.name // "")]' 2>/dev/null || echo '[]')
-asking=$(printf '%s' "$agents" | jq '[.[] | select(startswith("[ask]"))] | length' 2>/dev/null || echo 0)
-running=$(printf '%s' "$agents" | jq 'length' 2>/dev/null || echo 0)
+asking=$(printf '%s' "$agents" | jq '[.[] | select(startswith("[ask]") or startswith("[ready]"))] | length' 2>/dev/null || echo 0)
+running=$(printf '%s' "$agents" | jq '[.[] | select(startswith("[done]") | not)] | length' 2>/dev/null || echo 0)
 questions=$(cd "$cwd" && gh issue list --label question --assignee @me --state open --limit 200 --json number --jq length 2>/dev/null || echo 0)
 red_main="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/$(git -C "$cwd" remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#^.*github\.com[:/]##' | tr '/' '_')/main-red"
 

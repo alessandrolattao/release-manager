@@ -36,11 +36,14 @@ while [ "$(date +%s)" -lt "$end" ]; do
 		echo "a message reached your inbox: read it with inbox.sh read manager"
 		exit 0
 	fi
-	# Every 2 minutes, see whether the user answered a question.
+	# Every 2 minutes, see whether the user answered a question or merged a pull request in [ready].
 	checks=$((checks + 1))
-	if [ $((checks % 4)) -eq 0 ] && [ "$(questions_open)" -lt "$asked" ]; then
-		echo "a question was answered: look at the queue again"
-		exit 0
+	if [ $((checks % 4)) -eq 0 ]; then
+		sh "$here/ready-sweep.sh" >/dev/null 2>&1 || true
+		if [ "$(questions_open)" -lt "$asked" ]; then
+			echo "a question was answered: look at the queue again"
+			exit 0
+		fi
 	fi
 done
 echo "no change in $minutes minutes"

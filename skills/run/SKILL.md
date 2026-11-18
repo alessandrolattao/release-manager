@@ -53,7 +53,7 @@ It renames itself `release manager · <repo>` (the line above), with `🚀<n>` f
 - **Your color**: when your turn ends, orange if you need the user (an issue waits on a question, an agent is in `[ask]`, the default branch's CI is red), yellow if work is under way (an agent of yours is running, you are testing a pull request, the default branch's CI is running), green if there is nothing to do. You do nothing for it.
 - **Agent colors**: cyan, set when they start. The planner is purple.
 - Names and colors change between turns, without typing anything into the session or leaving rows in its conversation: one asked mid-turn shows when that session's turn ends.
-- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user. A merged agent is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
+- **Agent names** read like a board, `[<state>]<icons> <branch>`: `[dev]` developing, `[review]` pull request open (set by a hook when the agent opens it, and again after it pushes its fixes), `[test]` you are testing, `[fix]` fixing after a failed test, `[ask]` waiting on the user (a hook moves it back to `[dev]` as soon as the agent edits or commits again, wherever the user answered). A merged agent is removed, session and worktree. Icons: 🔥 Urgent, 🐛 Bug, ✨ Feature, 🔧 Task. The scripts below set the other states.
 - After a rename the old name no longer reaches a session: message agents and the planner by their current name (`claude agents --json` or ListAgents). Agents find you the same way, by the start of your name.
 
 ## Asking the user
@@ -68,7 +68,7 @@ EOF
 
 It posts the comment, adds `question`, moves the issue's agent to `[ask]`, leaves the details in the planner's inbox under that line, and raises its `🙋` counter. The line says who asks and what for, in the user's language: "Il release manager di my-app ha una domanda sulla issue 42: quale tabella legge il nuovo endpoint." Leave that issue and go on with the others.
 
-The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided.
+The user answers with the planner, which writes the decisions on the issue, removes `question` and leaves you an `unblocked` message in your inbox. An issue comes back to the queue when `question` is gone (`wait.sh` notices it too); when its agent goes back to work, `sh "${CLAUDE_SKILL_DIR}/scripts/set-state.sh" <branch> dev` and tell the agent what was decided. When the user answers the agent directly in its own chat, the agent goes back to `[dev]` by itself and tells the planner what was decided; the planner then writes it on the issue and removes `question`.
 
 ## The loop
 

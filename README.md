@@ -33,7 +33,7 @@ A technical analysis or an opinion you ask the planner for is its own work: it s
 
 ## The model chooses, the plugin does
 
-Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent and moves the board.
+Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, back from `[ask]` to `[dev]` when a hook sees it edit or commit again (wherever you answered it), and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent and moves the board.
 
 ## One thread at a time
 

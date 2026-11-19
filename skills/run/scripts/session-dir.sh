@@ -6,6 +6,10 @@
 
 sessions_dir="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/sessions"
 
+# waiting_in_chat <session-id>: true when a developer agent's last turn ended asking something
+# (hooks/agent-asks.sh) and no turn has started since (hooks/sessions.tsx empties `idle` when one does).
+waiting_in_chat() { [ -f "$sessions_dir/$1/asked" ] && [ -s "$sessions_dir/$1/idle" ]; }
+
 # want <session-id> <file> <value>: writes one file of a session's folder in one step, so the module
 # never reads half of it.
 want() {

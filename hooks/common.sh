@@ -27,6 +27,27 @@ session_name() {
 	printf '%s' "$name"
 }
 
+# agent_issue prints the issue of this session when it is a developer agent: it runs in the worktree of a
+# branch "<issue>-<slug>" and its name carries a state tag. Nothing for any other session. The caller has
+# sourced session-dir.sh: the last name asked comes first, since a rename shows only when the turn ends.
+agent_issue() {
+	case "$cwd" in
+	*/.claude/worktrees/*) ;;
+	*) return 0 ;;
+	esac
+	branch=${cwd##*/.claude/worktrees/}
+	branch=${branch%%/*}
+	number=${branch%%-*}
+	case "$number" in
+	"" | *[!0-9]*) return 0 ;;
+	esac
+	tag=$(cat "$sessions_dir/$sid/name" 2>/dev/null || true)
+	[ -n "$tag" ] || tag=$(session_name)
+	case "$tag" in
+	"["*) printf '%s' "$number" ;;
+	esac
+}
+
 # role_is <name prefix> <cache tag>: true when this session's name starts with the prefix.
 # Only a yes is cached: a session can start under another name and rename itself a few seconds
 # later (the skills do), so until it matches, the name is read again at every event.

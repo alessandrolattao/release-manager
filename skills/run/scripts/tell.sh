@@ -56,12 +56,27 @@ body=$(cat)
 	exit 2
 }
 
-# Who is writing: the role of this session, read from its name.
+# Who is writing: this very session, never another one in the same folder (the release manager, the planner
+# and the consultants all run in the main checkout). Its recorded role first, then its name.
+# shellcheck source=skills/run/scripts/session-dir.sh
+. "$here/session-dir.sh"
 from="session"
-name=$(claude agents --json 2>/dev/null | jq -r --arg c "$PWD" '[.[] | select(.cwd == $c) | .name][0] // empty' 2>/dev/null || true)
-case "$name" in
-"planner"*) from="planner · $repo_short" ;;
-"release manager"*) from="release manager · $repo_short" ;;
+me=${CLAUDE_CODE_SESSION_ID:-}
+case "$(cat "$sessions_dir/$me/role" 2>/dev/null || true)" in
+manager) from="release manager · $repo_short" ;;
+planner) from="planner · $repo_short" ;;
+*)
+	name=$(claude agents --json 2>/dev/null | jq -r --arg s "$me" '[.[] | select(.sessionId == $s) | .name][0] // empty' 2>/dev/null || true)
+	case "$name" in
+	"planner"*) from="planner · $repo_short" ;;
+	"release manager"*) from="release manager · $repo_short" ;;
+	"[plan]"*) from="consultant · $repo_short" ;;
+	"["*)
+		branch=${name#* }
+		from="agent of #${branch%%-*}"
+		;;
+	esac
+	;;
 esac
 [ -n "$sender" ] && from=$sender
 
@@ -74,6 +89,27 @@ file="$(date +%Y%m%dT%H%M%S)-$$-$kind.md"
 } >"$box/tmp/$file"
 mv "$box/tmp/$file" "$box/new/$file"
 echo "message left for the $to of $target ($kind)"
+
+# receiver_alive: true when a session with that role works on the target repository, on any account: its
+# heartbeat (hooks/sessions.tsx, every minute) is at most 3 minutes old.
+receiver_alive() {
+	now=$(date +%s)
+	wanted=$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')
+	for folder in "$sessions_dir"/*/; do
+		[ "$(cat "${folder}role" 2>/dev/null || true)" = "$to" ] || continue
+		at=$(cat "${folder}alive" 2>/dev/null || true)
+		case "$at" in "" | *[!0-9]*) continue ;; esac
+		[ $((now - at)) -le 180 ] || continue
+		dir=$(cat "${folder}cwd" 2>/dev/null || true)
+		[ -d "$dir" ] || continue
+		repo=$(git -C "$dir" remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#^.*github\.com[:/]##' | tr '[:upper:]' '[:lower:]' || true)
+		[ "$repo" != "$wanted" ] || return 0
+	done
+	return 1
+}
+if ! receiver_alive; then
+	echo "NOT READ YET: no $to of $target is running, the message waits in its inbox until one starts. If it cannot wait, tell the user."
+fi
 
 if [ "$to" = planner ] && [ "$kind" = question ] && [ "$recorded" = no ]; then
 	waiting="${XDG_STATE_HOME:-$HOME/.local/state}/release-manager/$(printf '%s' "$target" | tr '/' '_')/waiting"

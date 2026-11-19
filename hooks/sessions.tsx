@@ -77,11 +77,12 @@ async function remind($: EngineInterface, folder: string): Promise<void> {
   }
 }
 
-// Records whether the model of a session with a role is stopped, and since when.
+// Records whether the model of a session with a role, or of a developer agent, is stopped, and since when.
 async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
   try {
     const folder = await folderOf($)
-    if ((await readWant($, `${folder}/role`)) === '') {
+    const isAgent = (await $.session.cwd()).includes('/.claude/worktrees/')
+    if (!isAgent && (await readWant($, `${folder}/role`)) === '') {
       return
     }
     await $.fs.write(`${folder}/idle`, isRunning ? '' : `${Math.floor((await $.clock.now()) / 1000)}\n`)

@@ -2,17 +2,19 @@
 # Leaves a message in the inbox of a planner or a release manager, instead of interrupting it:
 # it reads its inbox when its current topic is over. The message is a file, written atomically
 # (Maildir: tmp/ then new/), and the receiver's 📨 counter goes up.
-#   tell.sh <planner|manager> <question|unblocked|info> [--to-repo owner/name] [--from "<sender>"] [--recorded] <<'EOF'
+#   tell.sh <planner|manager> <question|info> [--to-repo owner/name] [--from "<sender>"] [--recorded] <<'EOF'
 #   the message
 #   EOF
 # Without --to-repo the receiver is this repository's; with it, another repository's (planner to planner).
 # --from names the sender when it is not a role session, such as a Pulse check ("Pulse · monthly audit").
 # A question for the planner counts in its 🙋 until it is read, and its first line is said out loud if it
 # is still unread after 30 minutes (hooks/remind.sh). --recorded is for a caller that keeps its own record.
+# The issues hold what matters: between the release manager and the planner of one repository, a message
+# about an issue is one short pointer (the issue, one line, a link), and the details go on the issue first.
 set -eu
 
 to=${1:?planner or manager}
-kind=${2:?question, unblocked or info}
+kind=${2:?question or info}
 shift 2
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=skills/run/scripts/roles.sh
@@ -45,8 +47,14 @@ case "$to" in planner | manager) ;; *)
 	exit 2
 	;;
 esac
-case "$kind" in question | unblocked | info) ;; *)
-	echo "unknown kind '$kind': question, unblocked or info" >&2
+case "$kind" in
+question | info) ;;
+unblocked)
+	echo "there is no unblocked message: write the decision on the issue and remove question; the plugin wakes the release manager when a question is answered or new technical decisions land on an issue" >&2
+	exit 2
+	;;
+*)
+	echo "unknown kind '$kind': question or info" >&2
 	exit 2
 	;;
 esac
@@ -79,6 +87,15 @@ planner) from="planner · $repo_short" ;;
 	;;
 esac
 [ -n "$sender" ] && from=$sender
+
+# Between the release manager and the planner of this repository, a message about an issue only points at it.
+if [ -z "$sender" ] && [ "$target" = "$repo_full" ] && [ "$from" != session ] && printf '%s' "$body" | grep -q -E '#[0-9]+'; then
+	length=$(printf '%s' "$body" | wc -m | tr -d ' ')
+	if [ "$length" -gt 400 ]; then
+		echo "too long for a message about an issue ($length characters, at most 400): write the details on the issue as a comment, then send one line with the issue and the comment's link" >&2
+		exit 2
+	fi
+fi
 
 box=$(inbox_dir "$to" "$target")
 mkdir -p "$box/tmp" "$box/new" "$box/cur"

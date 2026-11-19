@@ -18,7 +18,7 @@ body=$(cat)
 }
 gh label list --limit 200 --json name --jq '.[].name' | grep -qx question ||
 	gh label create question --description "Waiting for an answer from the assignee" >/dev/null
-printf '%s\n' "$body" | gh issue comment "$issue" --body-file - >/dev/null
+link=$(printf '%s\n' "$body" | gh issue comment "$issue" --body-file -)
 gh issue edit "$issue" --add-label question >/dev/null
 echo "issue $issue: question asked"
 # When it asked and what for: if the question is still open 30 minutes later, the planner says this line
@@ -33,12 +33,10 @@ if [ -n "$branch" ]; then
 	sh "$here/set-state.sh" "$branch" ask
 fi
 
-# The planner is the one who talks to the user: its counter goes up, and the details go to its
-# inbox, to read when its current topic is over.
-{
-	printf 'Issue #%s needs the user: %s\n\n' "$issue" "$sentence"
-	printf '%s\n' "$body"
-} | sh "$here/tell.sh" planner question --recorded >/dev/null 2>&1 || true
+# The planner is the one who talks to the user: its counter goes up, and its inbox gets one line pointing
+# at the comment, which holds the details.
+printf 'Issue #%s needs the user: %s\n%s\n' "$issue" "$sentence" "$link" |
+	sh "$here/tell.sh" planner question --recorded >/dev/null 2>&1 || true
 planner=$(session_of "$planner_prefix")
 if [ -z "$planner" ]; then
 	echo "no planner running for $repo_short: the question waits on GitHub"

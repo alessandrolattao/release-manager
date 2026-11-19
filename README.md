@@ -37,7 +37,7 @@ Claude only makes the choices: which issue, what to answer, whether a test passe
 
 ## One thread at a time
 
-The release manager and the planner never interrupt each other, or another repository's planner: they leave messages in an inbox (one file per message, Maildir style, under `~/.local/share/release-manager/inbox/`), typed `question`, `unblocked` or `info`, and the receiver's name shows `📨<n>`. Both read it as soon as their turn is over; the planner waits while its last message waits for your answer, so a message never pulls a discussion off course. Only the developer agents talk to the release manager directly.
+The release manager and the planner never interrupt each other, or another repository's planner: they leave messages in an inbox (one file per message, Maildir style, under `~/.local/share/release-manager/inbox/`), typed `question` or `info`, and the receiver's name shows `📨<n>`. The issues hold what matters: decisions, questions and answers are written there, and a message about an issue is one line pointing at it. The user's standing rules ("up to 3 agents at once") live in one pinned issue per repository, which the planner keeps and every session reads at start and after a compaction. Both read it as soon as their turn is over; the planner waits while its last message waits for your answer, so a message never pulls a discussion off course. Only the developer agents talk to the release manager directly.
 
 ## It never decides how
 

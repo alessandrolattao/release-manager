@@ -34,6 +34,8 @@ fi
 
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}|$repo|g" \
 	-e "s|{{MANAGER}}|$manager|g" -e "s|{{WORKTREE}}|$worktree|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../agent-brief.md")
+# The user's standing rules travel with the brief (after a compaction a hook brings them back).
+brief=$(printf '%s\n\n%s\n' "$brief" "$(sh "$here/rules.sh" show --context 2>/dev/null || true)")
 
 # Same account as this session: keep CLAUDE_CONFIG_DIR, drop every other CLAUDE* variable so the
 # agent and its supervisor do not inherit this session's identity.

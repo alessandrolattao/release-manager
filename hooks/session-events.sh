@@ -4,7 +4,8 @@
 # turns, so a turn is never interrupted and the next piece of work starts as soon as the last one ends.
 #   - both: new messages in their inbox;
 #   - the release manager: an agent changed state, ended or waits for an answer in its own chat, a question
-#     was answered, an issue became workable, the default branch's CI is green again.
+#     was answered, an issue became workable, new technical decisions landed on an issue an agent is
+#     working on, the default branch's CI is green again.
 # The planner is not woken while its last message waits on the user's answer. Each thing is said once.
 # Claude Code starts this in every session of the plugin: any other session ends here within a minute,
 # since a running monitor makes the session look busy in `claude agents`.
@@ -106,6 +107,18 @@ look_github() {
 		[ -z "$fresh_issues" ] || note "workable issues: ${fresh_issues% }"
 		known=$list
 	fi
+	# New technical decisions on an issue one of the agents is working on: the planner sends no message for
+	# them, the issue is where they are. The first look only records what is there.
+	for n in $(printf '%s' "$seen" | jq -r '.[].name // empty' 2>/dev/null |
+		sed -n '/^\[\(done\|closed\)\]/d; s/^\[[a-z]*\][^ ]* \([0-9][0-9]*\)-.*/\1/p'); do
+		at=$(gh api --paginate "repos/$repo_full/issues/$n/comments?per_page=100" \
+			--jq '.[] | select(.body | startswith("## Technical decisions")) | .updated_at' 2>/dev/null | sort | tail -1)
+		[ -n "$at" ] || continue
+		mark="$counters_dir/decisions-$n"
+		if [ -f "$mark" ] && [ "$(cat "$mark")" != "$at" ]; then note "new technical decisions on #$n"; fi
+		mkdir -p "$counters_dir"
+		printf '%s\n' "$at" >"$mark"
+	done
 	if [ -f "$red_file" ] && sh "$scripts/main-ci.sh" 2>/dev/null | grep -q '^GREEN'; then
 		note "the default branch's CI is green again"
 	fi

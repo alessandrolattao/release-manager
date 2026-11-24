@@ -250,9 +250,10 @@ async function tick($: EngineInterface): Promise<void> {
     let status = await readStatus($, folder)
     if (tickNumber % ALIVE_EVERY_TICKS === 0) {
       await $.fs.write(`${folder}/alive`, `${now}\n`)
-      // Silent for 20 minutes while it should be working: stuck.
+      // An agent silent for 20 minutes while it should be working: stuck. Not a tech lead: waiting for the
+      // user or the team is its normal state, and a dead one turns red through the dispatcher.
       const idleSince = Number(await readText($, `${folder}/idle`))
-      if (!isBusy && status.state === 'working' && idleSince > 0 && now - idleSince > STUCK_AFTER_S && (status.busy_until ?? 0) < now) {
+      if (role !== 'tech-lead' && !isBusy && status.state === 'working' && idleSince > 0 && now - idleSince > STUCK_AFTER_S && (status.busy_until ?? 0) < now) {
         await setState($, folder, 'stuck', `ferma da ${age(idleSince, now)} senza aspettare niente`)
         status = await readStatus($, folder)
       }

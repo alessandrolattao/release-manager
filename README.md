@@ -26,7 +26,7 @@ Every session has the color of its state, in `claude agents` too:
 - **cyan**: working;
 - **purple**: waiting on another agent or on the main checkout;
 - **yellow**: waiting on you;
-- **red**: stuck (its session died, a turn failed, or it has been silent for 20 minutes with nothing to wait for);
+- **red**: stuck (its session died, a turn failed, or a developer, QA agent or spike has been silent for 20 minutes with nothing to wait for);
 - **no color**: done. It goes away soon after, with its worktree; its conversation stays (`claude --resume`).
 
 A color changes between turns: during a long turn the list shows the state of the turn before. The **board** beside a tech lead, a pane that opens by itself on a wide terminal or with `/team-board`, is always live: one row per agent with its color, where it works (its worktree or the main checkout), what it does and for how long, and under them the checkout lock, the queue, the default branch's CI and the capacity. A row copies its `claude attach` command.

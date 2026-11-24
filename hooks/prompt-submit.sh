@@ -1,11 +1,15 @@
 #!/bin/sh
-# UserPromptSubmit in a tech lead session: when the user comes back after a pause and another repository
-# left messages for this one's tech leads (tell.sh), one line of context says so. The messages themselves
-# never enter the conversation from here.
+# UserPromptSubmit in a team session: the user is writing to it, so it works with them, and whatever it
+# waited on is over (hooks/sessions.tsx would otherwise put the wait back when the turn ends).
+# In a tech lead, when the user comes back after a pause and another repository left messages for this
+# one's tech leads (tell.sh), one line of context says so. The messages never enter the conversation here.
 set -eu
 
 # shellcheck source=hooks/common.sh
 . "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
+case "$role" in tech-lead | dev | qa | spike) ;; *) exit 0 ;; esac
+state_set "$sid" working "con te"
+status_set "$sid" 'del(.resume_to)'
 [ "$role" = tech-lead ] || exit 0
 
 pause_minutes=15
@@ -13,7 +17,6 @@ last="$state_dir/$sid.last-prompt"
 now=$(date +%s)
 before=$(cat "$last" 2>/dev/null || echo 0)
 echo "$now" >"$last"
-state_set "$sid" working "con te"
 [ $((now - before)) -ge $((pause_minutes * 60)) ] || exit 0
 
 cd "$cwd"

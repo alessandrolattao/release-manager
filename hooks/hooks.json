@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/tech-lead-inbox.sh\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-submit.sh\"",
             "timeout": 15
           }
         ]

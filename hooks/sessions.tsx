@@ -230,7 +230,6 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
     rows.push({
       id: entry.name,
       label,
-      session: status.name ?? label,
       role: status.role,
       state: status.state ?? 'working',
       place: status.place ?? '',
@@ -268,18 +267,6 @@ async function openBoard($: EngineInterface): Promise<void> {
   await $.ui.open({ id: PANE, title: 'Team' })
 }
 
-// Opens an agent's session in this terminal, as picking it in the agent view does: /resume with its id
-// sends this session to the background and attaches the other one (← on an empty prompt comes back to
-// the agent view). When the engine refuses the command, its `claude attach` is copied instead.
-async function openSession($: EngineInterface, id: string, name: string): Promise<void> {
-  try {
-    await $.command.run({ command: 'resume', args: id })
-  } catch (err) {
-    $.ui.log(`resume ${id}: ${String(err)}`)
-    await $.ui.copy({ text: `claude attach "${name}"` })
-    $.ui.toast(`copied: claude attach "${name}"`)
-  }
-}
 
 async function tick($: EngineInterface): Promise<void> {
   if (isSyncing) {
@@ -409,7 +396,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const { Box, Text } = $.ui.resolve(e)
     const data: Board = await read($, board)
     const now = Math.floor((await $.clock.now()) / 1000)
     // The height is what the board uses: a group's title, then two or three lines per agent. What does not
@@ -452,9 +439,7 @@ export const register: Register = on => {
               return (
                 <Box key={row.id} flexDirection="column">
                   <Box flexDirection="row">
-                    <Button key={row.id} plain onPress={() => openSession($, row.id, row.session)}>
-                      <Text backgroundColor={look.bg} color={look.fg}> {row.label} </Text>
-                    </Button>
+                    <Text backgroundColor={look.bg} color={look.fg}> {row.label} </Text>
                     <Text dimColor>
                       {'  '}
                       {row.place ? `${row.place} · ` : ''}

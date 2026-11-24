@@ -4,8 +4,6 @@ export type BoardRow = {
   id: string
   // What the board shows: "tech lead", "tech lead admin-app", "dev #318", "qa #42", "spike flaky ci".
   label: string
-  // The session's own name, for `claude attach`.
-  session: string
   role: string
   state: string
   place: string

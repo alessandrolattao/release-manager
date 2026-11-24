@@ -30,7 +30,7 @@ Every session has the color of its state, in `claude agents` too:
 - **green**: idle, a tech lead with nothing in progress, waiting for work;
 - **no color**: done. It goes away soon after, with its worktree; its conversation stays (`claude --resume`).
 
-A color changes between turns: during a long turn the list shows the state of the turn before. The **board** beside a tech lead, a pane that opens by itself on a wide terminal or with `/team-board`, is always live: the agents grouped by state (waiting on you, working, waiting on others, stuck, idle), each name on the color of its state with where it works (its worktree or the main checkout) and for how long, what it does under it, and at the bottom the checkout lock, the developers, the queue, the default branch's CI and the capacity. Clicking a name opens that session in the same terminal (`/resume`); ← on an empty prompt goes back to the agent view.
+A color changes between turns: during a long turn the list shows the state of the turn before. The **board** beside a tech lead, a pane that opens by itself on a wide terminal or with `/team-board`, is always live: the agents grouped by state (waiting on you, working, waiting on others, stuck, idle), each name on the color of its state with where it works (its worktree or the main checkout) and for how long, what it does under it, and at the bottom the checkout lock, the developers, the queue, the default branch's CI and the capacity. To open an agent, pick it in the agent view (← on an empty prompt): the names are the same.
 
 ## Your rules
 

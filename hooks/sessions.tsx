@@ -202,56 +202,49 @@ async function dispatch($: EngineInterface, folder: string): Promise<void> {
   }
 }
 
-// The title window, the way an Atari ST dialog looked: an outer double frame, a dotted band, an inner
-// frame around a clean inside, and a drop shadow.
-// A row is a list of segments, each drawn with its own look.
-type Look = 'frame' | 'dots' | 'shadow' | 'label' | 'text' | 'strong'
+// The board's windows: dialogs of the DOS programs of the 80s and 90s (dialogRows), one for the title and
+// one for the summary, 2 columns in from each side of the pane. A row is a list of segments, each drawn
+// with its own look.
+type Look = 'frame' | 'shadow' | 'label' | 'text' | 'strong'
 type Segment = { text: string; look: Look }
 type Row = Segment[]
 
 const LOOKS: Record<Look, { color?: string; dimColor?: boolean; bold?: boolean }> = {
   frame: { bold: true },
-  dots: { color: 'gray', dimColor: true },
   shadow: { color: 'gray' },
   label: { dimColor: true },
   text: {},
   strong: { bold: true },
 }
+const SIDE = 2
 
 const width = (row: Row) => row.reduce((n, segment) => n + [...segment.text].length, 0)
 
-// windowRows <inside width> <left margin> <rows of the inside>: the rows of one window, 7 columns wider
-// than its inside (frames, band, shadow). Each inside row is padded with spaces to the inside width.
-function windowRows(inside: number, left: number, content: Row[]): Row[] {
-  const margin: Segment = { text: ' '.repeat(left), look: 'text' }
-  const across = inside + 4
-  const top: Row = [margin, { text: `╔${'═'.repeat(across)}╗`, look: 'frame' }]
-  const side = (row: Row): Row => [margin, { text: '║', look: 'frame' }, ...row, { text: '║', look: 'frame' }, { text: '▓', look: 'shadow' }]
-  const dotted = side([{ text: '░'.repeat(across), look: 'dots' }])
-  const framed = (open: string, line: Row, close: string): Row =>
-    side([{ text: '░', look: 'dots' }, { text: open, look: 'frame' }, ...line, { text: close, look: 'frame' }, { text: '░', look: 'dots' }])
-  return [
-    top,
-    dotted,
-    framed('┌', [{ text: '─'.repeat(inside), look: 'frame' }], '┐'),
-    ...content.map(row => framed('│', [...row, { text: ' '.repeat(Math.max(0, inside - width(row))), look: 'text' }], '│')),
-    framed('└', [{ text: '─'.repeat(inside), look: 'frame' }], '┘'),
-    dotted,
-    [margin, { text: `╚${'═'.repeat(across)}╝`, look: 'frame' }, { text: '▓', look: 'shadow' }],
-    [margin, { text: ' ', look: 'text' }, { text: '▓'.repeat(across + 2), look: 'shadow' }],
-  ]
-}
-
-// The title: the project's name, centered in a window centered in the pane. Null when the pane is too narrow.
+// The title: a dialog titled TEAM with the project's name centered in a thin inner frame. Null when the
+// pane is too narrow.
 function titleRows(name: string, columns: number): Row[] | null {
-  const inside = Math.min(columns - 7, Math.max(name.length + 8, 20))
-  if (inside < name.length + 2) {
+  const inside = columns - 5 - 2 * SIDE
+  const box = inside - 2
+  if (box < name.length) {
     return null
   }
-  const pad = Math.floor((inside - name.length) / 2)
-  return windowRows(inside, Math.max(0, Math.floor((columns - inside - 7) / 2)), [
-    [{ text: ' '.repeat(pad), look: 'text' }, { text: name, look: 'strong' }],
-  ])
+  const pad = Math.floor((box - name.length) / 2)
+  return dialogRows(
+    inside,
+    SIDE,
+    [
+      [{ text: `┌${'─'.repeat(box)}┐`, look: 'frame' }],
+      [
+        { text: '│', look: 'frame' },
+        { text: ' '.repeat(pad), look: 'text' },
+        { text: name, look: 'strong' },
+        { text: ' '.repeat(box - pad - name.length), look: 'text' },
+        { text: '│', look: 'frame' },
+      ],
+      [{ text: `└${'─'.repeat(box)}┘`, look: 'frame' }],
+    ],
+    'TEAM',
+  )
 }
 
 // wrap <text> <width>: the text in lines of at most that many characters, at spaces when it can.
@@ -313,8 +306,7 @@ function dialogRows(inside: number, left: number, content: Row[], title: string)
 // The summary: a dialog across the pane with 2 columns of room on each side and an empty row under it, one
 // row per item, long values wrapped inside it, never cut. Null when the pane is too narrow.
 function summaryRows(items: [string, string][], columns: number): Row[] | null {
-  const side = 2
-  const inside = columns - 5 - 2 * side
+  const inside = columns - 5 - 2 * SIDE
   const room = inside - 12
   if (room < 8) {
     return null
@@ -328,7 +320,7 @@ function summaryRows(items: [string, string][], columns: number): Row[] | null {
       ])
     })
   }
-  return dialogRows(inside, side, content, 'SUMMARY')
+  return dialogRows(inside, SIDE, content, 'SUMMARY')
 }
 
 function age(since: number, now: number): string {

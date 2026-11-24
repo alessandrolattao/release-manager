@@ -44,13 +44,16 @@ test('the board groups the agents by state, names on the color of their state', 
   expect((await ui.find({ type: 'Text', text: /tech lead api/ }))?.props.backgroundColor).toBe('green')
   expect((await ui.find({ type: 'Text', text: /checkout · waiting/ }))?.text).toContain('checkout · waiting 2m')
   expect((await ui.find({ type: 'Text', text: /idle 2m/ }))?.text).toContain('idle 2m')
-  expect((await ui.find({ type: 'Text', text: /║ +equokar\.com +║/ }))?.text).toMatch(/^░+║ +equokar\.com +║▓░+$/)
-  // As wide as the pane's body (48 here), the window centered in it.
-  const titleLine = (await ui.find({ type: 'Text', text: /║ +equokar\.com +║/ }))?.text ?? ''
-  expect([...titleLine].length).toBe(48)
-  const [, before = '', after = ''] = titleLine.match(/^(░*)║.*║▓(░*)$/) ?? []
-  expect(Math.abs(before.length - after.length)).toBeLessThanOrEqual(1)
-  expect((await ui.find({ type: 'Text', text: /^SUMMARY$/ }))?.text).toBe('SUMMARY')
-  expect((await ui.find({ type: 'Text', text: /^capacity/ }))?.text).toContain('ok')
+  // The title: the name inside the inner frame, the dotted band around it, centered in the 48 columns.
+  const titleLine = (await ui.find({ type: 'Text', text: /│ +equokar\.com +│/ }))?.text ?? ''
+  expect(titleLine).toMatch(/^ *║░│ +equokar\.com +│░║▓$/)
+  const before = titleLine.length - titleLine.trimStart().length
+  const after = 48 - [...titleLine].length
+  expect(Math.abs(before - after)).toBeLessThanOrEqual(1)
+  // The summary: SUMMARY in the top border of a window as wide as the pane, a row per item.
+  expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^╔═+ SUMMARY ═+╗$/)
+  const capacity = (await ui.find({ type: 'Text', text: /capacity/ }))?.text ?? ''
+  expect(capacity).toMatch(/^║ capacity +ok +║▓$/)
+  expect([...capacity].length).toBe(48)
   await ui.unmount()
 })

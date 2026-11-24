@@ -202,31 +202,128 @@ async function dispatch($: EngineInterface, folder: string): Promise<void> {
   }
 }
 
-// The board's title: the project's name in a window with a double frame and a drop shadow, on a dithered
-// background as wide as the pane, the way an Atari ST dialog sat on its desktop. Each line is split in its
-// parts so each gets its own look: background, frame and name, shadow.
-type TitleLine = { left: string; frame: string; shadow: string; right: string }
+// The title window, the way an Atari ST dialog looked: an outer double frame, a dotted band, an inner
+// frame around a clean inside, and a drop shadow.
+// A row is a list of segments, each drawn with its own look.
+type Look = 'frame' | 'dots' | 'shadow' | 'label' | 'text' | 'strong'
+type Segment = { text: string; look: Look }
+type Row = Segment[]
 
-function titleLines(name: string, columns: number): TitleLine[] | null {
-  const inner = Math.min(columns - 6, Math.max(name.length + 12, 24))
-  if (inner < name.length + 2) {
+const LOOKS: Record<Look, { color?: string; dimColor?: boolean; bold?: boolean }> = {
+  frame: { bold: true },
+  dots: { color: 'gray', dimColor: true },
+  shadow: { color: 'gray' },
+  label: { dimColor: true },
+  text: {},
+  strong: { bold: true },
+}
+
+const width = (row: Row) => row.reduce((n, segment) => n + [...segment.text].length, 0)
+
+// windowRows <inside width> <left margin> <rows of the inside>: the rows of one window, 7 columns wider
+// than its inside (frames, band, shadow). Each inside row is padded with spaces to the inside width.
+function windowRows(inside: number, left: number, content: Row[]): Row[] {
+  const margin: Segment = { text: ' '.repeat(left), look: 'text' }
+  const across = inside + 4
+  const top: Row = [margin, { text: `╔${'═'.repeat(across)}╗`, look: 'frame' }]
+  const side = (row: Row): Row => [margin, { text: '║', look: 'frame' }, ...row, { text: '║', look: 'frame' }, { text: '▓', look: 'shadow' }]
+  const dotted = side([{ text: '░'.repeat(across), look: 'dots' }])
+  const framed = (open: string, line: Row, close: string): Row =>
+    side([{ text: '░', look: 'dots' }, { text: open, look: 'frame' }, ...line, { text: close, look: 'frame' }, { text: '░', look: 'dots' }])
+  return [
+    top,
+    dotted,
+    framed('┌', [{ text: '─'.repeat(inside), look: 'frame' }], '┐'),
+    ...content.map(row => framed('│', [...row, { text: ' '.repeat(Math.max(0, inside - width(row))), look: 'text' }], '│')),
+    framed('└', [{ text: '─'.repeat(inside), look: 'frame' }], '┘'),
+    dotted,
+    [margin, { text: `╚${'═'.repeat(across)}╝`, look: 'frame' }, { text: '▓', look: 'shadow' }],
+    [margin, { text: ' ', look: 'text' }, { text: '▓'.repeat(across + 2), look: 'shadow' }],
+  ]
+}
+
+// The title: the project's name, centered in a window centered in the pane. Null when the pane is too narrow.
+function titleRows(name: string, columns: number): Row[] | null {
+  const inside = Math.min(columns - 7, Math.max(name.length + 8, 20))
+  if (inside < name.length + 2) {
     return null
   }
-  const left = Math.max(1, Math.floor((columns - inner - 3) / 2))
-  const right = Math.max(0, columns - left - inner - 3)
-  const pad = Math.floor((inner - name.length) / 2)
-  const bg = (n: number) => '░'.repeat(n)
-  const empty = { left: bg(left), frame: `║${' '.repeat(inner)}║`, shadow: '▓', right: bg(right) }
+  const pad = Math.floor((inside - name.length) / 2)
+  return windowRows(inside, Math.max(0, Math.floor((columns - inside - 7) / 2)), [
+    [{ text: ' '.repeat(pad), look: 'text' }, { text: name, look: 'strong' }],
+  ])
+}
+
+// wrap <text> <width>: the text in lines of at most that many characters, at spaces when it can.
+function wrap(text: string, max: number): string[] {
+  const lines: string[] = []
+  let line = ''
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    let rest = word
+    while ([...rest].length > max) {
+      if (line !== '') {
+        lines.push(line)
+        line = ''
+      }
+      lines.push(rest.slice(0, max))
+      rest = rest.slice(max)
+    }
+    if (line === '') {
+      line = rest
+    } else if ([...line].length + 1 + [...rest].length <= max) {
+      line = `${line} ${rest}`
+    } else {
+      lines.push(line)
+      line = rest
+    }
+  }
+  lines.push(line)
+  return lines
+}
+
+// dialogRows <inside width> <rows> <title>: a dialog of the DOS programs of the 80s and 90s, one double frame
+// with its title centered in the top border, a clean inside with a space of margin, and a drop shadow;
+// 5 columns wider than its inside.
+function dialogRows(inside: number, content: Row[], title: string): Row[] {
+  const across = inside + 2
+  const before = Math.max(1, Math.floor((across - title.length - 2) / 2))
+  const after = Math.max(1, across - title.length - 2 - before)
   return [
-    { left: bg(columns), frame: '', shadow: '', right: '' },
-    { left: bg(left), frame: `╔${'═'.repeat(inner)}╗`, shadow: '', right: bg(right + 1) },
-    empty,
-    { left: bg(left), frame: `║${' '.repeat(pad)}${name}${' '.repeat(inner - pad - name.length)}║`, shadow: '▓', right: bg(right) },
-    empty,
-    { left: bg(left), frame: `╚${'═'.repeat(inner)}╝`, shadow: '▓', right: bg(right) },
-    { left: bg(left + 1), frame: '', shadow: '▓'.repeat(inner + 2), right: bg(right) },
-    { left: bg(columns), frame: '', shadow: '', right: '' },
+    [
+      { text: `╔${'═'.repeat(before)} `, look: 'frame' },
+      { text: title, look: 'strong' },
+      { text: ` ${'═'.repeat(after)}╗`, look: 'frame' },
+    ],
+    ...content.map((row): Row => [
+      { text: '║ ', look: 'frame' },
+      ...row,
+      { text: ' '.repeat(Math.max(0, inside - width(row))), look: 'text' },
+      { text: ' ║', look: 'frame' },
+      { text: '▓', look: 'shadow' },
+    ]),
+    [{ text: `╚${'═'.repeat(across)}╝`, look: 'frame' }, { text: '▓', look: 'shadow' }],
+    [{ text: ' ', look: 'text' }, { text: '▓'.repeat(across + 2), look: 'shadow' }],
   ]
+}
+
+// The summary: a dialog as wide as the pane, one row per item, long values wrapped inside it, never cut.
+// Null when the pane is too narrow.
+function summaryRows(items: [string, string][], columns: number): Row[] | null {
+  const inside = columns - 5
+  const room = inside - 12
+  if (room < 8) {
+    return null
+  }
+  const content: Row[] = []
+  for (const [label, value] of items) {
+    wrap(value, room).forEach((part, i) => {
+      content.push([
+        { text: (i === 0 ? label : '').padEnd(11), look: 'label' },
+        { text: ` ${part}`, look: 'text' },
+      ])
+    })
+  }
+  return dialogRows(inside, content, 'SUMMARY')
 }
 
 function age(since: number, now: number): string {
@@ -431,33 +528,34 @@ export const register: Register = on => {
       const shown = data.rows.filter(row => row.state === group.state)
       return { ...group, count: shown.length, shown }
     }).filter(group => group.shown.length > 0)
-    const summary = data.summary
-    const line = (label: string, value: string) => (
-      <Text>
-        <Text dimColor>{label.padEnd(11)}</Text>
-        {value}
-      </Text>
-    )
+    const columns = Math.max(24, e.props.bodyColumns)
     const project = data.repo.split('/')[1] ?? '...'
-    const title = titleLines(project, Math.max(24, e.props.bodyColumns))
+    const title = titleRows(project, columns)
+    const summary = data.summary
+    const items: [string, string][] =
+      summary === null
+        ? [['', 'the dispatcher has not written its summary yet']]
+        : [
+            ['checkout', summary.checkout],
+            ['developers', summary.developers],
+            ['queue', summary.queue],
+            ['main CI', summary.ci],
+            ['capacity', summary.capacity],
+          ]
+    const bottom = summaryRows(items, columns)
+    const draw = (rows: Row[], key: string) =>
+      rows.map((row, i) => (
+        <Text key={`${key}-${i}`}>
+          {row.map((segment, j) => (
+            <Text key={`${key}-${i}-${j}`} {...LOOKS[segment.look]}>
+              {segment.text}
+            </Text>
+          ))}
+        </Text>
+      ))
     return (
       <Box flexDirection="column">
-        {title === null ? (
-          <Text bold>{project}</Text>
-        ) : (
-          title.map((part, i) => (
-            <Text key={`title-${i}`}>
-              <Text color="gray" dimColor>
-                {part.left}
-              </Text>
-              <Text bold>{part.frame}</Text>
-              <Text color="gray">{part.shadow}</Text>
-              <Text color="gray" dimColor>
-                {part.right}
-              </Text>
-            </Text>
-          ))
-        )}
+        {title === null ? <Text bold>{project}</Text> : draw(title, 'title')}
         {data.rows.length === 0 && <Text dimColor>No agents at work.</Text>}
         {groups.map(group => (
           <Box key={group.state} flexDirection="column" marginTop={1}>
@@ -489,18 +587,13 @@ export const register: Register = on => {
           </Box>
         ))}
         <Box flexDirection="column" marginTop={1}>
-          <Text bold>SUMMARY</Text>
-          {summary === null ? (
-            <Text dimColor>the dispatcher has not written its summary yet</Text>
-          ) : (
-            <>
-              {line('checkout', summary.checkout)}
-              {line('developers', summary.developers)}
-              {line('queue', summary.queue)}
-              {line('main CI', summary.ci)}
-              {line('capacity', summary.capacity)}
-            </>
-          )}
+          {bottom === null
+            ? items.map(([label, value]) => (
+                <Text key={`summary-${label}`}>
+                  <Text dimColor>{label.padEnd(11)}</Text> {value}
+                </Text>
+              ))
+            : draw(bottom, 'summary')}
         </Box>
       </Box>
     )

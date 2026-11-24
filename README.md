@@ -34,9 +34,9 @@ Every session has the color of its state, in `claude agents` too:
 
 A color changes between turns: during a long turn the list shows the state of the turn before. The **board** beside a tech lead, a pane that opens by itself on a wide terminal or with `/team-board`, is always live: the project's name in a TEAM dialog, as in the DOS programs of the 80s and 90s, then the agents grouped by state (waiting on you, working, waiting on others, stuck, idle), each name on the color of its state with where it works (its worktree or the main checkout) and for how long, what it does under it, and at the bottom a SUMMARY dialog in the same style with the dispatcher, the checkout lock, the developers at work, the queue, the default branch's CI and how long the plan usage lasts (green when it lasts until the reset, red when it runs out first). When it does not fit, it scrolls (the wheel, or the keys while it has the focus). To open an agent, pick it in the agent view (← on an empty prompt): the names are the same.
 
-## Your rules
+## Rules
 
-Your own rules for a repository ("this repository merges by rebase") are yours: they live on this machine, in `~/.local/share/team/rules/`, never in the repository or on GitHub. The tech lead writes them when you state them, and every session reads them at start and after a compaction. One is read by the scripts: `merge: merge|rebase|squash|user`.
+A rule holds for everyone, on every machine. A general one lives in this plugin, in what each role is told; one about a project lives in that repository's own instructions (its `CLAUDE.md` and skills), which the developers read before they work. When you give the tech lead a rule that holds from now on, it opens an issue for it in the right place.
 
 ## When something goes wrong
 

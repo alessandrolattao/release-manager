@@ -1,5 +1,5 @@
 # Sourced by the scripts: the repository they run in (its main checkout or a worktree), the names of its
-# sessions, the user's own rules for it, and a few counts.
+# sessions, and a few counts.
 # shellcheck shell=sh disable=SC2034 # the variables are used by the scripts that source this file
 
 _here=$(cd "$(dirname "$0")" && pwd)
@@ -12,7 +12,6 @@ repo_key=$(printf '%s' "$repo_full" | tr '/' '_')
 repo_dir="$team_state/repos/$repo_key"
 # The main checkout, from any worktree of it.
 root=$(cd "$(git rev-parse --git-common-dir)/.." && pwd)
-rules_file="$team_data/rules/$repo_key.md"
 mkdir -p "$repo_dir"
 
 # base_branch: the default branch, asked once.
@@ -21,9 +20,6 @@ base_branch() {
 	cat "$repo_dir/base"
 }
 
-# rule <key>: the value of a "<key>: <value>" line of the user's rules for this repository, if any.
-# The keys the scripts read: agents (how many at once), merge (merge, rebase, squash or user).
-rule() { sed -n "s/^[-*]* *$1: *//p" "$rules_file" 2>/dev/null | head -1 | tr -d '\r' | sed -E 's/ *\([0-9]{4}-[0-9]{2}-[0-9]{2}\)$//'; }
 
 # The names of the sessions, without counters, so an address never goes stale.
 tech_lead_name() { printf 'tech lead · %s%s' "$repo_short" "${1:+ · $1}"; }

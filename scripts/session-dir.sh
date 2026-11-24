@@ -4,7 +4,7 @@
 #                                asked, blocked, wake (what the hooks module and the scripts read and write)
 #   $team_state/repos/<key>/     one folder per repository: the checkout lock, the dispatcher's lock and
 #                                cursor, who follows each issue, QA and review records, the board
-#   $team_data/                  what is kept: the user's own rules, the tech leads' notes, spike reports
+#   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages
 # The status of a session is one JSON object, written by the scripts and the hooks, never by the model:
 #   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "pr", "branch",
 #    "busy_until", "tested_head", "asked_on"}

@@ -6,8 +6,8 @@
 #      tech lead who follows the issue;
 #   3. marks dead sessions stuck (red, in the agent list too) and removes finished ones with their worktree;
 #   4. resumes dead developer and QA agents, and starts the QA agents asked for;
-#   5. starts a developer for the next workable issue, within capacity;
-#   6. writes the board's summary: checkout, queue, main CI, capacity.
+#   5. starts a developer for the next workable issue (no cap: the user decides what is ready);
+#   6. writes the board's summary: checkout, queue, main CI, how long the plan usage lasts.
 #   dispatch.sh      (from the main checkout)
 set -u
 
@@ -193,34 +193,52 @@ for record in "$repo_dir"/qa/*; do
 	[ -n "$(live_of qa "$issue")" ] || sh "$here/start-qa.sh" "$issue" "$pr" >/dev/null 2>&1 || true
 done
 
-# 5. The next workable issue gets a developer, within capacity.
-max=$(rule agents)
-case "$max" in "" | *[!0-9]*) max=2 ;; esac
-capacity="ok"
-# The plan usage of this account, read at most every 5 minutes for all its repositories (the usage API
-# rate-limits frequent readers); when a read fails, the last good one holds for 30 minutes.
-usage_file="$team_state/usage/$(printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | tr '/' '_')"
+# 5. The next workable issue gets a developer: no cap, the user decides what is ready.
+# The plan usage of this account, only shown on the board: read at most every 5 minutes for all its
+# repositories (the usage API rate-limits frequent readers); when a read fails, the last good one holds for
+# 30 minutes.
+usage_file="$team_state/usage/$(printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | tr '/' '_').json"
 mkdir -p "$team_state/usage"
 usage=""
 if [ -n "$(find "$usage_file" -mmin -5 2>/dev/null)" ]; then
 	usage=$(cat "$usage_file")
-elif command -v clessidra >/dev/null 2>&1 && fresh=$(clessidra 2>/dev/null) && [ -n "$fresh" ]; then
+elif command -v clessidra >/dev/null 2>&1 && fresh=$(clessidra --json 2>/dev/null) &&
+	printf '%s' "$fresh" | jq -e '.windows' >/dev/null 2>&1; then
 	usage=$fresh
 	printf '%s\n' "$usage" >"$usage_file.$$" && mv "$usage_file.$$" "$usage_file"
 elif [ -n "$(find "$usage_file" -mmin -30 2>/dev/null)" ]; then
 	usage=$(cat "$usage_file")
 fi
-if [ -n "$usage" ]; then
-	lines=$usage
-	[ "$(rule capacity)" != 5h ] || lines=$(printf '%s\n' "$usage" | grep -i '5h' || true)
-	if printf '%s\n' "$lines" | grep -q 'runs out in'; then
-		capacity="runs out before the reset"
-		max=0
-	fi
-else
-	capacity="unreadable, at most 1 developer"
-	[ "$max" -le 1 ] || max=1
-fi
+# at <time>: a time of clessidra's as the board shows it, with the day only when it is not today.
+at() {
+	if [ "$(date -d "$1" +%F)" = "$(date +%F)" ]; then date -d "$1" +%H:%M; else date -d "$1" '+%a %-d %b %H:%M'; fi
+}
+# span <minutes>: "35m", "1h 15m", "2d 5h", the two largest units, as clessidra writes them.
+span() {
+	d=$(($1 / 1440)) h=$(($1 % 1440 / 60)) m=$(($1 % 60))
+	if [ "$d" -gt 0 ]; then echo "${d}d${h:+ ${h}h}" | sed 's/ 0h$//'
+	elif [ "$h" -gt 0 ]; then echo "${h}h ${m}m" | sed 's/ 0m$//'
+	else echo "${m}m"; fi
+}
+# window <5h|7d>: that window from clessidra --json, as {text, tone}: "11% · reset 02:20 · lasts" (ok),
+# "80% · out 12:45 · reset 14:00 · 1h 15m short" (alert), "2% · reset 16:55 · too early" (text).
+window() {
+	row=$(printf '%s' "$usage" | jq -r --arg w "$1" '.windows[]? | select(.window == $w)
+		| [.outcome, ((.used // 0) | floor | tostring), (.resets_at // "-"), (.runs_out_at // "-"),
+			((.short_by_minutes // 0) | tostring)] | @tsv' 2>/dev/null | head -1)
+	[ -n "$row" ] || { jq -n '{text: "unreadable", tone: "text"}'; return; }
+	outcome=$(printf '%s' "$row" | cut -f1) used=$(printf '%s' "$row" | cut -f2)
+	resets=$(printf '%s' "$row" | cut -f3) out=$(printf '%s' "$row" | cut -f4) short=$(printf '%s' "$row" | cut -f5)
+	case "$outcome" in
+	lasts) text="$used% · reset $(at "$resets") · lasts" tone=ok ;;
+	runs_out) text="$used% · out $(at "$out") · reset $(at "$resets") · $(span "$short") short" tone=alert ;;
+	limit_reached) text="$used% · reset $(at "$resets") · limit reached" tone=alert ;;
+	too_early) text="$used% · reset $(at "$resets") · too early" tone=text ;;
+	not_started) text="not started" tone=text ;;
+	*) text="no data" tone=text ;;
+	esac
+	jq -n --arg text "$text" --arg tone "$tone" '{text: $text, tone: $tone}'
+}
 # Busy: the live developers, and the ones resumed in this run, which have no heartbeat yet.
 busy=$(($(live_of dev | wc -l | tr -d ' ') + ${resumed:-0}))
 queue=$(sh "$here/queue.sh" 2>/dev/null || true)
@@ -234,7 +252,7 @@ for issue in $workable; do
 	next=$issue
 	break
 done
-if [ -n "$next" ] && [ "$busy" -lt "$max" ]; then
+if [ -n "$next" ]; then
 	sh "$here/start-dev.sh" "$next" >/dev/null 2>&1 && busy=$((busy + 1)) && next=""
 fi
 
@@ -252,7 +270,7 @@ jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$hol
 	--argjson ready "$(printf '%s\n' "$workable" | grep -c . || true)" --arg next "${next:+#$next}" \
 	--argjson backlog "$(printf '%s\n' "$queue" | jq -s '[.[] | select(.backlog)] | length' 2>/dev/null || echo 0)" \
 	--argjson questions "$(printf '%s\n' "$queue" | jq -s '[.[] | select(.question)] | length' 2>/dev/null || echo 0)" \
-	--arg ci "$ci" --arg capacity "$capacity" --argjson busy "$busy" --argjson max "$max" \
+	--arg ci "$ci" --argjson busy "$busy" --argjson h5 "$(window 5h)" --argjson d7 "$(window 7d)" \
 	'{updated: $now, checkout: {holder: $holder, since: $held_since, waiting: $waiting}, queue: {ready: $ready, next: $next,
-	backlog: $backlog, questions: $questions}, ci: $ci, capacity: $capacity, developers: {busy: $busy, max: $max}}' \
+	backlog: $backlog, questions: $questions}, ci: $ci, developers: {busy: $busy}, usage: {h5: $h5, d7: $d7}}' \
 	>"$repo_dir/board.json.tmp" && mv "$repo_dir/board.json.tmp" "$repo_dir/board.json"

@@ -320,6 +320,9 @@ function dialogRows(inside: number, left: number, content: Row[], title: string)
 // row per item, long values wrapped inside it, never cut. Null when the pane is too narrow.
 type Item = { label: string; value: string; look?: Look; press?: Press }
 
+// toneLook: the look of a usage window's tone, green when it lasts, red when it runs out first.
+const toneLook = (tone: string): Look => (tone === 'ok' ? 'ok' : tone === 'alert' ? 'alert' : 'text')
+
 function summaryRows(items: Item[], columns: number): Row[] | null {
   const inside = columns - 5 - 2 * SIDE
   const room = inside - 12
@@ -382,16 +385,17 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       checkout?: { holder?: string; waiting?: string }
       queue?: { ready?: number; next?: string; backlog?: number; questions?: number }
       ci?: string
-      capacity?: string
-      developers?: { busy?: number; max?: number }
+      developers?: { busy?: number }
+      usage?: { h5?: { text?: string; tone?: string }; d7?: { text?: string; tone?: string } }
     }
     const waiting = written.checkout?.waiting ? ` · queued: ${written.checkout.waiting}` : ''
     summary = {
       checkout: `${written.checkout?.holder || 'free'}${waiting}`,
-      developers: `${written.developers?.busy ?? 0}/${written.developers?.max ?? 0}`,
+      developers: `${written.developers?.busy ?? 0} at work`,
       queue: `${written.queue?.ready ?? 0} ready · ${written.queue?.backlog ?? 0} backlog${written.queue?.next ? ` · next ${written.queue.next}` : ''}`,
       ci: written.ci ?? '?',
-      capacity: written.capacity ?? '?',
+      usage5h: { text: written.usage?.h5?.text || 'unreadable', tone: written.usage?.h5?.tone ?? 'text' },
+      usage7d: { text: written.usage?.d7?.text || 'unreadable', tone: written.usage?.d7?.tone ?? 'text' },
     }
   } catch {
     summary = null
@@ -575,7 +579,8 @@ export const register: Register = on => {
             { label: 'developers', value: summary.developers },
             { label: 'queue', value: summary.queue },
             { label: 'main CI', value: summary.ci },
-            { label: 'capacity', value: summary.capacity },
+            { label: 'usage 5h', value: summary.usage5h.text, look: toneLook(summary.usage5h.tone) },
+            { label: 'usage 7d', value: summary.usage7d.text, look: toneLook(summary.usage7d.tone) },
           ]
     const bottom = summaryRows(items, columns)
     const version = await versionOf($)

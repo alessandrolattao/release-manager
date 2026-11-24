@@ -1,8 +1,7 @@
 #!/bin/sh
 # The user's own rules for a repository: they are theirs, so they live on this machine and never in the
 # repository or on GitHub. One file per repository, $team_data/rules/<owner>_<name>.md, one rule per line.
-# A few rules are also read by the scripts, written as "<key>: <value>":
-#   agents: <n>                        how many developer agents at once (2 when absent)
+# One rule is also read by the scripts, written as "<key>: <value>":
 #   merge: merge|rebase|squash|user    how pull requests land; "user" means the user merges them
 #   rules.sh show [--context]   prints the rules (--context: framed for a session's context)
 #   rules.sh add "<rule>"       adds one rule, with today's date

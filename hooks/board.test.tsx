@@ -24,7 +24,7 @@ const BOARD: Board = {
     { id: 'd', label: 'tech lead api', role: 'tech-lead', state: 'idle', place: '', detail: 'waiting for work', since: 0 },
     { id: 'c', label: 'dev #8', role: 'dev', state: 'working', place: 'worktree 8', detail: 'removal of preview pr-317 with SST .38', since: 0 },
   ],
-  summary: { checkout: 'dev #318', developers: '2/2', queue: '0 ready · 5 backlog', ci: 'verde', capacity: 'ok' },
+  summary: { checkout: 'dev #318', developers: '2 at work', queue: '0 ready · 5 backlog', ci: 'green', usage5h: { text: '80% · out 12:45 · reset 14:00 · 1h 15m short', tone: 'alert' }, usage7d: { text: '11% · reset Tue 1 Dec 17:00 · lasts', tone: 'ok' } },
   dispatcher: { running: false, version: '' },
   updated: 0,
 }
@@ -54,10 +54,13 @@ test('the board groups the agents by state, names on the color of their state', 
   expect(Math.abs(before.length - after.length)).toBeLessThanOrEqual(1)
   // The summary: SUMMARY in the top border of a window as wide as the pane, a row per item.
   expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^  ╔═+ SUMMARY ═+╗$/)
-  const capacity = (await ui.find({ type: 'Text', text: /capacity/ }))?.text ?? ''
-  expect(capacity).toMatch(/^  ║ capacity +ok +║▓$/)
+  const usage = (await ui.find({ type: 'Text', text: /usage 7d/ }))?.text ?? ''
+  expect(usage).toMatch(/^  ║ usage 7d +11% · reset Tue 1 Dec 17:00 +║▓$/)
   // 2 columns of room on each side: 48 less the 2 on the right, which are not drawn.
-  expect([...capacity].length).toBe(46)
+  expect([...usage].length).toBe(46)
+  // The usage tones: red when the window runs out first, green when it lasts.
+  expect((await ui.find({ type: 'Text', text: /^80% · out 12:45/ }))?.props.color).toBe('red')
+  expect((await ui.find({ type: 'Text', text: /^11% · reset Tue 1 Dec 17:00$/ }))?.props.color).toBe('green')
   // The dispatcher, stopped: in red, inside a control that starts it.
   const stopped = await ui.find({ type: 'Text', text: /^stopped · click to start$/ })
   expect(stopped?.props.color).toBe('red')

@@ -16,8 +16,13 @@ export type BoardSummary = {
   developers: string
   queue: string
   ci: string
-  capacity: string
+  // How long the plan usage lasts at this pace, as clessidra estimates it, per window: the text, and its
+  // tone (ok: it lasts, alert: it runs out first, text: too early to say).
+  usage5h: BoardUsage
+  usage7d: BoardUsage
 }
+
+export type BoardUsage = { text: string; tone: string }
 
 // This repository's dispatcher on this machine: running when its last cycle is recent.
 export type BoardDispatcher = {

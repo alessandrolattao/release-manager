@@ -43,6 +43,8 @@ const BACKGROUNDS: Record<string, { bg: string; fg: string }> = {
   idle: { bg: 'green', fg: 'black' },
 }
 const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 }
+// What the board writes before how long an agent has been in its state: "waiting 9m", "idle 1h20m".
+const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', working: 'working', stuck: 'stuck', idle: 'idle' }
 
 const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, updated: 0 }, {
   shape: 'board-2',
@@ -456,7 +458,7 @@ export const register: Register = on => {
                     <Text dimColor>
                       {'  '}
                       {row.place ? `${row.place} · ` : ''}
-                      {age(row.since, now)}
+                      {`${VERBS[row.state] ?? row.state} ${age(row.since, now)}`}
                     </Text>
                   </Box>
                   {row.detail !== '' && (

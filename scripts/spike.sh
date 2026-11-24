@@ -34,7 +34,7 @@ wait_for() {
 	echo "spike $id: $state"
 	# Its work is over: the board drops it and the dispatcher removes the session.
 	full_id=$(claude agents --json --all 2>/dev/null | jq -r --arg i "$id" '[.[] | select(.id == $i or .sessionId == $i) | .sessionId][0] // empty' 2>/dev/null || true)
-	[ -z "$full_id" ] || state_set "$full_id" done "report pronto"
+	[ -z "$full_id" ] || state_set "$full_id" done "report ready"
 	if [ -s "$report" ]; then
 		echo "report $report"
 		echo
@@ -74,7 +74,7 @@ slug=$(printf '%s' "$topic" | tr -cs 'A-Za-z0-9' '-' | sed 's/^-//; s/-$//' | cu
 report="$dir/$(date +%Y%m%dT%H%M%S)-${slug:-spike}.md"
 
 brief=$(sed -e "s|{{REPO}}|$repo_full|g" -e "s|{{TECH_LEAD}}|$(address_of "${CLAUDE_CODE_SESSION_ID:-}")|g" \
-	-e "s|{{REPORT}}|$report|g" -e "s|{{BASE}}|$base|g" "$here/../briefs/spike.md")
+	-e "s|{{REPORT}}|$report|g" -e "s|{{BASE}}|$base|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/spike.md")
 brief="$brief
 
 $question"

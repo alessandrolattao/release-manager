@@ -55,7 +55,11 @@ type Status = {
   detail?: string
   since?: number
   busy_until?: number
+  resume_to?: { state: string; detail: string; since: number }
 }
+
+// The detail a turn that starts gives; a turn that ends with it untouched changed nothing.
+const TURN_DETAIL = 'lavora'
 
 async function rootOf($: EngineInterface): Promise<string> {
   if (stateRoot === undefined) {
@@ -126,8 +130,27 @@ async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
     const now = Math.floor((await $.clock.now()) / 1000)
     await $.fs.write(`${folder}/idle`, isRunning ? '' : `${now}\n`)
     const status = await readStatus($, folder)
-    if (isRunning && status.state !== 'done') {
-      await setState($, folder, 'working', status.state === 'working' ? (status.detail ?? 'lavora') : 'lavora')
+    if (isRunning) {
+      if (status.state === 'you' || status.state === 'others') {
+        // Woken while it waits: working for this turn, and back to the wait when the turn ends with no
+        // script having changed the state (an answer that is not there yet, a look at the issue).
+        status.resume_to = { state: status.state, detail: status.detail ?? '', since: status.since ?? now }
+        status.state = 'working'
+        status.detail = TURN_DETAIL
+        status.since = now
+        await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
+      } else if (status.state !== 'working' && status.state !== 'done') {
+        await setState($, folder, 'working', TURN_DETAIL)
+      }
+    } else if (status.resume_to !== undefined) {
+      const back = status.resume_to
+      delete status.resume_to
+      if (status.state === 'working' && status.detail === TURN_DETAIL) {
+        status.state = back.state
+        status.detail = back.detail
+        status.since = back.since
+      }
+      await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
     }
   } catch (err) {
     $.ui.log(`turn: ${String(err)}`)

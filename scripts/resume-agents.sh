@@ -26,8 +26,10 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	dir=$(cat "$sessions_dir/$id/cwd" 2>/dev/null || true)
 	[ -d "$dir" ] || continue
 	name=$(jq -r .name "$status")
+	# No flags: a background session keeps its own saved options, and any flag passed here (even --name)
+	# would start a copy of it under a new id instead of continuing it. The module renames it anyway.
 	# shellcheck disable=SC2086 # unset_args is a list of -u flags
-	if (cd "$dir" && env $unset_args claude --bg --resume "$id" --name "$name" "$prompt") </dev/null >/dev/null 2>&1; then
+	if (cd "$dir" && env $unset_args claude --bg --resume "$id" "$prompt") </dev/null >/dev/null 2>&1; then
 		state_set "$id" working "ripresa dopo l'interruzione"
 		echo "resumed $name"
 	else

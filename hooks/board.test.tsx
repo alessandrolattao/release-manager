@@ -51,9 +51,10 @@ test('the board groups the agents by state, names on the color of their state', 
   const after = 48 - [...titleLine].length
   expect(Math.abs(before - after)).toBeLessThanOrEqual(1)
   // The summary: SUMMARY in the top border of a window as wide as the pane, a row per item.
-  expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^╔═+ SUMMARY ═+╗$/)
+  expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^  ╔═+ SUMMARY ═+╗$/)
   const capacity = (await ui.find({ type: 'Text', text: /capacity/ }))?.text ?? ''
-  expect(capacity).toMatch(/^║ capacity +ok +║▓$/)
-  expect([...capacity].length).toBe(48)
+  expect(capacity).toMatch(/^  ║ capacity +ok +║▓$/)
+  // 2 columns of room on each side: 48 less the 2 on the right, which are not drawn.
+  expect([...capacity].length).toBe(46)
   await ui.unmount()
 })

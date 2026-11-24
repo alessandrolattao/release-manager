@@ -281,35 +281,40 @@ function wrap(text: string, max: number): string[] {
   return lines
 }
 
-// dialogRows <inside width> <rows> <title>: a dialog of the DOS programs of the 80s and 90s, one double frame
-// with its title centered in the top border, a clean inside with a space of margin, and a drop shadow;
-// 5 columns wider than its inside.
-function dialogRows(inside: number, content: Row[], title: string): Row[] {
+// dialogRows <inside width> <left margin> <rows> <title>: a dialog of the DOS programs of the 80s and 90s,
+// one double frame with its title centered in the top border, a clean inside with a space of margin, and a
+// drop shadow; 5 columns wider than its inside, after the margin.
+function dialogRows(inside: number, left: number, content: Row[], title: string): Row[] {
+  const margin: Segment = { text: ' '.repeat(left), look: 'text' }
   const across = inside + 2
   const before = Math.max(1, Math.floor((across - title.length - 2) / 2))
   const after = Math.max(1, across - title.length - 2 - before)
   return [
     [
+      margin,
       { text: `╔${'═'.repeat(before)} `, look: 'frame' },
       { text: title, look: 'strong' },
       { text: ` ${'═'.repeat(after)}╗`, look: 'frame' },
     ],
     ...content.map((row): Row => [
+      margin,
       { text: '║ ', look: 'frame' },
       ...row,
       { text: ' '.repeat(Math.max(0, inside - width(row))), look: 'text' },
       { text: ' ║', look: 'frame' },
       { text: '▓', look: 'shadow' },
     ]),
-    [{ text: `╚${'═'.repeat(across)}╝`, look: 'frame' }, { text: '▓', look: 'shadow' }],
-    [{ text: ' ', look: 'text' }, { text: '▓'.repeat(across + 2), look: 'shadow' }],
+    [margin, { text: `╚${'═'.repeat(across)}╝`, look: 'frame' }, { text: '▓', look: 'shadow' }],
+    [margin, { text: ' ', look: 'text' }, { text: '▓'.repeat(across + 2), look: 'shadow' }],
+    [{ text: '', look: 'text' }],
   ]
 }
 
-// The summary: a dialog as wide as the pane, one row per item, long values wrapped inside it, never cut.
-// Null when the pane is too narrow.
+// The summary: a dialog across the pane with 2 columns of room on each side and an empty row under it, one
+// row per item, long values wrapped inside it, never cut. Null when the pane is too narrow.
 function summaryRows(items: [string, string][], columns: number): Row[] | null {
-  const inside = columns - 5
+  const side = 2
+  const inside = columns - 5 - 2 * side
   const room = inside - 12
   if (room < 8) {
     return null
@@ -323,7 +328,7 @@ function summaryRows(items: [string, string][], columns: number): Row[] | null {
       ])
     })
   }
-  return dialogRows(inside, content, 'SUMMARY')
+  return dialogRows(inside, side, content, 'SUMMARY')
 }
 
 function age(since: number, now: number): string {

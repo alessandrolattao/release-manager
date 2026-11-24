@@ -40,7 +40,8 @@ const GROUPS: { state: string; title: string }[] = [
 const BACKGROUNDS: Record<string, { bg: string; fg: string }> = {
   you: { bg: 'yellow', fg: 'black' },
   working: { bg: 'cyan', fg: 'black' },
-  others: { bg: 'magenta', fg: 'white' },
+  // The purple Claude Code gives an agent in the agent list (dark theme), not the terminal's magenta, which draws pink.
+  others: { bg: '#827dbd', fg: 'white' },
   stuck: { bg: 'red', fg: 'white' },
   idle: { bg: 'green', fg: 'black' },
 }

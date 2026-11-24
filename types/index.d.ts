@@ -19,7 +19,14 @@ export type BoardSummary = {
   capacity: string
 }
 
+// This repository's dispatcher on this machine: running when its last cycle is recent.
+export type BoardDispatcher = {
+  running: boolean
+  version: string
+}
+
 export type Board = {
+  dispatcher: BoardDispatcher
   repo: string
   rows: BoardRow[]
   summary: BoardSummary | null

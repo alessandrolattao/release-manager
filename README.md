@@ -13,7 +13,9 @@ claude --bg --name "tech lead" "/team:tech-lead admin-app"  # another one, on it
 - **Developers** (`dev #<n> · …`), one per issue, in their own worktree. A developer reads the issue and its `## Technical decisions`, builds and tests the change, opens the pull request, follows its reviews, merges it and watches the default branch's CI. Whatever needs the running stack (sst dev, a server) runs in the main checkout, one agent at a time, through a lock with a queue. Before merging, a reviewer with a clean context checks the change against the decisions.
 - **QA agents** (`qa #<n> · …`) for the delicate issues, the ones with the label `qa`: a second agent tests the pull request before its merge.
 
-Developers start by themselves. Every minute a dispatcher (a script, not a model) starts one on the next workable issue: assigned to you, labelled `ready for development`, nothing blocking it, no `question`, best priority first, within capacity (2 at once by default, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets).
+Developers start by themselves. Every minute a dispatcher (a process of its own, not a model) starts one on the next workable issue: assigned to you, labelled `ready for development`, nothing blocking it, no `question`, best priority first, within capacity (2 at once by default, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets). The same dispatcher wakes the sessions with the comments written to them and keeps the board's summary.
+
+The dispatcher runs only when you start it, one per repository on each machine that works on it: click its red `stopped` row in the board's summary, or run `/team:dispatcher` in a Claude Code session in the repository's checkout (`/team:dispatcher stop` stops it, `status` tells). It goes on after that session ends; after a restart of the machine it stays stopped until you start it again. After a plugin update, restart it to run the new version: the summary shows the version it runs.
 
 ## GitHub is where the team talks
 

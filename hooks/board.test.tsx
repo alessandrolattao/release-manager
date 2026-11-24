@@ -25,12 +25,13 @@ const BOARD: Board = {
     { id: 'c', label: 'dev #8', role: 'dev', state: 'working', place: 'worktree 8', detail: 'removal of preview pr-317 with SST .38', since: 0 },
   ],
   summary: { checkout: 'dev #318', developers: '2/2', queue: '0 ready · 5 backlog', ci: 'verde', capacity: 'ok' },
+  dispatcher: { running: false, version: '' },
   updated: 0,
 }
 
 test('the board groups the agents by state, names on the color of their state', async ($, on) => {
   // As the atom keeps it: a value with its shape tag.
-  on('state.get', () => ({ value: { value: { shape: 'board-2', value: BOARD }, version: 1 } }))
+  on('state.get', () => ({ value: { value: { shape: 'board-3', value: BOARD }, version: 1 } }))
   on('clock.now', () => ({ value: 120000 }))
   on('fs.read', () => ({ value: '{"name":"team","version":"9.9.9"}' }))
 
@@ -57,6 +58,10 @@ test('the board groups the agents by state, names on the color of their state', 
   expect(capacity).toMatch(/^  ║ capacity +ok +║▓$/)
   // 2 columns of room on each side: 48 less the 2 on the right, which are not drawn.
   expect([...capacity].length).toBe(46)
+  // The dispatcher, stopped: in red, inside a control that starts it.
+  const stopped = await ui.find({ type: 'Text', text: /^stopped · click to start$/ })
+  expect(stopped?.props.color).toBe('red')
+  expect(await ui.find({ type: 'Button' })).toBeTruthy()
   // At the foot, the plugin's version centered in the 48 columns.
   const foot = (await ui.find({ type: 'Text', text: /team 9\.9\.9/ }))?.text ?? ''
   expect(foot.trim()).toBe('team 9.9.9')

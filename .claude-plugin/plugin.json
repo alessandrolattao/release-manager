@@ -1,8 +1,8 @@
 {
   "name": "team",
   "displayName": "Team",
-  "version": "0.2.15",
-  "description": "A development team of Claude Code sessions for one repository: tech leads who design with you and prepare the issues, developers who build, test and merge them, QA for the delicate ones. The issues on GitHub are where they talk; colors and a board show who does what.",
+  "version": "0.3.0",
+  "description": "A development team of Claude Code sessions for one repository, on one machine or several: a tech lead who designs with you and prepares the issues, developers who build, test and merge them, QA for the delicate ones. The issues on GitHub are where they talk; colors and a board show who does what.",
   "author": {
     "name": "Alessandro Lattao",
     "url": "https://github.com/alessandrolattao"

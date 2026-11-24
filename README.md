@@ -37,6 +37,24 @@ A color changes between turns: during a long turn the list shows the state of th
 
 A rule holds for everyone, on every machine. A general one lives in this plugin, in what each role is told; one about a project lives in that repository's own instructions (its `CLAUDE.md` and skills), which the developers read before they work. When you give the tech lead a rule that holds from now on, it opens an issue for it in the right place.
 
+## Several machines
+
+The team can work on one repository from several machines at once: start a dispatcher on each (`/team:dispatcher` in the repository's checkout), and keep the tech lead on the machine you talk to it from. GitHub is all they share.
+
+- **One machine per issue.** A workable issue is `ready for development` and not started (its own GitHub status is not In progress, In review or Done). Before it starts a developer, a machine takes the issue with a comment, `**dispatcher · <machine>** takes #<n>`, and waits 30 seconds: the oldest take still standing wins, sets the issue's status to In progress (the project's Status follows, when the issue is on a board), and starts; any other deletes its take. The developer sets In review when it opens its pull request; the merge closes the issue.
+- **Takeover.** An issue stays In progress while a machine works on it. When one stays there too long (a machine switched off), tell the tech lead to take it over: it releases the issue (`**tech lead** releases #<n>`), which is Todo again, and the first free machine takes it, from its pushed branch.
+- **The board** shows the other machines' developers too, with a color read from GitHub: purple while their last message waits for an answer, red after an hour with nothing on the issue, cyan otherwise.
+- **One GitHub account.** Every machine uses yours, and its hourly API allowance: the dispatcher reads little (new comments and the queue each minute, the default branch's CI every 5 minutes).
+- **The main checkout** is per machine, so tests that need the running stack run on several machines at once. When the repository's tests share cloud resources (an `sst dev` stage), give each machine its own, in the repository's setup.
+
+### Compatibility
+
+Machines may run different versions of the plugin for a while: the lines they exchange are a contract, which only ever grows. A reader ignores what it does not know, and nothing changes meaning.
+
+- `**<from> → <to>**`, the first line of a team message, with ` · fyi` after it when no answer is owed;
+- `**dispatcher · <machine>** takes #<n>` and `**<who>** releases #<n>`, the takes;
+- the issue's own status: Todo, In progress, In review, Done.
+
 ## When something goes wrong
 
 After a restart of the machine, the first Claude Code session that starts resumes the tech leads that were running, and their dispatcher resumes the developers and QA agents. When a session meets a problem of the plugin itself, it reports it as an issue on this repository, describing the plugin only.

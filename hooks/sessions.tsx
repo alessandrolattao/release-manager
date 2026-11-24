@@ -14,7 +14,7 @@ import type { Board, BoardRow } from '../types'
 //     while it should be working, means stuck.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn (hooks/session-events.sh wakes a session only between turns).
-//   - in a tech lead it draws the board (/team-board opens it): the agents of the repository by state, and a
+//   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh) started by hand, which a
 //     click on its row starts when it is stopped.
 
@@ -48,7 +48,7 @@ const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 
 const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', working: 'working', stuck: 'stuck', idle: 'idle' }
 
 const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, dispatcher: { running: false, version: '' }, updated: 0 }, {
-  shape: 'board-3',
+  shape: 'board-4',
 })
 
 let stateRoot: string | undefined
@@ -73,6 +73,7 @@ type Status = {
   detail?: string
   since?: number
   busy_until?: number
+  stage?: string
   resume_to?: { state: string; detail: string; since: number }
 }
 
@@ -320,6 +321,9 @@ function dialogRows(inside: number, left: number, content: Row[], title: string)
 // row per item, long values wrapped inside it, never cut. Null when the pane is too narrow.
 type Item = { label: string; value: string; look?: Look; press?: Press }
 
+// toneLook: the look of a usage window's tone, green when it lasts, red when it runs out first.
+const toneLook = (tone: string): Look => (tone === 'ok' ? 'ok' : tone === 'alert' ? 'alert' : 'text')
+
 function summaryRows(items: Item[], columns: number): Row[] | null {
   const inside = columns - 5 - 2 * SIDE
   const room = inside - 12
@@ -370,6 +374,7 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       role: status.role,
       state: status.state ?? 'working',
       place: status.place ?? '',
+      stage: status.stage ?? '',
       detail: status.detail ?? '',
       since: status.since ?? 0,
     })
@@ -382,16 +387,32 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       checkout?: { holder?: string; waiting?: string }
       queue?: { ready?: number; next?: string; backlog?: number; questions?: number }
       ci?: string
-      capacity?: string
-      developers?: { busy?: number; max?: number }
+      developers?: { busy?: number }
+      usage?: { h5?: { text?: string; tone?: string }; d7?: { text?: string; tone?: string } }
+      elsewhere?: { issue: number; host: string; stage?: string; state: string; detail: string; since: number }[]
     }
+    // The developers of other machines, as the dispatcher guesses them from GitHub (scripts/dispatch.sh).
+    for (const remote of written.elsewhere ?? []) {
+      rows.push({
+        id: `remote-${remote.issue}`,
+        label: `dev #${remote.issue}`,
+        role: 'dev',
+        state: remote.state,
+        place: `other PC ${remote.host}`,
+        stage: remote.stage ?? '',
+        detail: remote.detail,
+        since: remote.since,
+      })
+    }
+    rows.sort((a, b) => (ORDER[a.role] ?? 9) - (ORDER[b.role] ?? 9) || a.label.localeCompare(b.label, undefined, { numeric: true }))
     const waiting = written.checkout?.waiting ? ` · queued: ${written.checkout.waiting}` : ''
     summary = {
       checkout: `${written.checkout?.holder || 'free'}${waiting}`,
-      developers: `${written.developers?.busy ?? 0}/${written.developers?.max ?? 0}`,
+      developers: `${written.developers?.busy ?? 0} at work`,
       queue: `${written.queue?.ready ?? 0} ready · ${written.queue?.backlog ?? 0} backlog${written.queue?.next ? ` · next ${written.queue.next}` : ''}`,
       ci: written.ci ?? '?',
-      capacity: written.capacity ?? '?',
+      usage5h: { text: written.usage?.h5?.text || 'unreadable', tone: written.usage?.h5?.tone ?? 'text' },
+      usage7d: { text: written.usage?.d7?.text || 'unreadable', tone: written.usage?.d7?.tone ?? 'text' },
     }
   } catch {
     summary = null
@@ -498,7 +519,7 @@ function emptied(content: readonly ApiContentBlock[]): ApiContentBlock[] {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    await $.command.register({ name: 'team-board', description: 'Open the team board: every agent of this repository, colored by its state' })
+    await $.command.register({ name: 'team', description: 'Open the team pane: the project, its agents by state, the summary' })
     if (!isBusy) {
       await markTurn($, false)
     }
@@ -508,9 +529,9 @@ export const register: Register = on => {
     return result
   })
 
-  on('command.run', { command: 'team-board' }, async $ => {
+  on('command.run', { command: 'team' }, async $ => {
     await openBoard($)
-    return { text: 'Team board opened.' }
+    return { text: 'Team pane opened.' }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -575,7 +596,8 @@ export const register: Register = on => {
             { label: 'developers', value: summary.developers },
             { label: 'queue', value: summary.queue },
             { label: 'main CI', value: summary.ci },
-            { label: 'capacity', value: summary.capacity },
+            { label: 'usage 5h', value: summary.usage5h.text, look: toneLook(summary.usage5h.tone) },
+            { label: 'usage 7d', value: summary.usage7d.text, look: toneLook(summary.usage7d.tone) },
           ]
     const bottom = summaryRows(items, columns)
     const version = await versionOf($)
@@ -624,6 +646,7 @@ export const register: Register = on => {
                       <Text dimColor>
                         {'  '}
                         {row.place ? `${row.place} · ` : ''}
+                        {row.stage ? `${row.stage} · ` : ''}
                         {`${VERBS[row.state] ?? row.state} ${age(row.since, now)}`}
                       </Text>
                     </Box>

@@ -1,8 +1,10 @@
 #!/bin/sh
 # Lists the open issues of this repository assigned to you, best first, as one JSON object per line:
-#   {"number":12,"title":"...","priority":"High","effort":"Low","blockedBy":[34],"question":false,"ready":true,"backlog":false,"workable":true}
+#   {"number":12,"title":"...","priority":"High","effort":"Low","blockedBy":[34],"question":false,"ready":true,"status":"planned","backlog":false,"workable":true}
 # ready is true when the issue carries the label "ready for development"; without it the issue is in the backlog.
-# workable is true when it is ready, no open issue blocks it and it does not carry the question label.
+# status is the category of the issue's own status (backlog, planned, started, completed, ...; null when unset).
+# workable is true when it is ready, not started (its status is not started or completed: a machine takes
+# it by setting In progress), no open issue blocks it and it does not carry the question label.
 # Order: Priority Urgent, High, Medium, Low, then none (Priority only orders, it does not make an issue ready); oldest first.
 set -eu
 
@@ -20,6 +22,7 @@ query='query($owner: String!, $name: String!, $me: String!, $endCursor: String) 
         number
         title
         labels(first: 30) { nodes { name } }
+        status { name category { key } }
         blockedBy(first: 20) { nodes { number state repository { nameWithOwner } } }
         issueFieldValues(first: 10) {
           nodes { ... on IssueFieldSingleSelectValue { name field { ... on IssueFieldSingleSelect { name } } } }
@@ -41,9 +44,12 @@ gh api graphql --paginate -f query="$query" -F owner="$owner" -F name="$name" -F
 			blockedBy: [.blockedBy.nodes[] | select(.state == "OPEN")
 				| if .repository.nameWithOwner == $repo then .number else "\(.repository.nameWithOwner)#\(.number)" end],
 			question: ([.labels.nodes[].name] | index("question") != null),
-			ready: ([.labels.nodes[].name] | index("ready for development") != null)
+			ready: ([.labels.nodes[].name] | index("ready for development") != null),
+			status: (.status.category.key // null),
+			statusName: (.status.name // null)
 		}
 		| .backlog = (.ready | not)
-		| .workable = ((.backlog | not) and (.blockedBy | length) == 0 and (.question | not))
+		| .workable = ((.backlog | not) and (.blockedBy | length) == 0 and (.question | not)
+			and ((.status // "") | IN("started", "completed") | not))
 	' |
 	jq -s -c 'sort_by((.priority | {"Urgent": 0, "High": 1, "Medium": 2, "Low": 3}[. // ""] // 4), .number) | .[]'

@@ -3,11 +3,11 @@
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
 #   1. hands each new GitHub comment of the repository to the session it is written to;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
-#      tech lead who follows the issue;
+#      repository's tech lead;
 #   3. marks dead sessions stuck (red, in the agent list too) and removes finished ones with their worktree;
 #   4. resumes dead developer and QA agents, and starts the QA agents asked for;
-#   5. starts a developer for the next workable issue, within capacity;
-#   6. writes the board's summary: checkout, queue, main CI, capacity.
+#   5. starts a developer for the next workable issue (no cap: the user decides what is ready);
+#   6. writes the board's summary: checkout, queue, main CI, how long the plan usage lasts.
 #   dispatch.sh      (from the main checkout)
 set -u
 
@@ -23,7 +23,13 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 trap 'rm -rf "$lock"' EXIT
 trap 'exit 1' INT TERM
-login=$(gh api user --jq .login 2>/dev/null) || exit 0
+# The team's GitHub account, asked once a day.
+login_file="$team_state/login"
+login=$( [ -z "$(find "$login_file" -mmin -1440 2>/dev/null)" ] || cat "$login_file")
+if [ -z "$login" ]; then
+	login=$(gh api user --jq .login 2>/dev/null) || exit 0
+	echo "$login" >"$login_file"
+fi
 now=$(date +%s)
 tab=$(printf '\t')
 listing=$(claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]')
@@ -35,6 +41,14 @@ job_of() { printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId
 running() { [ "$(printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId == $s and .status != null)] | length')" != 0 ]; }
 # wake <session-id> <from> <text> <link>: the monitor of that session wakes it between turns.
 wake() { printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "$2" "$(printf '%s' "$3" | tr '\t\n' '  ' | cut -c1-200)" "$4" >>"$sessions_dir/$1/wake"; }
+# note <issue> <jq filter> [jq args]: what last happened on an issue, from the comments read here (which
+# machine took it, the last team message and when), for the board's agents of other machines.
+note() {
+	f="$repo_dir/activity/$1.json"
+	shift
+	mkdir -p "$repo_dir/activity"
+	{ cat "$f" 2>/dev/null || echo '{}'; } | jq -c --argjson now "$now" "$@" >"$f.$$" && mv "$f.$$" "$f"
+}
 # live_of <role> [issue]: the sessions of that role (and issue) alive and not done.
 live_of() {
 	for id in $(sessions_of "$1" "${2:-}"); do
@@ -83,15 +97,30 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		grep -qx "$cid" "$seen" && continue
 		echo "$cid" >>"$seen"
 		from="" to="" text=$first
-		header=$(printf '%s' "$first" | sed -n 's/^\*\*\(.*\) → \(.*\)\*\*$/\1\t\2/p')
+		# "**from → to**", with " · fyi" after it when no answer is owed.
+		header=$(printf '%s' "$first" | sed -n 's/^\*\*\(.*\) → \(.*\)\*\*\( · fyi\)\{0,1\}$/\1\t\2/p')
 		# The team writes and reads with the user's own account: only its comments are listened to, so nobody
 		# else can pass for a session or the user. Anyone else's comment wakes nobody.
 		[ "$author" = "$login" ] || continue
 		issue=$(issue_of "$issue" "$link")
+		# A machine taking or releasing the issue (claim.sh): no message for anyone, a note for the board.
+		case "$first" in
+		"**dispatcher · "*"** takes #"*)
+			h=$(printf '%s' "$first" | sed -n 's/^\*\*dispatcher · \([a-z0-9-]*\)\*\* takes #[0-9]*$/\1/p')
+			[ -z "$h" ] || note "$issue" --arg h "$h" '.host = $h | .at = $now'
+			continue
+			;;
+		"**"*"** releases #"*)
+			note "$issue" '.host = null | .at = $now'
+			continue
+			;;
+		esac
 		if [ -n "$header" ]; then
 			from=${header%%"$tab"*}
 			to=${header#*"$tab"}
 			text=$second
+			case "$first" in *"** · fyi") fyi=true ;; *) fyi=false ;; esac
+			note "$issue" --arg f "$from" --arg t "$to" --argjson fyi "$fyi" '.from = $f | .to = $t | .fyi = $fyi | .at = $now'
 		else
 			from="the user"
 		fi
@@ -99,22 +128,20 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		case "$to" in
 		"@$login") ;;
 		"tech lead"*)
-			for id in $(live_of tech-lead); do [ "$(address_of "$id")" = "$to" ] && targets="$targets $id"; done
-			[ -n "$targets" ] || for id in $(open_of tech-lead); do [ "$(address_of "$id")" = "$to" ] && targets="$targets $id"; done
-			[ -n "$targets" ] || targets=$(live_of tech-lead | head -1)
+			# The repository's tech lead: the live one, else the last known.
+			targets=$(live_of tech-lead | head -1)
 			[ -n "$targets" ] || targets=$(open_of tech-lead | head -1)
 			;;
 		"dev #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
 		"")
 			# Written on GitHub by the user, without a header: to whoever waits on the user for that issue
-			# (asked there, or in its own chat about it), else to its developer, else to the tech lead who
-			# follows it.
+			# (asked there, or in its own chat about it), else to its developer, else to the tech lead.
 			for id in $(open_of dev "$issue") $(open_of qa "$issue") $(open_of tech-lead); do
 				jq -e --argjson n "$issue" '.state == "you" and (.asked_on == $n or (.asked_on == null and .issue == $n))' \
 					"$sessions_dir/$id/status" >/dev/null 2>&1 && targets="$targets $id"
 			done
 			[ -n "$targets" ] || targets=$(open_of dev "$issue")
-			[ -n "$targets" ] || for id in $(open_of tech-lead); do [ "$(address_of "$id")" = "$(follower_of "$issue")" ] && targets=$id; done
+			[ -n "$targets" ] || targets=$(live_of tech-lead | head -1)
 			;;
 		esac
 		for id in $targets; do
@@ -127,20 +154,19 @@ else
 	rm -f "$cursor.next"
 fi
 
-# 2. Questions left in an agent's own chat, unanswered for 5 minutes, go to the tech lead on the issue.
+# 2. Questions an agent left in its own chat, which nobody reads, go to the tech lead on the issue.
 for id in $(sessions_of dev) $(sessions_of qa); do
 	asked="$sessions_dir/$id/asked"
 	waiting_in_chat "$id" || continue
 	[ ! -f "$asked.told" ] || continue
 	at=$(sed -n 1p "$asked")
 	case "$at" in "" | *[!0-9]*) continue ;; esac
-	[ $((now - at)) -ge 300 ] || continue
+	[ $((now - at)) -ge 30 ] || continue
 	issue=$(jq -r .issue "$sessions_dir/$id/status")
-	follower=$(follower_of "$issue")
-	printf '**%s → %s**\n\nAsked in its own chat, where nobody answered:\n\n%s\n' "$(address_of "$id")" "$follower" "$(sed -n '4,$p' "$asked")" |
+	printf '**%s → tech lead**\n\nAsked in its own chat:\n\n%s\n' "$(address_of "$id")" "$(sed -n '4,$p' "$asked")" |
 		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
 		touch "$asked.told"
-		state_set "$id" others "waits for $follower: $(sed -n 4p "$asked")"
+		state_set "$id" others "waits for tech lead: $(sed -n 4p "$asked")"
 	}
 done
 
@@ -193,34 +219,52 @@ for record in "$repo_dir"/qa/*; do
 	[ -n "$(live_of qa "$issue")" ] || sh "$here/start-qa.sh" "$issue" "$pr" >/dev/null 2>&1 || true
 done
 
-# 5. The next workable issue gets a developer, within capacity.
-max=$(rule agents)
-case "$max" in "" | *[!0-9]*) max=2 ;; esac
-capacity="ok"
-# The plan usage of this account, read at most every 5 minutes for all its repositories (the usage API
-# rate-limits frequent readers); when a read fails, the last good one holds for 30 minutes.
-usage_file="$team_state/usage/$(printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | tr '/' '_')"
+# 5. The next workable issue gets a developer: no cap, the user decides what is ready.
+# The plan usage of this account, only shown on the board: read at most every 5 minutes for all its
+# repositories (the usage API rate-limits frequent readers); when a read fails, the last good one holds for
+# 30 minutes.
+usage_file="$team_state/usage/$(printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | tr '/' '_').json"
 mkdir -p "$team_state/usage"
 usage=""
 if [ -n "$(find "$usage_file" -mmin -5 2>/dev/null)" ]; then
 	usage=$(cat "$usage_file")
-elif command -v clessidra >/dev/null 2>&1 && fresh=$(clessidra 2>/dev/null) && [ -n "$fresh" ]; then
+elif command -v clessidra >/dev/null 2>&1 && fresh=$(clessidra --json 2>/dev/null) &&
+	printf '%s' "$fresh" | jq -e '.windows' >/dev/null 2>&1; then
 	usage=$fresh
 	printf '%s\n' "$usage" >"$usage_file.$$" && mv "$usage_file.$$" "$usage_file"
 elif [ -n "$(find "$usage_file" -mmin -30 2>/dev/null)" ]; then
 	usage=$(cat "$usage_file")
 fi
-if [ -n "$usage" ]; then
-	lines=$usage
-	[ "$(rule capacity)" != 5h ] || lines=$(printf '%s\n' "$usage" | grep -i '5h' || true)
-	if printf '%s\n' "$lines" | grep -q 'runs out in'; then
-		capacity="runs out before the reset"
-		max=0
-	fi
-else
-	capacity="unreadable, at most 1 developer"
-	[ "$max" -le 1 ] || max=1
-fi
+# at <time>: a time of clessidra's as the board shows it, with the day only when it is not today.
+at() {
+	if [ "$(date -d "$1" +%F)" = "$(date +%F)" ]; then date -d "$1" +%H:%M; else date -d "$1" '+%a %-d %b %H:%M'; fi
+}
+# span <minutes>: "35m", "1h 15m", "2d 5h", the two largest units, as clessidra writes them.
+span() {
+	d=$(($1 / 1440)) h=$(($1 % 1440 / 60)) m=$(($1 % 60))
+	if [ "$d" -gt 0 ]; then echo "${d}d${h:+ ${h}h}" | sed 's/ 0h$//'
+	elif [ "$h" -gt 0 ]; then echo "${h}h ${m}m" | sed 's/ 0m$//'
+	else echo "${m}m"; fi
+}
+# window <5h|7d>: that window from clessidra --json, as {text, tone}: "11% · reset 02:20 · lasts" (ok),
+# "80% · out 12:45 · reset 14:00 · 1h 15m short" (alert), "2% · reset 16:55 · too early" (text).
+window() {
+	row=$(printf '%s' "$usage" | jq -r --arg w "$1" '.windows[]? | select(.window == $w)
+		| [.outcome, ((.used // 0) | floor | tostring), (.resets_at // "-"), (.runs_out_at // "-"),
+			((.short_by_minutes // 0) | tostring)] | @tsv' 2>/dev/null | head -1)
+	[ -n "$row" ] || { jq -n '{text: "unreadable", tone: "text"}'; return; }
+	outcome=$(printf '%s' "$row" | cut -f1) used=$(printf '%s' "$row" | cut -f2)
+	resets=$(printf '%s' "$row" | cut -f3) out=$(printf '%s' "$row" | cut -f4) short=$(printf '%s' "$row" | cut -f5)
+	case "$outcome" in
+	lasts) text="$used% · reset $(at "$resets") · lasts" tone=ok ;;
+	runs_out) text="$used% · out $(at "$out") · reset $(at "$resets") · $(span "$short") short" tone=alert ;;
+	limit_reached) text="$used% · reset $(at "$resets") · limit reached" tone=alert ;;
+	too_early) text="$used% · reset $(at "$resets") · too early" tone=text ;;
+	not_started) text="not started" tone=text ;;
+	*) text="no data" tone=text ;;
+	esac
+	jq -n --arg text "$text" --arg tone "$tone" '{text: $text, tone: $tone}'
+}
 # Busy: the live developers, and the ones resumed in this run, which have no heartbeat yet.
 busy=$(($(live_of dev | wc -l | tr -d ' ') + ${resumed:-0}))
 queue=$(sh "$here/queue.sh" 2>/dev/null || true)
@@ -234,7 +278,7 @@ for issue in $workable; do
 	next=$issue
 	break
 done
-if [ -n "$next" ] && [ "$busy" -lt "$max" ]; then
+if [ -n "$next" ]; then
 	sh "$here/start-dev.sh" "$next" >/dev/null 2>&1 && busy=$((busy + 1)) && next=""
 fi
 
@@ -242,17 +286,45 @@ fi
 sh "$here/checkout.sh" next >/dev/null 2>&1 || true
 holder=$(sed -n 1p "$repo_dir/checkout" 2>/dev/null || true)
 base=$(base_branch)
-sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)
-ci=$(gh run list --branch "$base" --commit "$sha" --limit 50 --json status,conclusion 2>/dev/null |
-	jq -r 'if length == 0 then "no runs" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "red"
-		elif any(.[]; .status != "completed") then "running" else "green" end' 2>/dev/null || echo "?")
+# The default branch's CI, asked at most every 5 minutes: every machine shares one GitHub account and its
+# hourly API allowance.
+ci_file="$repo_dir/ci"
+if [ -n "$(find "$ci_file" -mmin -5 2>/dev/null)" ]; then
+	ci=$(cat "$ci_file")
+else
+	sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)
+	ci=$(gh run list --branch "$base" --commit "$sha" --limit 50 --json status,conclusion 2>/dev/null |
+		jq -r 'if length == 0 then "no runs" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "red"
+			elif any(.[]; .status != "completed") then "running" else "green" end' 2>/dev/null || echo "?")
+	[ "$ci" = "?" ] || echo "$ci" >"$ci_file"
+fi
+# The agents of other machines: the started issues another machine took, their state guessed from the notes
+# of the comments read here: stuck when nothing happened on the issue for an hour, waiting when the agent's
+# last message is still unanswered, working otherwise.
+myhost=$(sh "$here/claim.sh" host 2>/dev/null || true)
+elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {number, title, statusName}' 2>/dev/null |
+	while read -r row; do
+		f="$repo_dir/activity/$(printf '%s' "$row" | jq -r .number).json"
+		h=$(jq -r '.host // ""' "$f" 2>/dev/null || true)
+		[ -n "$h" ] && [ "$h" != "$myhost" ] || continue
+		jq -c --argjson row "$row" --argjson now "$now" '
+			($now - (.at // $now)) as $quiet
+			| (((.from // "") | test("^(dev|qa) #")) and (.fyi != true)) as $asks
+			| {issue: $row.number, title: $row.title, host: .host, since: (.at // $now),
+				stage: (($row.statusName // "in progress") | ascii_downcase),
+				state: (if $quiet > 3600 then "stuck" elif $asks then "others" else "working" end),
+				detail: (if $quiet > 3600 then "quiet \($quiet / 3600 | floor)h, on \(.host)"
+					elif $asks then "waits for \(.to), on \(.host)" else "on \(.host)" end)}' "$f"
+	done | jq -s -c '.')
 jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$holder")" \
 	--arg held_since "$(sed -n 2p "$repo_dir/checkout" 2>/dev/null)" \
 	--arg waiting "$(while read -r w; do [ -n "$w" ] && address_of "$w"; done <"$repo_dir/checkout.queue" 2>/dev/null | paste -sd, -)" \
 	--argjson ready "$(printf '%s\n' "$workable" | grep -c . || true)" --arg next "${next:+#$next}" \
 	--argjson backlog "$(printf '%s\n' "$queue" | jq -s '[.[] | select(.backlog)] | length' 2>/dev/null || echo 0)" \
 	--argjson questions "$(printf '%s\n' "$queue" | jq -s '[.[] | select(.question)] | length' 2>/dev/null || echo 0)" \
-	--arg ci "$ci" --arg capacity "$capacity" --argjson busy "$busy" --argjson max "$max" \
+	--arg ci "$ci" --argjson busy "$busy" --argjson h5 "$(window 5h)" --argjson d7 "$(window 7d)" \
+	--argjson elsewhere "${elsewhere:-[]}" \
 	'{updated: $now, checkout: {holder: $holder, since: $held_since, waiting: $waiting}, queue: {ready: $ready, next: $next,
-	backlog: $backlog, questions: $questions}, ci: $ci, capacity: $capacity, developers: {busy: $busy, max: $max}}' \
+	backlog: $backlog, questions: $questions}, ci: $ci, developers: {busy: $busy}, usage: {h5: $h5, d7: $d7},
+	elsewhere: $elsewhere}' \
 	>"$repo_dir/board.json.tmp" && mv "$repo_dir/board.json.tmp" "$repo_dir/board.json"

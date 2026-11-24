@@ -22,10 +22,9 @@ done
 branch=$(gh pr view "$pr" --json headRefName --jq .headRefName)
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{PR}}|$pr|g" -e "s|{{REPO}}|$repo_full|g" -e "s|{{ROOT}}|$root|g" \
 	-e "s|{{BASE}}|$(base_branch)|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/qa.md")
-brief=$(printf '%s\n\n%s\n' "$brief" "$(sh "$here/rules.sh" show --context 2>/dev/null || true)")
 
 cd "$root"
-name=$(qa_name "$issue")
+name=$(qa_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in review")
 id=$(launch "$name" "$brief")
 sh "$here/role.sh" "$id" qa "$issue" "$branch" >/dev/null
 status_set "$id" --argjson p "$pr" '.pr = $p'

@@ -8,6 +8,6 @@ How you work:
 4. You never decide. For each choice give the options you see, what each costs and risks, and your recommendation with its reason: the user decides, with the tech lead. When something cannot be known from what you can read, say so and say what would settle it.
 5. You ask nothing and talk to no one: no SendMessage, no issue, no comment. What is left open goes in the report.
 6. Write the report to `{{REPORT}}`, in the language of the question: the answer first, then the options and the facts behind them, each with where you read it (file and line, or a link).
-7. Then answer with nothing but one line, `result: <the answer in one sentence>`, and stop.
+7. Then run `sh "{{SCRIPTS}}/done.sh" "report ready"`: the plugin removes this session (its conversation stays). Last, answer with nothing but one line, `result: <the answer in one sentence>`, and stop.
 
 The question:

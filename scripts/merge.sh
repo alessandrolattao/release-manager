@@ -2,12 +2,12 @@
 # The developer merges its own pull request, once everything holds for its current head:
 #   - the decision review passed (review.sh);
 #   - the QA passed, when the issue carries the label qa (qa.sh);
-#   - every check of the pull request is green;
-#   - the default branch's CI is not red, unless this pull request closes the bug opened for it.
-# The method comes from the user's rules for the repository ("merge: merge|rebase|squash", merge commit when
-# none); "merge: user" means the user merges here: hand the pull request over with comment.sh <pr> you.
-# Then run main-ci.sh --wait in the background: the default branch's CI is yours until it is green.
-#   merge.sh <pr>
+#   - every check of the pull request is green.
+# A red default branch stops nobody: it is red for many reasons, most of them someone else's.
+# The method is the one the repository's own instructions ask for (--rebase, --squash); without one, a merge
+# commit when the repository allows it, else the method it allows.
+# Then run main-ci.sh <pr> --wait in the background: it follows the CI and deploy of the merge.
+#   merge.sh <pr> [--merge|--rebase|--squash]
 set -eu
 
 pr=${1:?pull request number}
@@ -20,12 +20,20 @@ refuse() {
 	exit 1
 }
 
-method=$(rule merge)
-method=${method:-merge}
-case "${method:-merge}" in
-merge | rebase | squash) ;;
-user) refuse "the user merges in this repository: hand the pull request over with comment.sh $pr you" ;;
-*) refuse "the user's rules say 'merge: $method', which is not merge, rebase, squash or user" ;;
+case "${2:-}" in
+--merge | --rebase | --squash) method=${2#--} ;;
+"")
+	allowed=$(gh api "repos/$repo_full" --jq '[if .allow_merge_commit then "merge" else empty end,
+		if .allow_rebase_merge then "rebase" else empty end, if .allow_squash_merge then "squash" else empty end] | join(" ")' 2>/dev/null || true)
+	case " $allowed " in
+	*" merge "* | "  ") method=merge ;;
+	*) method=${allowed%% *} ;;
+	esac
+	;;
+*)
+	echo "usage: merge.sh <pr> [--merge|--rebase|--squash]" >&2
+	exit 2
+	;;
 esac
 
 info=$(gh pr view "$pr" --json headRefOid,state,mergeable,closingIssuesReferences)
@@ -65,17 +73,8 @@ rm -f "$err"
 bad=$(printf '%s' "$checks" | jq -r '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL") | "\(.name): \(.state)"] | join(", ")')
 [ -z "$bad" ] || refuse "checks not green: $bad"
 
-if [ -f "$repo_dir/main-red" ]; then
-	bug=$(sed -n 2p "$repo_dir/main-red")
-	closes=$(printf '%s' "$info" | jq -r '[.closingIssuesReferences[].number] | map(tostring) | join(" ")')
-	case " $closes " in
-	*" $bug "*) ;;
-	*) refuse "the default branch's CI is red (issue #$bug): only the pull request that closes #$bug merges now" ;;
-	esac
-fi
-
 # Only the head that was reviewed and checked: a push in between makes GitHub refuse the merge.
 gh pr merge "$pr" "--$method" --match-head-commit "$head"
 echo "merged #$pr ($method)"
-[ -z "$me" ] || state_set "$me" working "merged #$pr, waits for the default branch's CI"
-echo "next: sh \"$here/main-ci.sh\" --wait, in the background"
+[ -z "$me" ] || state_set "$me" working "merged #$pr, waits for its CI and deploy"
+echo "next: sh \"$here/main-ci.sh\" $pr --wait, in the background"

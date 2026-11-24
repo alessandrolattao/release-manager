@@ -1,6 +1,7 @@
 #!/bin/sh
 # Starts the developer agent of one issue: the branch linked to the issue, a worktree of it, and a
-# background session "dev #<n> · <repo> · <slug>" with the brief briefs/dev.md and the user's rules.
+# background session "<repo> · dev #<n> · <title>" with the brief briefs/dev.md, once this machine has taken the issue
+# on GitHub (claim.sh).
 # The dispatcher runs it for the next workable issue; a tech lead runs it when the user asks for one now.
 #   start-dev.sh <issue-number>    (from the main checkout)
 set -eu
@@ -31,6 +32,10 @@ if ! mkdir "$starting" 2>/dev/null; then
 fi
 trap 'rmdir "$starting" 2>/dev/null || true' EXIT INT TERM
 
+# One machine per issue: this one takes it on GitHub first (30 seconds), and gives up when another one has
+# it. Taking it sets the issue In progress.
+sh "$here/claim.sh" take "$issue" || exit 1
+
 # The linked branch: reuse it when the issue already has one, otherwise let GitHub create <n>-<slug>.
 branch=$(gh issue develop "$issue" --list 2>/dev/null | awk 'NR==1 {print $1}')
 if [ -z "$branch" ]; then
@@ -52,13 +57,11 @@ fi
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}|$repo_full|g" \
 	-e "s|{{WORKTREE}}|$worktree|g" -e "s|{{ROOT}}|$root|g" -e "s|{{BASE}}|$base|g" \
 	-e "s|{{SCRIPTS}}|$here|g" -e "s|{{BRIEFS}}|$here/../briefs|g" "$here/../briefs/dev.md")
-brief=$(printf '%s\n\n%s\n' "$brief" "$(sh "$here/rules.sh" show --context 2>/dev/null || true)")
 
 cd "$worktree"
-name=$(dev_name "$issue" "$branch")
+name=$(dev_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in progress")
 id=$(launch "$name" "$brief")
 sh "$here/role.sh" "$id" dev "$issue" "$branch" >/dev/null
-sh "$here/project.sh" "$issue" "In Progress" >/dev/null 2>&1 || true
 echo "started $name ($id)"
 echo "branch   $branch"
 echo "worktree $worktree"

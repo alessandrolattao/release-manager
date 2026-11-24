@@ -31,7 +31,6 @@ for repo in "$old_state"/*/; do
 	key=$(basename "$repo")
 	[ "$key" != sessions ] || continue
 	mkdir -p "$team_state/repos/$key"
-	[ ! -f "$repo/main-red" ] || cp "$repo/main-red" "$team_state/repos/$key/main-red"
 done
 [ ! -d "$old_data/notes" ] || cp -R "$old_data/notes" "$team_data/" 2>/dev/null || true
 [ ! -d "$old_data/consults" ] || { mkdir -p "$team_data/spikes" && cp -R "$old_data/consults/." "$team_data/spikes/" 2>/dev/null || true; }

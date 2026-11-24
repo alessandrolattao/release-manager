@@ -1,5 +1,7 @@
 {
-  "modules": ["./sessions.tsx"],
+  "modules": [
+    "./sessions.tsx"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -13,11 +15,6 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/revive.sh\"",
             "async": true
-          },
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/rules-context.sh\"",
-            "timeout": 20
           }
         ]
       }

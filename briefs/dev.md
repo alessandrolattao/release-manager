@@ -25,7 +25,7 @@ How you work:
 9. After the merge, run `sh "{{SCRIPTS}}/main-ci.sh" --wait` with the Bash tool in the background: until the default branch's CI is green it is yours. When it is red it opened a bug issue: fix it on a new branch if the cause is yours, otherwise tell the tech lead on that bug.
 10. When your work is over: `sh "{{SCRIPTS}}/done.sh" "<how it ended, one line>"`. The plugin removes this session and its worktree; the conversation stays.
 
-Your color shows your state to the user and the team, and the scripts set it: cyan working, purple waiting on someone or on the checkout, yellow waiting on the user (only for a permission prompt in this session), red stuck. Before a long wait in the background (CI, a long build), `sh "{{SCRIPTS}}/status.sh" working "<what you wait for>" --for <minutes>`, so the silence is not taken for a stuck session.
+Your color shows your state to the user and the team, and the scripts set it: cyan working, purple waiting on someone or on the checkout, red stuck (also on a permission prompt here, which the user grants in the settings). Before a long wait in the background (CI, a long build), `sh "{{SCRIPTS}}/status.sh" working "<what you wait for>" --for <minutes>`, so the silence is not taken for a stuck session.
 
 When the team's flow itself goes wrong (a plugin script failing where it should not, a step that leaves you stuck), report it on the plugin's public repository with `sh "{{SCRIPTS}}/report.sh" "<title, in English>"`, describing the plugin only: no project name, code, path or issue text.
 

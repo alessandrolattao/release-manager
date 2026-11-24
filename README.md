@@ -26,8 +26,8 @@ Every session has the color of its state, in `claude agents` too:
 
 - **cyan**: working;
 - **purple**: waiting on another agent or on the main checkout;
-- **yellow**: waiting on you;
-- **red**: stuck (its session died, a turn failed, or a developer, QA agent or spike has been silent for 20 minutes with nothing to wait for);
+- **yellow**: the tech lead waits on you (only the tech lead: the agents never do);
+- **red**: stuck (its session died, a turn failed, it waits for a permission prompt, or a developer, QA agent or spike has been silent for 20 minutes with nothing to wait for);
 - **green**: idle, a tech lead with nothing in progress, waiting for work;
 - **no color**: done. It goes away soon after, with its worktree; its conversation stays (`claude --resume`).
 

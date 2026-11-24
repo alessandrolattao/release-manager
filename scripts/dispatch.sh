@@ -83,7 +83,8 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		grep -qx "$cid" "$seen" && continue
 		echo "$cid" >>"$seen"
 		from="" to="" text=$first
-		header=$(printf '%s' "$first" | sed -n 's/^\*\*\(.*\) → \(.*\)\*\*$/\1\t\2/p')
+		# "**from → to**", with " · fyi" after it when no answer is owed.
+		header=$(printf '%s' "$first" | sed -n 's/^\*\*\(.*\) → \(.*\)\*\*\( · fyi\)\{0,1\}$/\1\t\2/p')
 		# The team writes and reads with the user's own account: only its comments are listened to, so nobody
 		# else can pass for a session or the user. Anyone else's comment wakes nobody.
 		[ "$author" = "$login" ] || continue

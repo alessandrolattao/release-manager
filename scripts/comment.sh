@@ -12,7 +12,8 @@
 #   dev | qa     the developer or the QA agent of that issue
 #   "<address>"  a session by its address, as "dev #42" or "qa #42"
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
-#   --fyi        a reply or a piece of news: nobody owes you an answer, your state does not change
+#   --fyi        a reply or a piece of news: nobody owes you an answer, your state does not change, and the
+#                header says so ("**dev #42 → tech lead** · fyi")
 # Prints the comment's link.
 set -eu
 
@@ -50,7 +51,9 @@ dev | qa) address="$to #$issue" ;;
 *) address=$to ;;
 esac
 
-link=$(printf '**%s → %s**\n\n%s\n' "$from" "$address" "$body" | gh issue comment "$target" --body-file -)
+marker=""
+[ "$fyi" != --fyi ] || marker=" · fyi"
+link=$(printf '**%s → %s**%s\n\n%s\n' "$from" "$address" "$marker" "$body" | gh issue comment "$target" --body-file -)
 echo "$link"
 
 first=$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1)

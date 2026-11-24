@@ -439,7 +439,7 @@ export const register: Register = on => {
       </Text>
     )
     const project = data.repo.split('/')[1] ?? '...'
-    const title = titleLines(project, Math.max(24, e.viewport?.columns ?? 60))
+    const title = titleLines(project, Math.max(24, e.props.bodyColumns))
     return (
       <Box flexDirection="column">
         {title === null ? (

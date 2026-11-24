@@ -30,7 +30,7 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	# would start a copy of it under a new id instead of continuing it. The module renames it anyway.
 	# shellcheck disable=SC2086 # unset_args is a list of -u flags
 	if (cd "$dir" && env $unset_args claude --bg --resume "$id" "$prompt") </dev/null >/dev/null 2>&1; then
-		state_set "$id" working "ripresa dopo l'interruzione"
+		state_set "$id" working "resumed after an interruption"
 		echo "resumed $name"
 	else
 		echo "could not resume $name: resume it from claude agents" >&2

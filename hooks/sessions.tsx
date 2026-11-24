@@ -26,11 +26,23 @@ const STUCK_AFTER_S = 20 * 60
 const EXPECT_MS = 15000
 const PANE = 'team-board'
 const COLORS: Record<string, string> = { working: 'cyan', others: 'purple', you: 'yellow', stuck: 'red', done: 'default' }
-const DOTS: Record<string, string> = { working: 'cyan', others: 'magenta', you: 'yellow', stuck: 'red', done: 'gray' }
+// The board: the agents grouped by state, in this order, each name on the background of its state.
+const GROUPS: { state: string; title: string }[] = [
+  { state: 'you', title: 'WAITING ON YOU' },
+  { state: 'working', title: 'WORKING' },
+  { state: 'others', title: 'WAITING ON OTHERS' },
+  { state: 'stuck', title: 'STUCK' },
+]
+const BACKGROUNDS: Record<string, { bg: string; fg: string }> = {
+  you: { bg: 'yellow', fg: 'black' },
+  working: { bg: 'cyan', fg: 'black' },
+  others: { bg: 'magenta', fg: 'white' },
+  stuck: { bg: 'red', fg: 'white' },
+}
 const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 }
 
-const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], footer: '', waitingOnUser: 0, updated: 0 }, {
-  shape: 'board-1',
+const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, updated: 0 }, {
+  shape: 'board-2',
 })
 
 let stateRoot: string | undefined
@@ -59,7 +71,7 @@ type Status = {
 }
 
 // The detail a turn that starts gives; a turn that ends with it untouched changed nothing.
-const TURN_DETAIL = 'lavora'
+const TURN_DETAIL = 'at work'
 
 async function rootOf($: EngineInterface): Promise<string> {
   if (stateRoot === undefined) {
@@ -191,10 +203,16 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
     if (status.repo !== repo || !status.role || status.state === 'done') {
       continue
     }
-    const what = status.role === 'dev' || status.role === 'qa' ? `${status.issue ?? ''} ${status.title ?? ''}`.trim() : (status.topic ?? '')
+    const label =
+      status.role === 'tech-lead'
+        ? `tech lead${status.topic ? ` ${status.topic}` : ''}`
+        : status.role === 'spike'
+          ? `spike ${status.topic ?? ''}`.trim()
+          : `${status.role} #${status.issue ?? '?'}`
     rows.push({
       id: entry.name,
-      name: status.role === 'tech-lead' ? `tech lead${what ? ` ${what}` : ''}` : `${status.role} #${what}`,
+      label,
+      session: status.name ?? label,
       role: status.role,
       state: status.state ?? 'working',
       place: status.place ?? '',
@@ -202,34 +220,47 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       since: status.since ?? 0,
     })
   }
-  rows.sort((a, b) => (ORDER[a.role] ?? 9) - (ORDER[b.role] ?? 9) || a.name.localeCompare(b.name))
-  let footer = ''
+  rows.sort((a, b) => (ORDER[a.role] ?? 9) - (ORDER[b.role] ?? 9) || a.label.localeCompare(b.label, undefined, { numeric: true }))
+  let summary: Board['summary'] = null
   try {
     const key = repo.replace('/', '_')
-    const summary = JSON.parse(await $.fs.read(`${root}/repos/${key}/board.json`)) as {
+    const written = JSON.parse(await $.fs.read(`${root}/repos/${key}/board.json`)) as {
       checkout?: { holder?: string; waiting?: string }
       queue?: { ready?: number; next?: string; backlog?: number; questions?: number }
       ci?: string
       capacity?: string
       developers?: { busy?: number; max?: number }
     }
-    const checkout = summary.checkout?.holder ? `checkout: ${summary.checkout.holder}` : 'checkout libero'
-    const waiting = summary.checkout?.waiting ? ` · in coda: ${summary.checkout.waiting}` : ''
-    footer = `${checkout}${waiting} · developer ${summary.developers?.busy ?? 0}/${summary.developers?.max ?? 0} · pronte ${summary.queue?.ready ?? 0}${summary.queue?.next ? ` (${summary.queue.next})` : ''} · backlog ${summary.queue?.backlog ?? 0} · CI main ${summary.ci ?? '?'} · capacità ${summary.capacity ?? '?'}`
+    const waiting = written.checkout?.waiting ? ` · queued: ${written.checkout.waiting}` : ''
+    summary = {
+      checkout: `${written.checkout?.holder || 'free'}${waiting}`,
+      developers: `${written.developers?.busy ?? 0}/${written.developers?.max ?? 0}`,
+      queue: `${written.queue?.ready ?? 0} ready · ${written.queue?.backlog ?? 0} backlog${written.queue?.next ? ` · next ${written.queue.next}` : ''}`,
+      ci: written.ci ?? '?',
+      capacity: written.capacity ?? '?',
+    }
   } catch {
-    footer = 'il dispatcher non ha ancora scritto il riepilogo'
+    summary = null
   }
   const now = Math.floor((await $.clock.now()) / 1000)
-  await update($, board, () => ({ repo, rows, footer, waitingOnUser: rows.filter(r => r.state === 'you').length, updated: now }))
+  await update($, board, () => ({ repo, rows, summary, updated: now }))
 }
 
 async function openBoard($: EngineInterface): Promise<void> {
   await $.ui.open({ id: PANE, title: 'Team' })
 }
 
-async function copyAttach($: EngineInterface, name: string): Promise<void> {
-  await $.ui.copy({ text: `claude attach "${name}"` })
-  $.ui.toast(`copiato: claude attach "${name}"`)
+// Opens an agent's session in this terminal, as picking it in the agent view does: /resume with its id
+// sends this session to the background and attaches the other one (← on an empty prompt comes back to
+// the agent view). When the engine refuses the command, its `claude attach` is copied instead.
+async function openSession($: EngineInterface, id: string, name: string): Promise<void> {
+  try {
+    await $.command.run({ command: 'resume', args: id })
+  } catch (err) {
+    $.ui.log(`resume ${id}: ${String(err)}`)
+    await $.ui.copy({ text: `claude attach "${name}"` })
+    $.ui.toast(`copied: claude attach "${name}"`)
+  }
 }
 
 async function tick($: EngineInterface): Promise<void> {
@@ -254,7 +285,7 @@ async function tick($: EngineInterface): Promise<void> {
       // user or the team is its normal state, and a dead one turns red through the dispatcher.
       const idleSince = Number(await readText($, `${folder}/idle`))
       if (role !== 'tech-lead' && !isBusy && status.state === 'working' && idleSince > 0 && now - idleSince > STUCK_AFTER_S && (status.busy_until ?? 0) < now) {
-        await setState($, folder, 'stuck', `ferma da ${age(idleSince, now)} senza aspettare niente`)
+        await setState($, folder, 'stuck', `silent for ${age(idleSince, now)} with nothing to wait for`)
         status = await readStatus($, folder)
       }
     }
@@ -284,7 +315,7 @@ async function tick($: EngineInterface): Promise<void> {
 async function failedTurn($: EngineInterface, reason: string): Promise<void> {
   const folder = await folderOf($)
   if ((await readText($, `${folder}/role`)) !== '') {
-    await setState($, folder, 'stuck', reason === 'refusal' ? 'il modello ha rifiutato' : 'errore API o limite di utilizzo')
+    await setState($, folder, 'stuck', reason === 'refusal' ? 'the model refused' : 'API error or usage limit')
   }
 }
 
@@ -363,22 +394,81 @@ export const register: Register = on => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const data: Board = await read($, board)
     const now = Math.floor((await $.clock.now()) / 1000)
-    const room = Math.max(3, (e.viewport?.rows ?? 30) - 4)
-    const waiting = data.waitingOnUser > 0 ? ` · ${data.waitingOnUser} ti aspett${data.waitingOnUser === 1 ? 'a' : 'ano'}` : ''
+    // The height is what the board uses: a group's title, then two or three lines per agent. What does not
+    // fit is counted on one last line, above the summary (6 lines).
+    const width = Math.max(20, (e.viewport?.columns ?? 60) - 2)
+    let room = Math.max(4, (e.viewport?.rows ?? 30) - 2 - 6)
+    let hidden = 0
+    const groups = GROUPS.map(group => {
+      const members = data.rows.filter(row => row.state === group.state)
+      const shown: BoardRow[] = []
+      for (const row of members) {
+        const lines = 1 + Math.min(2, Math.ceil(Math.max(1, row.detail.length) / width)) + (shown.length === 0 ? 2 : 0)
+        if (lines > room) {
+          hidden++
+          continue
+        }
+        room -= lines
+        shown.push(row)
+      }
+      return { ...group, count: members.length, shown }
+    }).filter(group => group.shown.length > 0)
+    const summary = data.summary
+    const line = (label: string, value: string) => (
+      <Text>
+        <Text dimColor>{label.padEnd(11)}</Text>
+        {value}
+      </Text>
+    )
     return (
       <Box flexDirection="column">
-        <Text bold>TEAM · {data.repo || '...'}{waiting}</Text>
-        {data.rows.length === 0 && <Text dimColor>Nessun agente al lavoro.</Text>}
-        {data.rows.slice(0, room).map(row => (
-          <Button key={row.id} onPress={() => copyAttach($, row.name)}>
-            <Text color={DOTS[row.state] ?? 'gray'}>● </Text>
-            <Text>{row.name.slice(0, 40)}</Text>
-            <Text dimColor>{row.place ? ` ${row.place}` : ''} · </Text>
-            <Text>{row.detail.slice(0, 60)}</Text>
-            <Text dimColor> {age(row.since, now)}</Text>
-          </Button>
+        <Text bold>TEAM · {data.repo.split('/')[1] ?? '...'}</Text>
+        {data.rows.length === 0 && <Text dimColor>No agents at work.</Text>}
+        {groups.map(group => (
+          <Box key={group.state} flexDirection="column" marginTop={1}>
+            <Text bold>
+              {group.title} ({group.count})
+            </Text>
+            {group.shown.map(row => {
+              const look = BACKGROUNDS[row.state] ?? { bg: 'gray', fg: 'white' }
+              return (
+                <Box key={row.id} flexDirection="column">
+                  <Box flexDirection="row">
+                    <Button key={row.id} plain onPress={() => openSession($, row.id, row.session)}>
+                      <Text backgroundColor={look.bg} color={look.fg}> {row.label} </Text>
+                    </Button>
+                    <Text dimColor>
+                      {'  '}
+                      {row.place ? `${row.place} · ` : ''}
+                      {age(row.since, now)}
+                    </Text>
+                  </Box>
+                  {row.detail !== '' && (
+                    <Box paddingLeft={2}>
+                      <Text wrap="wrap" maxLines={2}>
+                        {row.detail}
+                      </Text>
+                    </Box>
+                  )}
+                </Box>
+              )
+            })}
+          </Box>
         ))}
-        <Text dimColor>{data.footer}</Text>
+        {hidden > 0 && <Text dimColor>… e altri {hidden}</Text>}
+        <Box flexDirection="column" marginTop={1}>
+          {summary === null ? (
+            <Text dimColor>the dispatcher has not written its summary yet</Text>
+          ) : (
+            <>
+              {line('checkout', summary.checkout)}
+              {line('developers', summary.developers)}
+              {line('queue', summary.queue)}
+              {line('main CI', summary.ci)}
+              {line('capacity', summary.capacity)}
+            </>
+          )}
+        </Box>
       </Box>
     )
   })

@@ -8,7 +8,7 @@ set -eu
 # shellcheck source=hooks/common.sh
 . "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
 case "$role" in tech-lead | dev | qa | spike) ;; *) exit 0 ;; esac
-state_set "$sid" working "con te"
+state_set "$sid" working "with you"
 status_set "$sid" 'del(.resume_to)'
 [ "$role" = tech-lead ] || exit 0
 

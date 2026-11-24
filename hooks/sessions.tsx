@@ -14,7 +14,7 @@ import type { Board, BoardRow } from '../types'
 //     while it should be working, means stuck.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn (hooks/session-events.sh wakes a session only between turns).
-//   - in a tech lead it draws the board (/team-board opens it): the agents of the repository by state, and a
+//   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh) started by hand, which a
 //     click on its row starts when it is stopped.
 
@@ -519,7 +519,7 @@ function emptied(content: readonly ApiContentBlock[]): ApiContentBlock[] {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    await $.command.register({ name: 'team-board', description: 'Open the team board: every agent of this repository, colored by its state' })
+    await $.command.register({ name: 'team', description: 'Open the team pane: the project, its agents by state, the summary' })
     if (!isBusy) {
       await markTurn($, false)
     }
@@ -529,9 +529,9 @@ export const register: Register = on => {
     return result
   })
 
-  on('command.run', { command: 'team-board' }, async $ => {
+  on('command.run', { command: 'team' }, async $ => {
     await openBoard($)
-    return { text: 'Team board opened.' }
+    return { text: 'Team pane opened.' }
   })
 
   on('turn.start', async ($, e, next) => {

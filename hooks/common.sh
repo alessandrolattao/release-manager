@@ -1,4 +1,5 @@
-# Sourced by the hooks: reads the payload on stdin and tells which session it comes from.
+# Sourced by the hooks: reads the payload on stdin and tells which session it comes from and what it is
+# in the team (its role, recorded by scripts/role.sh).
 # shellcheck shell=sh disable=SC2034 # the variables are used by the hooks that source this file
 
 payload=$(cat)
@@ -8,58 +9,12 @@ cwd=$(field cwd)
 case "$sid" in
 "" | *[!A-Za-z0-9-]*) exit 0 ;;
 esac
-state_dir="${TMPDIR:-/tmp}/release-manager-$(id -u)"
+state_dir="${TMPDIR:-/tmp}/team-$(id -u)"
 mkdir -p "$state_dir"
-scripts="${CLAUDE_PLUGIN_ROOT:?}/skills/run/scripts"
-
+scripts="${CLAUDE_PLUGIN_ROOT:?}/scripts"
 transcript=$(field transcript_path)
+# shellcheck source=scripts/session-dir.sh
+. "$scripts/session-dir.sh"
 
-# session_name prints this session's current name, or nothing when it cannot be told.
-# The transcript (its path comes with the hook payload) holds what --name and /rename set;
-# `claude agents` is the fallback, since from inside a session it may not list it right away.
-session_name() {
-	name=""
-	if [ -n "$transcript" ] && [ -f "$transcript" ]; then
-		name=$(grep -E '"type":"(custom-title|agent-name)"' "$transcript" 2>/dev/null | tail -1 |
-			jq -r '.customTitle // .agentName // empty' 2>/dev/null || true)
-	fi
-	[ -n "$name" ] || name=$(claude agents --json 2>/dev/null | jq -r --arg s "$sid" '[.[] | select(.sessionId == $s) | .name][0] // empty' 2>/dev/null || true)
-	printf '%s' "$name"
-}
-
-# agent_issue prints the issue of this session when it is a developer agent: it runs in the worktree of a
-# branch "<issue>-<slug>" and its name carries a state tag. Nothing for any other session. The caller has
-# sourced session-dir.sh: the last name asked comes first, since a rename shows only when the turn ends.
-agent_issue() {
-	case "$cwd" in
-	*/.claude/worktrees/*) ;;
-	*) return 0 ;;
-	esac
-	branch=${cwd##*/.claude/worktrees/}
-	branch=${branch%%/*}
-	number=${branch%%-*}
-	case "$number" in
-	"" | *[!0-9]*) return 0 ;;
-	esac
-	tag=$(cat "$sessions_dir/$sid/name" 2>/dev/null || true)
-	[ -n "$tag" ] || tag=$(session_name)
-	case "$tag" in
-	"["*) printf '%s' "$number" ;;
-	esac
-}
-
-# role_is <name prefix> <cache tag>: true when this session's name starts with the prefix.
-# Only a yes is cached: a session can start under another name and rename itself a few seconds
-# later (the skills do), so until it matches, the name is read again at every event.
-role_is() {
-	cache="$state_dir/$sid.$2"
-	[ "$(cat "$cache" 2>/dev/null)" = yes ] && return 0
-	current=$(session_name)
-	case "$current" in
-	"$1"*)
-		echo yes >"$cache"
-		return 0
-		;;
-	esac
-	return 1
-}
+# role: tech-lead, dev, qa, spike, or empty for a session outside the team.
+role=$(cat "$sessions_dir/$sid/role" 2>/dev/null || true)

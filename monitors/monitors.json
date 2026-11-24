@@ -1,7 +1,7 @@
 [
   {
     "name": "session-events",
-    "description": "release manager or planner: something to look at",
+    "description": "team: something for this session",
     "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/session-events.sh\""
   }
 ]

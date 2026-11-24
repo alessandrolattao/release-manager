@@ -434,7 +434,7 @@ export const register: Register = on => {
                   </Box>
                   {row.detail !== '' && (
                     <Box paddingLeft={2}>
-                      <Text wrap="wrap" maxLines={2}>
+                      <Text wrap="wrap">
                         {row.detail}
                       </Text>
                     </Box>

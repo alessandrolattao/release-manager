@@ -28,5 +28,5 @@ if [ "$(jq -r '.role // ""' "$sessions_dir/$me/status" 2>/dev/null)" = qa ]; the
 		;;
 	esac
 fi
-state_set "$me" done "$(printf '%s' "$detail" | tr '\n' ' ' | cut -c1-120)"
+state_set "$me" done "$(printf '%s' "$detail" | tr '\n' ' ')"
 echo "done: this session goes away in a few minutes"

@@ -11,7 +11,8 @@
 # asked_on: the issue where the session asked the user on GitHub (comment.sh); absent when it asked in its
 # own chat (hooks/asks.sh), where the user answers it directly.
 # state: working (cyan), others (purple: waits on another agent or the checkout), you (yellow: waits on
-# the user), stuck (red: dead, failing or silent), done (no color, then the session goes away).
+# the user), stuck (red: dead, failing or silent), idle (green: a tech lead waiting for work), done (no
+# color, then the session goes away).
 # shellcheck shell=sh disable=SC2034 # the variables are used by the files that source this one
 
 team_state="${XDG_STATE_HOME:-$HOME/.local/state}/team"

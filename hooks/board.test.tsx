@@ -21,6 +21,7 @@ const BOARD: Board = {
   rows: [
     { id: 'a', label: 'tech lead', session: 'tech lead · equokar.com', role: 'tech-lead', state: 'you', place: '', detail: 'Registro come tua regola fissa che le domande per te passano tutte da me?', since: 0 },
     { id: 'b', label: 'dev #318', session: 'dev #318 · equokar.com · il-banco', role: 'dev', state: 'you', place: 'checkout', detail: 'giro vero di #318 sul bucket e su Google Drive, comandi in issue', since: 0 },
+    { id: 'd', label: 'tech lead api', session: 'tech lead · equokar.com · api', role: 'tech-lead', state: 'idle', place: '', detail: 'waiting for work', since: 0 },
     { id: 'c', label: 'dev #8', session: 'dev #8 · equokar.com · una-pull', role: 'dev', state: 'working', place: 'worktree 8', detail: 'removal of preview pr-317 with SST .38', since: 0 },
   ],
   summary: { checkout: 'dev #318', developers: '2/2', queue: '0 ready · 5 backlog', ci: 'verde', capacity: 'ok' },
@@ -39,6 +40,8 @@ test('the board groups the agents by state, names on the color of their state', 
   expect(name?.text).toBe(' dev #318 ')
   expect(name?.props.backgroundColor).toBe('yellow')
   expect((await ui.find({ type: 'Text', text: /removal of preview/ }))?.text).toBe('removal of preview pr-317 with SST .38')
+  expect((await ui.find({ type: 'Text', text: /^IDLE/ }))?.text).toBe('IDLE (1)')
+  expect((await ui.find({ type: 'Text', text: /tech lead api/ }))?.props.backgroundColor).toBe('green')
   expect((await ui.find({ type: 'Text', text: /^capacity/ }))?.text).toContain('ok')
   await ui.unmount()
 })

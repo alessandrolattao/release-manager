@@ -25,19 +25,22 @@ const DISPATCH_TIMEOUT_MS = 600000
 const STUCK_AFTER_S = 20 * 60
 const EXPECT_MS = 15000
 const PANE = 'team-board'
-const COLORS: Record<string, string> = { working: 'cyan', others: 'purple', you: 'yellow', stuck: 'red', done: 'default' }
+const COLORS: Record<string, string> = { working: 'cyan', others: 'purple', you: 'yellow', stuck: 'red', idle: 'green', done: 'default' }
+const IDLE_DETAIL = 'waiting for work'
 // The board: the agents grouped by state, in this order, each name on the background of its state.
 const GROUPS: { state: string; title: string }[] = [
   { state: 'you', title: 'WAITING ON YOU' },
   { state: 'working', title: 'WORKING' },
   { state: 'others', title: 'WAITING ON OTHERS' },
   { state: 'stuck', title: 'STUCK' },
+  { state: 'idle', title: 'IDLE' },
 ]
 const BACKGROUNDS: Record<string, { bg: string; fg: string }> = {
   you: { bg: 'yellow', fg: 'black' },
   working: { bg: 'cyan', fg: 'black' },
   others: { bg: 'magenta', fg: 'white' },
   stuck: { bg: 'red', fg: 'white' },
+  idle: { bg: 'green', fg: 'black' },
 }
 const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 }
 
@@ -136,7 +139,8 @@ async function apply($: EngineInterface, key: string, command: string, value: st
 async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
   try {
     const folder = await folderOf($)
-    if ((await readText($, `${folder}/role`)) === '') {
+    const role = await readText($, `${folder}/role`)
+    if (role === '') {
       return
     }
     const now = Math.floor((await $.clock.now()) / 1000)
@@ -154,15 +158,27 @@ async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
       } else if (status.state !== 'working' && status.state !== 'done') {
         await setState($, folder, 'working', TURN_DETAIL)
       }
-    } else if (status.resume_to !== undefined) {
-      const back = status.resume_to
-      delete status.resume_to
-      if (status.state === 'working' && status.detail === TURN_DETAIL) {
-        status.state = back.state
-        status.detail = back.detail
-        status.since = back.since
+    } else {
+      const before = JSON.stringify(status)
+      if (status.resume_to !== undefined) {
+        const back = status.resume_to
+        delete status.resume_to
+        if (status.state === 'working' && status.detail === TURN_DETAIL) {
+          status.state = back.state
+          status.detail = back.detail
+          status.since = back.since
+        }
       }
-      await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
+      // A tech lead whose turn ends with nothing in progress, no question for the user and nobody to wait
+      // on, waits for work: idle (green). A question asks.sh finds afterwards turns it yellow anyway.
+      if (role === 'tech-lead' && status.state === 'working' && (status.busy_until ?? 0) < now) {
+        status.state = 'idle'
+        status.detail = IDLE_DETAIL
+        status.since = now
+      }
+      if (JSON.stringify(status) !== before) {
+        await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
+      }
     }
   } catch (err) {
     $.ui.log(`turn: ${String(err)}`)

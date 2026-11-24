@@ -24,7 +24,8 @@ export type BoardSummary = {
   usage7d: BoardUsage
 }
 
-export type BoardUsage = { text: string; tone: string }
+// alt, when set (above 90% used), alternates with text on the board: when the window resets.
+export type BoardUsage = { text: string; alt: string; tone: string }
 
 // This repository's dispatcher on this machine: running when its last cycle is recent.
 export type BoardDispatcher = {

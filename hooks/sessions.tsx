@@ -21,6 +21,7 @@ import type { Board, BoardRow } from '../types'
 const TICK_MS = 2000
 const ALIVE_EVERY_TICKS = 30
 const BOARD_EVERY_TICKS = 2
+const ALTERNATE_S = 4
 const DISPATCHER_START_MS = 30000
 const DISPATCHER_ALIVE_S = 660
 const STUCK_AFTER_S = 20 * 60
@@ -39,7 +40,8 @@ const GROUPS: { state: string; title: string }[] = [
 const BACKGROUNDS: Record<string, { bg: string; fg: string }> = {
   you: { bg: 'yellow', fg: 'black' },
   working: { bg: 'cyan', fg: 'black' },
-  others: { bg: 'magenta', fg: 'white' },
+  // The purple Claude Code gives an agent in the agent list (dark theme), not the terminal's magenta, which draws pink.
+  others: { bg: '#827dbd', fg: 'white' },
   stuck: { bg: 'red', fg: 'white' },
   idle: { bg: 'green', fg: 'black' },
 }
@@ -388,7 +390,7 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       queue?: { ready?: number; next?: string; backlog?: number; questions?: number }
       ci?: string
       developers?: { busy?: number }
-      usage?: { h5?: { text?: string; tone?: string }; d7?: { text?: string; tone?: string } }
+      usage?: { h5?: { text?: string; alt?: string; tone?: string }; d7?: { text?: string; alt?: string; tone?: string } }
       elsewhere?: { issue: number; host: string; stage?: string; state: string; detail: string; since: number }[]
     }
     // The developers of other machines, as the dispatcher guesses them from GitHub (scripts/dispatch.sh).
@@ -411,8 +413,8 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       developers: `${written.developers?.busy ?? 0} at work`,
       queue: `${written.queue?.ready ?? 0} ready · ${written.queue?.backlog ?? 0} backlog${written.queue?.next ? ` · next ${written.queue.next}` : ''}`,
       ci: written.ci ?? '?',
-      usage5h: { text: written.usage?.h5?.text || 'unreadable', tone: written.usage?.h5?.tone ?? 'text' },
-      usage7d: { text: written.usage?.d7?.text || 'unreadable', tone: written.usage?.d7?.tone ?? 'text' },
+      usage5h: { text: written.usage?.h5?.text || 'unreadable', alt: written.usage?.h5?.alt ?? '', tone: written.usage?.h5?.tone ?? 'text' },
+      usage7d: { text: written.usage?.d7?.text || 'unreadable', alt: written.usage?.d7?.alt ?? '', tone: written.usage?.d7?.tone ?? 'text' },
     }
   } catch {
     summary = null
@@ -583,6 +585,8 @@ export const register: Register = on => {
     const project = data.repo.split('/')[1] ?? '...'
     const title = titleRows(project, columns)
     const summary = data.summary
+    // Above 90%, a usage window's line alternates with when it resets, a few seconds each.
+    const usageText = (u: { text: string; alt: string }) => (u.alt !== '' && Math.floor(now / ALTERNATE_S) % 2 === 1 ? u.alt : u.text)
     // The dispatcher first: stopped, in red, it is a control that starts it.
     const dispatcher: Item = data.dispatcher.running
       ? { label: 'dispatcher', value: `running${data.dispatcher.version ? ` · team ${data.dispatcher.version}` : ''}`, look: 'ok' }
@@ -596,8 +600,8 @@ export const register: Register = on => {
             { label: 'developers', value: summary.developers },
             { label: 'queue', value: summary.queue },
             { label: 'main CI', value: summary.ci },
-            { label: 'usage 5h', value: summary.usage5h.text, look: toneLook(summary.usage5h.tone) },
-            { label: 'usage 7d', value: summary.usage7d.text, look: toneLook(summary.usage7d.tone) },
+            { label: 'usage 5h', value: usageText(summary.usage5h), look: toneLook(summary.usage5h.tone) },
+            { label: 'usage 7d', value: usageText(summary.usage7d), look: toneLook(summary.usage7d.tone) },
           ]
     const bottom = summaryRows(items, columns)
     const version = await versionOf($)

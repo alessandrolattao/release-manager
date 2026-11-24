@@ -411,9 +411,9 @@ export const register: Register = on => {
     const data: Board = await read($, board)
     const now = Math.floor((await $.clock.now()) / 1000)
     // The height is what the board uses: a group's title, then two or three lines per agent. What does not
-    // fit is counted on one last line, above the summary (6 lines).
+    // fit is counted on one last line, above the summary (7 lines with its title).
     const width = Math.max(20, (e.viewport?.columns ?? 60) - 2)
-    let room = Math.max(4, (e.viewport?.rows ?? 30) - 2 - 6)
+    let room = Math.max(4, (e.viewport?.rows ?? 30) - 2 - 7)
     let hidden = 0
     const groups = GROUPS.map(group => {
       const members = data.rows.filter(row => row.state === group.state)
@@ -473,6 +473,7 @@ export const register: Register = on => {
         ))}
         {hidden > 0 && <Text dimColor>… e altri {hidden}</Text>}
         <Box flexDirection="column" marginTop={1}>
+          <Text bold>SUMMARY</Text>
           {summary === null ? (
             <Text dimColor>the dispatcher has not written its summary yet</Text>
           ) : (

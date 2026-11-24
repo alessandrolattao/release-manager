@@ -399,24 +399,10 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const data: Board = await read($, board)
     const now = Math.floor((await $.clock.now()) / 1000)
-    // The height is what the board uses: a group's title, then two or three lines per agent. What does not
-    // fit is counted on one last line, above the summary (7 lines with its title).
-    const width = Math.max(20, (e.viewport?.columns ?? 60) - 2)
-    let room = Math.max(4, (e.viewport?.rows ?? 30) - 2 - 7)
-    let hidden = 0
+    // Every agent is drawn: the pane's body scrolls (the wheel, or the keys while the pane has the focus).
     const groups = GROUPS.map(group => {
-      const members = data.rows.filter(row => row.state === group.state)
-      const shown: BoardRow[] = []
-      for (const row of members) {
-        const lines = 1 + Math.min(2, Math.ceil(Math.max(1, row.detail.length) / width)) + (shown.length === 0 ? 2 : 0)
-        if (lines > room) {
-          hidden++
-          continue
-        }
-        room -= lines
-        shown.push(row)
-      }
-      return { ...group, count: members.length, shown }
+      const shown = data.rows.filter(row => row.state === group.state)
+      return { ...group, count: shown.length, shown }
     }).filter(group => group.shown.length > 0)
     const summary = data.summary
     const line = (label: string, value: string) => (
@@ -458,7 +444,6 @@ export const register: Register = on => {
             })}
           </Box>
         ))}
-        {hidden > 0 && <Text dimColor>… e altri {hidden}</Text>}
         <Box flexDirection="column" marginTop={1}>
           <Text bold>SUMMARY</Text>
           {summary === null ? (

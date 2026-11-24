@@ -235,35 +235,33 @@ elif command -v clessidra >/dev/null 2>&1 && fresh=$(clessidra --json 2>/dev/nul
 elif [ -n "$(find "$usage_file" -mmin -30 2>/dev/null)" ]; then
 	usage=$(cat "$usage_file")
 fi
-# at <time>: a time of clessidra's as the board shows it, with the day only when it is not today.
+# at <time> <5h|7d>: a time of clessidra's as the board shows it: the hour within the 5-hour window, the
+# day of the week and the hour within the weekly one.
 at() {
-	if [ "$(date -d "$1" +%F)" = "$(date +%F)" ]; then date -d "$1" +%H:%M; else date -d "$1" '+%a %-d %b %H:%M'; fi
+	if [ "$2" = 5h ]; then date -d "$1" +%H:%M; else date -d "$1" '+%a %H:%M'; fi
 }
-# span <minutes>: "35m", "1h 15m", "2d 5h", the two largest units, as clessidra writes them.
-span() {
-	d=$(($1 / 1440)) h=$(($1 % 1440 / 60)) m=$(($1 % 60))
-	if [ "$d" -gt 0 ]; then echo "${d}d${h:+ ${h}h}" | sed 's/ 0h$//'
-	elif [ "$h" -gt 0 ]; then echo "${h}h ${m}m" | sed 's/ 0m$//'
-	else echo "${m}m"; fi
-}
-# window <5h|7d>: that window from clessidra --json, as {text, tone}: "11% · reset 02:20 · lasts" (ok),
-# "80% · out 12:45 · reset 14:00 · 1h 15m short" (alert), "2% · reset 16:55 · too early" (text).
+# window <5h|7d>: that window from clessidra --json, as {text, alt, tone}. text: "33% · lasts" (ok),
+# "99% · runs out Wed 08:00" (alert), "100% · resets Tue 17:00" (alert), "2% · too early" (text). Above 90%
+# the board alternates text with alt, "93% · resets 00:10": when the window starts again.
 window() {
 	row=$(printf '%s' "$usage" | jq -r --arg w "$1" '.windows[]? | select(.window == $w)
-		| [.outcome, ((.used // 0) | floor | tostring), (.resets_at // "-"), (.runs_out_at // "-"),
-			((.short_by_minutes // 0) | tostring)] | @tsv' 2>/dev/null | head -1)
-	[ -n "$row" ] || { jq -n '{text: "unreadable", tone: "text"}'; return; }
+		| [.outcome, ((.used // 0) | floor | tostring), (.resets_at // "-"), (.runs_out_at // "-")] | @tsv' 2>/dev/null | head -1)
+	[ -n "$row" ] || { jq -n '{text: "unreadable", alt: "", tone: "text"}'; return; }
 	outcome=$(printf '%s' "$row" | cut -f1) used=$(printf '%s' "$row" | cut -f2)
-	resets=$(printf '%s' "$row" | cut -f3) out=$(printf '%s' "$row" | cut -f4) short=$(printf '%s' "$row" | cut -f5)
+	resets=$(printf '%s' "$row" | cut -f3) out=$(printf '%s' "$row" | cut -f4)
+	alt=""
 	case "$outcome" in
-	lasts) text="$used% · reset $(at "$resets") · lasts" tone=ok ;;
-	runs_out) text="$used% · out $(at "$out") · reset $(at "$resets") · $(span "$short") short" tone=alert ;;
-	limit_reached) text="$used% · reset $(at "$resets") · limit reached" tone=alert ;;
-	too_early) text="$used% · reset $(at "$resets") · too early" tone=text ;;
+	lasts) text="$used% · lasts" tone=ok ;;
+	runs_out) text="$used% · runs out $(at "$out" "$1")" tone=alert ;;
+	limit_reached) text="$used% · resets $(at "$resets" "$1")" tone=alert ;;
+	too_early) text="$used% · too early" tone=text ;;
 	not_started) text="not started" tone=text ;;
 	*) text="no data" tone=text ;;
 	esac
-	jq -n --arg text "$text" --arg tone "$tone" '{text: $text, tone: $tone}'
+	if [ "$used" -ge 90 ] 2>/dev/null && [ "$outcome" != limit_reached ] && [ "$resets" != - ]; then
+		alt="$used% · resets $(at "$resets" "$1")"
+	fi
+	jq -n --arg text "$text" --arg alt "$alt" --arg tone "$tone" '{text: $text, alt: $alt, tone: $tone}'
 }
 # Busy: the live developers, and the ones resumed in this run, which have no heartbeat yet.
 busy=$(($(live_of dev | wc -l | tr -d ' ') + ${resumed:-0}))

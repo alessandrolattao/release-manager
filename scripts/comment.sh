@@ -56,6 +56,8 @@ fi
 [ -z "$me" ] || [ "$fyi" = --fyi ] || {
 	if [ "$to" = you ]; then
 		state_set "$me" you "$first"
+		# Asked on GitHub, so the answer comes on GitHub: the plugin wakes the session with it.
+		status_set "$me" --argjson n "$issue" '.asked_on = $n'
 	else
 		state_set "$me" others "aspetta $address: $first"
 	fi

@@ -27,7 +27,10 @@ request)
 	echo "QA requested for #$number at ${head%"${head#???????}"}: the plugin starts a QA agent"
 	;;
 pass | fail)
-	head=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
+	# The head the QA agent tested in the main checkout (checkout.sh take records it); a push made while it
+	# tested is not passed with it.
+	head=$(jq -r '.tested_head // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
+	[ -n "$head" ] || head=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
 	printf '%s\t%s\n' "$action" "$head" >"$repo_dir/qa/$number"
 	echo "QA $action recorded for #$number at ${head%"${head#???????}"}"
 	;;

@@ -22,6 +22,7 @@ if ! mkdir "$lock" 2>/dev/null; then
 	mkdir "$lock" 2>/dev/null || exit 0
 fi
 trap 'rm -rf "$lock"' EXIT
+trap 'exit 1' INT TERM
 login=$(gh api user --jq .login 2>/dev/null) || exit 0
 now=$(date +%s)
 tab=$(printf '\t')
@@ -39,6 +40,31 @@ live_of() {
 	for id in $(sessions_of "$1" "${2:-}"); do
 		{ alive "$id" || running "$id"; } && [ "$(jq -r .state "$sessions_dir/$id/status")" != done ] && echo "$id"
 	done
+}
+# open_of <role> [issue]: the sessions of that role (and issue) not done, alive or not: a comment for one
+# that is dead waits in its `wake` file and is delivered when it is resumed.
+open_of() {
+	for id in $(sessions_of "$1" "${2:-}"); do
+		[ "$(jq -r .state "$sessions_dir/$id/status")" != done ] && echo "$id"
+	done
+}
+# issue_of <number> <link>: the issue a comment belongs to. A comment on a pull request carries the pull
+# request's number: the issue is the one it closes (remembered), else the one its QA record names.
+issue_of() {
+	case "$2" in */pull/*) ;; *)
+		echo "$1"
+		return
+		;;
+	esac
+	known="$repo_dir/pr-issue/$1"
+	if [ ! -s "$known" ]; then
+		mkdir -p "$repo_dir/pr-issue"
+		n=$(gh pr view "$1" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty' 2>/dev/null || true)
+		[ -n "$n" ] || n=$(cut -f3 "$repo_dir/qa/$1" 2>/dev/null || true)
+		case "$n" in "" | *[!0-9]*) n="" ;; esac
+		[ -z "$n" ] || echo "$n" >"$known"
+	fi
+	cat "$known" 2>/dev/null || echo "$1"
 }
 
 # 1. GitHub comments to sessions.
@@ -61,6 +87,7 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		# The team writes and reads with the user's own account: only its comments are listened to, so nobody
 		# else can pass for a session or the user. Anyone else's comment wakes nobody.
 		[ "$author" = "$login" ] || continue
+		issue=$(issue_of "$issue" "$link")
 		if [ -n "$header" ]; then
 			from=${header%%"$tab"*}
 			to=${header#*"$tab"}
@@ -73,17 +100,21 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		"@$login") ;;
 		"tech lead"*)
 			for id in $(live_of tech-lead); do [ "$(address_of "$id")" = "$to" ] && targets="$targets $id"; done
+			[ -n "$targets" ] || for id in $(open_of tech-lead); do [ "$(address_of "$id")" = "$to" ] && targets="$targets $id"; done
 			[ -n "$targets" ] || targets=$(live_of tech-lead | head -1)
+			[ -n "$targets" ] || targets=$(open_of tech-lead | head -1)
 			;;
-		"dev #"* | "qa #"*) targets=$(live_of "${to%% *}" "${to#*#}") ;;
+		"dev #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
 		"")
-			# Written on GitHub by the user or someone else: to whoever waits on the user for that issue,
-			# else to its developer, else to the tech lead who follows it.
-			for id in $(live_of dev "$issue") $(live_of qa "$issue") $(live_of tech-lead); do
-				[ "$(jq -r '.state + " " + ((.issue // "") | tostring)' "$sessions_dir/$id/status")" = "you $issue" ] && targets="$targets $id"
+			# Written on GitHub by the user, without a header: to whoever waits on the user for that issue
+			# (asked there, or in its own chat about it), else to its developer, else to the tech lead who
+			# follows it.
+			for id in $(open_of dev "$issue") $(open_of qa "$issue") $(open_of tech-lead); do
+				jq -e --argjson n "$issue" '.state == "you" and (.asked_on == $n or (.asked_on == null and .issue == $n))' \
+					"$sessions_dir/$id/status" >/dev/null 2>&1 && targets="$targets $id"
 			done
-			[ -n "$targets" ] || targets=$(live_of dev "$issue")
-			[ -n "$targets" ] || for id in $(live_of tech-lead); do [ "$(address_of "$id")" = "$(follower_of "$issue")" ] && targets=$id; done
+			[ -n "$targets" ] || targets=$(open_of dev "$issue")
+			[ -n "$targets" ] || for id in $(open_of tech-lead); do [ "$(address_of "$id")" = "$(follower_of "$issue")" ] && targets=$id; done
 			;;
 		esac
 		for id in $targets; do
@@ -131,8 +162,10 @@ for f in "$sessions_dir"/*/status; do
 		case "$(jq -r .role "$f"):$dir" in
 		dev:"$root/.claude/worktrees/"*)
 			branch=$(jq -r '.branch // ""' "$f")
+			# Neither goes with work that was not pushed: remove refuses a dirty worktree, -d a branch ahead
+			# of what was pushed and merged.
 			git -C "$root" worktree remove "$dir" >/dev/null 2>&1 || true
-			[ -z "$branch" ] || git -C "$root" branch -D "$branch" >/dev/null 2>&1 || true
+			[ -z "$branch" ] || git -C "$root" branch -d "$branch" >/dev/null 2>&1 || true
 			;;
 		esac
 		rm -rf "${sessions_dir:?}/$id"
@@ -151,7 +184,7 @@ for f in "$sessions_dir"/*/status; do
 done
 
 # 4. Dead agents come back; QA agents asked for start.
-sh "$here/resume-agents.sh" >/dev/null 2>&1 || true
+resumed=$(sh "$here/resume-agents.sh" 2>/dev/null | grep -c '^resumed dev ' || true)
 for record in "$repo_dir"/qa/*; do
 	[ -f "$record" ] || continue
 	[ "$(cut -f1 "$record")" = requested ] || continue
@@ -175,16 +208,16 @@ else
 	capacity="non leggibile, al massimo 1 agente"
 	[ "$max" -le 1 ] || max=1
 fi
-busy=$(live_of dev | wc -l | tr -d ' ')
+# Busy: the live developers, and the ones resumed in this run, which have no heartbeat yet.
+busy=$(($(live_of dev | wc -l | tr -d ' ') + ${resumed:-0}))
 queue=$(sh "$here/queue.sh" 2>/dev/null || true)
 workable=$(printf '%s\n' "$queue" | jq -r 'select(.workable) | .number' 2>/dev/null || true)
 next=""
 for issue in $workable; do
-	taken=no
-	for id in $(sessions_of dev "$issue"); do
-		[ "$(jq -r .state "$sessions_dir/$id/status")" = done ] || taken=yes
-	done
-	[ "$taken" = no ] || continue
+	# Any session of the issue holds it, a done one too until it is removed with its worktree, and so does
+	# a developer being started (start-dev.sh).
+	[ -z "$(sessions_of dev "$issue")" ] || continue
+	[ -z "$(find "$repo_dir/starting.$issue" -maxdepth 0 -mmin -5 2>/dev/null)" ] || continue
 	next=$issue
 	break
 done
@@ -192,7 +225,8 @@ if [ -n "$next" ] && [ "$busy" -lt "$max" ]; then
 	sh "$here/start-dev.sh" "$next" >/dev/null 2>&1 && busy=$((busy + 1)) && next=""
 fi
 
-# 6. The board's summary.
+# 6. A free checkout with someone waiting wakes the first of them; then the board's summary.
+sh "$here/checkout.sh" next >/dev/null 2>&1 || true
 holder=$(sed -n 1p "$repo_dir/checkout" 2>/dev/null || true)
 base=$(base_branch)
 sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)

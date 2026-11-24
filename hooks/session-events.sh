@@ -27,9 +27,8 @@ until [ -s "$folder/role" ]; do
 	waited=$((waited + 2))
 done
 role=$(cat "$folder/role")
-state_dir="${TMPDIR:-/tmp}/team-$(id -u)"
-mkdir -p "$state_dir"
-read_lines="$state_dir/$sid.wake-read"
+# How many lines of `wake` were delivered, beside it, so a restart of the machine does not deliver them again.
+read_lines="$folder/wake-read"
 box=""
 if [ "$role" = tech-lead ]; then
 	repo=$(git -C "$(cat "$folder/cwd")" remote get-url origin 2>/dev/null | sed -E 's#\.git$##; s#^.*github\.com[:/]##' | tr '/' '_')
@@ -37,13 +36,14 @@ if [ "$role" = tech-lead ]; then
 fi
 
 # between_turns: the model has been stopped for a few seconds (hooks/sessions.tsx writes `idle` when a turn
-# ends and empties it when one starts) and, for a tech lead, no question of its own waits on the user.
+# ends and empties it when one starts) and, for a tech lead, no question it asked in its own chat waits on
+# the user (one asked on GitHub, asked_on, is answered there, so its answer wakes it).
 between_turns() {
 	since=$(cat "$folder/idle" 2>/dev/null)
 	case "$since" in "" | *[!0-9]*) return 1 ;; esac
 	[ $(($(date +%s) - since)) -ge 5 ] || return 1
 	[ "$role" = tech-lead ] || return 0
-	[ "$(jq -r '.state // ""' "$folder/status" 2>/dev/null)" != you ]
+	[ "$(jq -r 'if .state == "you" and .asked_on == null then "chat" else "" end' "$folder/status" 2>/dev/null)" != chat ]
 }
 
 told=""
@@ -54,11 +54,12 @@ while :; do
 	done_lines=$(cat "$read_lines" 2>/dev/null || echo 0)
 	total=$(wc -l <"$folder/wake" 2>/dev/null | tr -d ' ' || echo 0)
 	total=${total:-0}
+	[ "$done_lines" -le "$total" ] 2>/dev/null || done_lines=0
 	if [ "$total" -gt "$done_lines" ]; then
 		new=$(sed -n "$((done_lines + 1)),${total}p" "$folder/wake" |
 			awk -F '\t' '{ printf "%s%s: %s%s", (NR > 1 ? "; " : ""), $2, $3, ($4 != "" ? " (" $4 ")" : "") }')
 		line="for you on GitHub: $new"
-		echo "$total" >"$read_lines"
+		echo "$total" >"$read_lines.tmp" && mv "$read_lines.tmp" "$read_lines"
 	fi
 	if [ -n "$box" ]; then
 		fresh=$(find "$box" -type f 2>/dev/null | sort | grep -vxF "$told")

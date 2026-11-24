@@ -14,8 +14,11 @@ launch() {
 	short=$(printf '%s\n' "$out" | sed -n 's/^backgrounded · \([0-9a-f]\{8\}\).*/\1/p' | head -1)
 	full=""
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		# By the job id it printed; by name only when it printed none, and then the newest one, since an
+		# older session of the same name may still be listed.
 		full=$(claude agents --json 2>/dev/null | jq -r --arg s "$short" --arg n "$1" \
-			'[.[] | select((($s != "") and (.id == $s)) or .name == $n) | .sessionId][0] // empty')
+			'if $s != "" then [.[] | select(.id == $s) | .sessionId][0] // empty
+			else [.[] | select(.name == $n)] | sort_by(.startedAt // .createdAt // 0) | last | .sessionId // empty end')
 		[ -n "$full" ] && break
 		sleep 1
 	done

@@ -63,7 +63,8 @@ for line in command.split("\n"):
             skipping = None
         continue
     lines.append(line)
-    match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
+    # `<<<word` is a here-string, on its own line: nothing after it is skipped.
+    match = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
     if match:
         skipping = match.group(1)
 script = ";\n".join(lines)
@@ -109,6 +110,22 @@ for words in segments:
     if real.startswith(plugin + os.sep) and real.endswith(".sh"):
         if role == "spike" and os.path.basename(real) in SPIKE_FORBIDDEN_SCRIPTS:
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
+        continue
+
+    # A command inside a command (sh -c '...', eval ...) is checked as one of its own.
+    inner = None
+    if head in ("sh", "bash", "zsh", "dash") and "-c" in words[1:]:
+        k = words.index("-c")
+        inner = words[k + 1] if k + 1 < len(words) else ""
+    elif head == "eval":
+        inner = " ".join(words[1:])
+    if inner is not None:
+        nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
+                                input=f"cd {shlex.quote(where)}\n{inner}", capture_output=True, text=True)
+        if nested.returncode != 0:
+            sys.stdout.write(nested.stdout)
+            sys.stderr.write(nested.stderr)
+            sys.exit(nested.returncode)
         continue
 
     if head == "cd" and len(words) > 1:

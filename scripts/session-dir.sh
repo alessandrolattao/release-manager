@@ -6,7 +6,10 @@
 #                                cursor, who follows each issue, QA and review records, the board
 #   $team_data/                  what is kept: the user's own rules, the tech leads' notes, spike reports
 # The status of a session is one JSON object, written by the scripts and the hooks, never by the model:
-#   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "pr"}
+#   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "pr", "branch",
+#    "busy_until", "tested_head", "asked_on"}
+# asked_on: the issue where the session asked the user on GitHub (comment.sh); absent when it asked in its
+# own chat (hooks/asks.sh), where the user answers it directly.
 # state: working (cyan), others (purple: waits on another agent or the checkout), you (yellow: waits on
 # the user), stuck (red: dead, failing or silent), done (no color, then the session goes away).
 # shellcheck shell=sh disable=SC2034 # the variables are used by the files that source this one
@@ -29,7 +32,8 @@ status_set() {
 	shift
 	file="$sessions_dir/$id/status"
 	mkdir -p "$sessions_dir/$id"
-	{ cat "$file" 2>/dev/null || echo '{}'; } | jq -c "$@" >"$file.tmp" 2>/dev/null && mv "$file.tmp" "$file" || rm -f "$file.tmp"
+	tmp="$file.$$.tmp"
+	{ cat "$file" 2>/dev/null || echo '{}'; } | jq -c "$@" >"$tmp" 2>/dev/null && mv "$tmp" "$file" || rm -f "$tmp"
 }
 
 # state_set <session-id> <state> <detail>: the session's state and what it means in a few words; `since`

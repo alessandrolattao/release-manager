@@ -13,12 +13,23 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/launch.sh"
 base=$(base_branch)
 
+# One developer per issue: a session of it that is not done holds it, alive or not (a dead one is resumed
+# by the dispatcher), and so does one being started right now.
 for other in $(sessions_of dev "$issue"); do
-	if alive "$other" && [ "$(jq -r .state "$sessions_dir/$other/status")" != done ]; then
-		echo "issue $issue already has a developer: $(jq -r .name "$sessions_dir/$other/status")" >&2
+	if [ "$(jq -r .state "$sessions_dir/$other/status")" != done ]; then
+		echo "issue $issue already has a developer: $(jq -r .name "$sessions_dir/$other/status") ($other). If it is dead, resume it: claude --bg --resume $other" >&2
 		exit 1
 	fi
 done
+starting="$repo_dir/starting.$issue"
+mkdir -p "$repo_dir"
+if ! mkdir "$starting" 2>/dev/null; then
+	[ -n "$(find "$starting" -maxdepth 0 -mmin +5 2>/dev/null)" ] || {
+		echo "a developer of issue $issue is being started right now" >&2
+		exit 1
+	}
+fi
+trap 'rmdir "$starting" 2>/dev/null || true' EXIT INT TERM
 
 # The linked branch: reuse it when the issue already has one, otherwise let GitHub create <n>-<slug>.
 branch=$(gh issue develop "$issue" --list 2>/dev/null | awk 'NR==1 {print $1}')

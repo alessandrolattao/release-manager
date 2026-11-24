@@ -41,4 +41,6 @@ if [ -n "$transcript" ] && [ -f "$transcript" ]; then
 fi
 
 state_set "$sid" you "$short"
+# Asked in its own chat: the user answers it there, not on GitHub.
+status_set "$sid" 'del(.asked_on)'
 [ "$role" = tech-lead ] || want "$sid" asked "$(printf '%s\n%s\n%s\n%s' "$(date +%s)" "$short" "$(jq -r '.issue // ""' "$sessions_dir/$sid/status")" "$short")"

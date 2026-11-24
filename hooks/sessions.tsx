@@ -392,6 +392,20 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
   await update($, board, () => ({ repo, rows, summary, updated: now }))
 }
 
+// The plugin's version, read once from its manifest, for the foot of the board.
+let pluginVersion: string | undefined
+async function versionOf($: EngineInterface): Promise<string> {
+  if (pluginVersion === undefined) {
+    try {
+      const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: string }
+      pluginVersion = manifest.version ?? ''
+    } catch {
+      pluginVersion = ''
+    }
+  }
+  return pluginVersion
+}
+
 async function openBoard($: EngineInterface): Promise<void> {
   await $.ui.open({ id: PANE, title: 'Team' })
 }
@@ -548,6 +562,8 @@ export const register: Register = on => {
             ['capacity', summary.capacity],
           ]
     const bottom = summaryRows(items, columns)
+    const version = await versionOf($)
+    const footer = version === '' ? 'team' : `team ${version}`
     const draw = (rows: Row[], key: string) =>
       rows.map((row, i) => (
         <Text key={`${key}-${i}`}>
@@ -600,6 +616,11 @@ export const register: Register = on => {
               ))
             : draw(bottom, 'summary')}
         </Box>
+        {bottom === null && <Text> </Text>}
+        <Text dimColor>
+          {' '.repeat(Math.max(0, Math.floor((columns - footer.length) / 2)))}
+          {footer}
+        </Text>
       </Box>
     )
   })

@@ -97,11 +97,20 @@ for id in $list; do
 		n=$((n + 1))
 	done
 	case "$role" in
-	tech-lead) waiting="If you were waiting for the user's answer, end your turn with that question again in its last line." ;;
-	spike) waiting="Go on with your analysis." ;;
-	*) waiting="If you are waiting for something (another agent, the checkout, CI), declare it with sh \"$plugin/scripts/status.sh\" <others|working> \"<what you wait for>\" [--for <minutes>] and end your turn." ;;
+	tech-lead)
+		told="$plugin/skills/tech-lead/SKILL.md"
+		waiting="If you were waiting for the user's answer, end your turn with that question again in its last line."
+		;;
+	spike)
+		told="$plugin/briefs/spike.md"
+		waiting="Go on with your analysis."
+		;;
+	*)
+		told="$plugin/briefs/$role.md"
+		waiting="If you are waiting for something (another agent, the checkout, CI), declare it with sh \"$plugin/scripts/status.sh\" <others|working> \"<what you wait for>\" [--for <minutes>] and end your turn."
+		;;
 	esac
-	prompt="The team plugin was updated to $(basename "$plugin") and this session was restarted to load it. Its scripts are now in $plugin/scripts: use this path from now on, and read again what your role is told ($plugin/briefs or $plugin/skills) when its rules matter. Go on from where you were. $waiting"
+	prompt="The team plugin was updated to $(basename "$plugin") and this session was restarted to load it. Its scripts are now in $plugin/scripts: use this path from now on. Your role's rules may have changed: read $told again now, whole, and follow it from here on (its {{...}} placeholders stand for what you already know: your issue, branch, worktree, repository). Then go on from where you were. $waiting"
 	out=$( (cd "$dir" && as "$cfg" claude --bg --resume "$id" "$prompt") </dev/null 2>&1 | head -1)
 	echo "$name: $out"
 done

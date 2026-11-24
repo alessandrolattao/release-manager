@@ -1,6 +1,7 @@
 #!/bin/sh
-# Makes this tech lead the one who follows an issue: the developer's and the QA agent's comments to
-# "tech lead" on it reach this session, and the board shows the issue under it.
+# Makes this tech lead the one who follows an issue, when the user gives it the issue: the developer's and
+# the QA agent's comments to "tech lead" on it reach this session. Run by another tech lead, the issue
+# moves to that one.
 #   follow.sh <issue> [<issue>...]
 set -eu
 

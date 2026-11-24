@@ -22,10 +22,6 @@ if [ "$action" = add ]; then
 		gh label create "$label" --color 0E8A16 --description "Technical decisions taken: a developer may build it" >/dev/null
 	gh issue edit "$issue" --add-label "$label" >/dev/null
 	echo "issue $issue: ready for development"
-	# The tech lead who makes it ready follows it: its developer's questions reach that tech lead.
-	if [ "$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/sessions/${CLAUDE_CODE_SESSION_ID:-none}/role" 2>/dev/null)" = tech-lead ]; then
-		sh "$(dirname "$0")/follow.sh" "$issue" >/dev/null 2>&1 || true
-	fi
 else
 	gh issue edit "$issue" --remove-label "$label" >/dev/null
 	echo "issue $issue: back to the backlog"

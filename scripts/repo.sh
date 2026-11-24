@@ -22,22 +22,18 @@ base_branch() {
 
 
 # The names of the sessions, without counters, so an address never goes stale.
-tech_lead_name() { printf 'tech lead · %s%s' "$repo_short" "${1:+ · $1}"; }
+tech_lead_name() { printf 'tech lead · %s' "$repo_short"; }
 dev_name() { printf 'dev #%s · %s · %s' "$1" "$repo_short" "$(printf '%s' "${2#*-}" | cut -c1-40)"; }
 qa_name() { printf 'qa #%s · %s' "$1" "$repo_short"; }
 spike_name() { printf 'spike · %s · %s' "$repo_short" "$1"; }
 
-# address_of <session-id>: how comments name the session: "tech lead", "tech lead <topic>", "dev #<n>",
-# "qa #<n>", "spike <topic>".
+# address_of <session-id>: how comments name the session: "tech lead", "dev #<n>", "qa #<n>", "spike <topic>".
 address_of() {
-	jq -r 'if .role == "tech-lead" then "tech lead" + (if (.topic // "") != "" then " " + .topic else "" end)
+	jq -r 'if .role == "tech-lead" then "tech lead"
 		elif .role == "dev" or .role == "qa" then .role + " #" + (.issue | tostring)
 		elif .role == "spike" then "spike " + (.topic // "")
 		else "team" end' "$sessions_dir/$1/status" 2>/dev/null || echo team
 }
-
-# follower_of <issue>: the address of the tech lead who follows the issue (follow.sh), or "tech lead".
-follower_of() { cat "$repo_dir/issues/$1/tech-lead" 2>/dev/null || echo "tech lead"; }
 
 # sessions_of <role> [issue]: the ids of this repository's sessions with that role (and issue), from
 # their status files, alive or not.

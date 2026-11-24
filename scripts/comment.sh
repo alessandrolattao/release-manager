@@ -8,9 +8,9 @@
 # <to>:
 #   you          the user, from a tech lead only: a real @mention (GitHub notifies them), the label
 #                question on the issue. The user talks only with the tech leads: other sessions ask a tech lead.
-#   tech lead    the tech lead who follows the issue (follow.sh), or any tech lead
+#   tech lead    the repository's tech lead
 #   dev | qa     the developer or the QA agent of that issue
-#   "<address>"  a session by its address, as "tech lead admin-app" or "dev #42"
+#   "<address>"  a session by its address, as "dev #42" or "qa #42"
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
 #   --fyi        a reply or a piece of news: nobody owes you an answer, your state does not change
 # Prints the comment's link.
@@ -45,7 +45,7 @@ fi
 login=$(gh api user --jq .login)
 case "$to" in
 you) address="@$login" ;;
-"tech lead") address=$(follower_of "$issue") ;;
+"tech lead") address="tech lead" ;;
 dev | qa) address="$to #$issue" ;;
 *) address=$to ;;
 esac

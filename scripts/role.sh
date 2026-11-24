@@ -1,7 +1,7 @@
 #!/bin/sh
 # Records what a session is in the team and gives it its name. The tech lead skill runs it when it starts;
 # the scripts that start developers, QA and spikes run it for the session they start.
-#   role.sh <session-id> tech-lead [topic]        (from the main checkout)
+#   role.sh <session-id> tech-lead                (from the main checkout; one per repository)
 #   role.sh <session-id> dev|qa <issue> [branch]  (from the session's folder)
 #   role.sh <session-id> spike <topic>            (from the main checkout)
 # From then on the hooks module keeps the session's heartbeat and color, the monitor wakes it when there
@@ -31,23 +31,18 @@ esac
 
 case "$role" in
 tech-lead)
-	topic=$arg
-	# Two tech leads alive on the same topic would share an address: the second gets a number.
-	n=1
-	while :; do
-		taken=no
-		for other in $(sessions_of tech-lead); do
-			[ "$other" != "$id" ] || continue
-			alive "$other" || continue
-			[ "$(jq -r '.topic // ""' "$sessions_dir/$other/status")" != "$topic" ] || taken=yes
-		done
-		[ "$taken" = yes ] || break
-		n=$((n + 1))
-		topic="${arg:+$arg }$n"
+	# One tech lead per repository: the user talks to one, and every question about an issue goes to it.
+	for other in $(sessions_of tech-lead); do
+		[ "$other" != "$id" ] || continue
+		if alive "$other"; then
+			echo "this repository already has a tech lead on this machine: $(jq -r .name "$sessions_dir/$other/status") ($other)."
+			echo "Tell the user in one line, and stop here."
+			exit 0
+		fi
 	done
-	name=$(tech_lead_name "$topic")
-	status_set "$id" --arg r tech-lead --arg repo "$repo_full" --arg n "$name" --arg t "$topic" --arg p "$place" \
-		'.role = $r | .repo = $repo | .name = $n | .topic = $t | .place = $p | del(.issue)'
+	name=$(tech_lead_name)
+	status_set "$id" --arg r tech-lead --arg repo "$repo_full" --arg n "$name" --arg p "$place" \
+		'.role = $r | .repo = $repo | .name = $n | .place = $p | del(.issue) | del(.topic)'
 	state_set "$id" working "with you"
 	;;
 dev | qa)

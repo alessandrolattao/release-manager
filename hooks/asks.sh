@@ -4,7 +4,7 @@
 #   - a tech lead asks the user, who talks to it: its state becomes "waits on you" (yellow);
 #   - a developer or QA agent asks in a chat nobody reads (the user talks only with the tech leads): the
 #     question is recorded, its state becomes "waits on others", and the dispatcher turns it into a comment
-#     to the tech lead who follows the issue.
+#     to the repository's tech lead.
 # A turn that asked on GitHub (comment.sh) or that asks nothing changes nothing here.
 #   asks.sh   (hook payload on stdin)
 set -eu

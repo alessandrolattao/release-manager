@@ -3,7 +3,7 @@
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
 #   1. hands each new GitHub comment of the repository to the session it is written to;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
-#      tech lead who follows the issue;
+#      repository's tech lead;
 #   3. marks dead sessions stuck (red, in the agent list too) and removes finished ones with their worktree;
 #   4. resumes dead developer and QA agents, and starts the QA agents asked for;
 #   5. starts a developer for the next workable issue (no cap: the user decides what is ready);
@@ -99,22 +99,20 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		case "$to" in
 		"@$login") ;;
 		"tech lead"*)
-			for id in $(live_of tech-lead); do [ "$(address_of "$id")" = "$to" ] && targets="$targets $id"; done
-			[ -n "$targets" ] || for id in $(open_of tech-lead); do [ "$(address_of "$id")" = "$to" ] && targets="$targets $id"; done
-			[ -n "$targets" ] || targets=$(live_of tech-lead | head -1)
+			# The repository's tech lead: the live one, else the last known.
+			targets=$(live_of tech-lead | head -1)
 			[ -n "$targets" ] || targets=$(open_of tech-lead | head -1)
 			;;
 		"dev #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
 		"")
 			# Written on GitHub by the user, without a header: to whoever waits on the user for that issue
-			# (asked there, or in its own chat about it), else to its developer, else to the tech lead who
-			# follows it.
+			# (asked there, or in its own chat about it), else to its developer, else to the tech lead.
 			for id in $(open_of dev "$issue") $(open_of qa "$issue") $(open_of tech-lead); do
 				jq -e --argjson n "$issue" '.state == "you" and (.asked_on == $n or (.asked_on == null and .issue == $n))' \
 					"$sessions_dir/$id/status" >/dev/null 2>&1 && targets="$targets $id"
 			done
 			[ -n "$targets" ] || targets=$(open_of dev "$issue")
-			[ -n "$targets" ] || for id in $(open_of tech-lead); do [ "$(address_of "$id")" = "$(follower_of "$issue")" ] && targets=$id; done
+			[ -n "$targets" ] || targets=$(live_of tech-lead | head -1)
 			;;
 		esac
 		for id in $targets; do
@@ -136,11 +134,10 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	case "$at" in "" | *[!0-9]*) continue ;; esac
 	[ $((now - at)) -ge 30 ] || continue
 	issue=$(jq -r .issue "$sessions_dir/$id/status")
-	follower=$(follower_of "$issue")
-	printf '**%s → %s**\n\nAsked in its own chat:\n\n%s\n' "$(address_of "$id")" "$follower" "$(sed -n '4,$p' "$asked")" |
+	printf '**%s → tech lead**\n\nAsked in its own chat:\n\n%s\n' "$(address_of "$id")" "$(sed -n '4,$p' "$asked")" |
 		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
 		touch "$asked.told"
-		state_set "$id" others "waits for $follower: $(sed -n 4p "$asked")"
+		state_set "$id" others "waits for tech lead: $(sed -n 4p "$asked")"
 	}
 done
 

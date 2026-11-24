@@ -3,13 +3,12 @@
 A development team of Claude Code sessions for one repository, as a [Claude Code](https://code.claude.com) plugin. You are the product owner: you decide what to build and take the technical decisions. The team does the rest.
 
 ```sh
-claude --bg --name "tech lead" "/team:tech-lead"            # the one you talk to
-claude --bg --name "tech lead" "/team:tech-lead admin-app"  # another one, on its own topic
+claude --bg --name "tech lead" "/team:tech-lead"   # the one you talk to, one per repository
 ```
 
 ## Who is in the team
 
-- **Tech leads**, the sessions you talk to, one per topic when several work in parallel. Each follows the issues you give it ("let's work on #3": from then on #3 is its own, and its developer's questions reach it). A tech lead designs with you, prepares its issues, smooths its developers' work, and starts **spikes** (`spike · …`), read-only background sessions, for the technical analyses you ask for. It never develops, and a hook makes sure of it. New issues and the first technical decision of an issue are always taken with you; on an issue that already has decisions it takes the next ones when they follow from those and it has no doubt.
+- **The tech lead**, the session you talk to, one per repository: every question about the repository's issues reaches it. It designs with you, prepares its issues, smooths its developers' work, and starts **spikes** (`spike · …`), read-only background sessions, for the technical analyses you ask for. It never develops, and a hook makes sure of it. New issues and the first technical decision of an issue are always taken with you; on an issue that already has decisions it takes the next ones when they follow from those and it has no doubt.
 - **Developers** (`dev #<n> · …`), one per issue, in their own worktree. A developer reads the issue and its `## Technical decisions`, builds and tests the change, opens the pull request, follows its reviews, merges it and watches the default branch's CI. Whatever needs the running stack (sst dev, a server) runs in the main checkout, one agent at a time, through a lock with a queue. Before merging, a reviewer with a clean context checks the change against the decisions.
 - **QA agents** (`qa #<n> · …`) for the delicate issues, the ones with the label `qa`: a second agent tests the pull request before its merge.
 
@@ -19,7 +18,7 @@ The dispatcher runs only when you start it, one per repository on each machine t
 
 ## GitHub is where the team talks
 
-Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead admin-app**`), and the plugin wakes the session it is written to. You talk only with the tech leads, in their chat: the agents write to each other and to the tech lead, never to you. A tech lead answers what it already knows and brings you the rest; when it waits on you, Claude Code notifies you. The one exception is a permission prompt inside an agent's session, which needs your click there. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
+Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead**`), and the plugin wakes the session it is written to. You talk only with the tech leads, in their chat: the agents write to each other and to the tech lead, never to you. A tech lead answers what it already knows and brings you the rest; when it waits on you, Claude Code notifies you. The one exception is a permission prompt inside an agent's session, which needs your click there. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
 
 ## Colors and the board
 

@@ -10,7 +10,7 @@ sh "{{SCRIPTS}}/comment.sh" <issue-or-pr> <to> <<'EOF'
 EOF
 ```
 
-`<to>` is `tech lead` (the one who follows the issue) or `qa`. The user talks only with the tech lead: you never write to the user, not even for what only they can do or decide (a login, a decision nobody else may take). Ask the tech lead, who answers or brings it to the user. A comment written to you wakes you; `--fyi` marks one that expects no reply. Never ask in this chat and never use SendMessage: while you wait for an answer, end your turn and the plugin wakes you.
+`<to>` is `tech lead` (the repository's one) or `qa`. The user talks only with the tech lead: you never write to the user, not even for what only they can do or decide (a login, a decision nobody else may take). Ask the tech lead, who answers or brings it to the user. A comment written to you wakes you; `--fyi` marks one that expects no reply. Never ask in this chat and never use SendMessage: while you wait for an answer, end your turn and the plugin wakes you.
 
 How you work:
 

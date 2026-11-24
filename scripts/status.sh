@@ -22,7 +22,7 @@ working | others | you | done) ;;
 	exit 2
 	;;
 esac
-state_set "$id" "$state" "$(printf '%s' "$detail" | tr '\n' ' ' | cut -c1-120)"
+state_set "$id" "$state" "$(printf '%s' "$detail" | tr '\n' ' ')"
 if [ "${3:-}" = --for ]; then
 	minutes=${4:?minutes}
 	status_set "$id" --argjson u "$(($(date +%s) + minutes * 60))" '.busy_until = $u'

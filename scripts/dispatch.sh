@@ -140,7 +140,7 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	printf '**%s → %s**\n\nAsked in its own chat, where nobody answered:\n\n%s\n' "$(address_of "$id")" "$follower" "$(sed -n '4,$p' "$asked")" |
 		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
 		touch "$asked.told"
-		state_set "$id" others "waits for $follower: $(sed -n 4p "$asked" | cut -c1-80)"
+		state_set "$id" others "waits for $follower: $(sed -n 4p "$asked")"
 	}
 done
 

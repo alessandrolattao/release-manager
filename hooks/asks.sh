@@ -25,7 +25,7 @@ if [ -z "$question" ]; then
 	fi
 fi
 [ -n "$question" ] || exit 0
-short=$(printf '%s' "$question" | tr '\n' ' ' | sed -E 's/[`*_#>]//g; s/\[([^]]*)\]\([^)]*\)/\1/g' | cut -c1-140)
+short=$(printf '%s' "$question" | tr '\n' ' ' | sed -E 's/[`*_#>]//g; s/\[([^]]*)\]\([^)]*\)/\1/g')
 
 # Asked on GitHub in this very turn: the comment already says it, and comment.sh set the state.
 if [ -n "$transcript" ] && [ -f "$transcript" ]; then

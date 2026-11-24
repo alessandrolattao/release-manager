@@ -20,6 +20,6 @@ if [ "$mode" = go ]; then
 fi
 
 tool=$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)
-what=$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.file_path // .tool_input.url // empty' 2>/dev/null | head -1 | cut -c1-80 || true)
+what=$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.file_path // .tool_input.url // empty' 2>/dev/null | head -1 || true)
 want "$sid" blocked "$(date +%s)"
 state_set "$sid" you "permission: ${what:-$tool}"

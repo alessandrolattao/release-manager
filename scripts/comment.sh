@@ -47,7 +47,7 @@ esac
 link=$(printf '**%s → %s**\n\n%s\n' "$from" "$address" "$body" | gh issue comment "$target" --body-file -)
 echo "$link"
 
-first=$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1 | cut -c1-100)
+first=$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1)
 if [ "$to" = you ]; then
 	gh label list --limit 200 --json name --jq '.[].name' | grep -qx question ||
 		gh label create question --description "Waiting for an answer from the assignee" >/dev/null

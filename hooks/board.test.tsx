@@ -44,6 +44,7 @@ test('the board groups the agents by state, names on the color of their state', 
   expect((await ui.find({ type: 'Text', text: /tech lead api/ }))?.props.backgroundColor).toBe('green')
   expect((await ui.find({ type: 'Text', text: /checkout · waiting/ }))?.text).toContain('checkout · waiting 2m')
   expect((await ui.find({ type: 'Text', text: /idle 2m/ }))?.text).toContain('idle 2m')
+  expect((await ui.find({ type: 'Text', text: /║ +equokar\.com +║/ }))?.text).toMatch(/^░+║ +equokar\.com +║▓░+$/)
   expect((await ui.find({ type: 'Text', text: /^SUMMARY$/ }))?.text).toBe('SUMMARY')
   expect((await ui.find({ type: 'Text', text: /^capacity/ }))?.text).toContain('ok')
   await ui.unmount()

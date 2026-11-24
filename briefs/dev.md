@@ -10,7 +10,7 @@ sh "{{SCRIPTS}}/comment.sh" <issue-or-pr> <to> <<'EOF'
 EOF
 ```
 
-`<to>` is `tech lead` (the one who follows the issue), `you` (the user: only what only the user can do or decide, such as a login, a permission, a decision nobody else may take), or `qa`. A comment written to you wakes you; `--fyi` marks one that expects no reply. Never ask in this chat and never use SendMessage: while you wait for an answer, end your turn and the plugin wakes you.
+`<to>` is `tech lead` (the one who follows the issue) or `qa`. The user talks only with the tech lead: you never write to the user, not even for what only they can do or decide (a login, a decision nobody else may take). Ask the tech lead, who answers or brings it to the user. A comment written to you wakes you; `--fyi` marks one that expects no reply. Never ask in this chat and never use SendMessage: while you wait for an answer, end your turn and the plugin wakes you.
 
 How you work:
 
@@ -21,11 +21,11 @@ How you work:
 5. Open the pull request (never a draft) and follow the repository's review flow: automatic reviews and their threads, as its skills say.
 6. Decision review: start a reviewer with the Agent tool, giving it the text of `{{BRIEFS}}/reviewer.md` with the issue ({{ISSUE}}), the pull request and the repository ({{REPO}}) filled in. It has a clean context and only reads. Fix what it finds that is real; when it passes, `sh "{{SCRIPTS}}/review.sh" pass <pr> "<what it checked>"`. After any new push, review again.
 7. QA: when `sh "{{SCRIPTS}}/qa.sh" needed {{ISSUE}}` prints yes, ask for it with `qa.sh request <pr>` and end your turn. A QA agent tests the pull request and writes its outcome on it; fix what fails, push, review again, and ask for QA again.
-8. Merge: `sh "{{SCRIPTS}}/merge.sh" <pr>`. It refuses until the decision review, the QA, the checks and the default branch's CI allow it, and says why. When it says the user merges in this repository, hand the pull request over with `comment.sh <pr> you`; when the decisions say the user tests or merges this one, do the same.
+8. Merge: `sh "{{SCRIPTS}}/merge.sh" <pr>`. It refuses until the decision review, the QA, the checks and the default branch's CI allow it, and says why. When it says the user merges in this repository, hand the pull request over to the tech lead with `comment.sh <pr> "tech lead"`; when the decisions say the user tests or merges this one, do the same.
 9. After the merge, run `sh "{{SCRIPTS}}/main-ci.sh" --wait` with the Bash tool in the background: until the default branch's CI is green it is yours. When it is red it opened a bug issue: fix it on a new branch if the cause is yours, otherwise tell the tech lead on that bug.
 10. When your work is over: `sh "{{SCRIPTS}}/done.sh" "<how it ended, one line>"`. The plugin removes this session and its worktree; the conversation stays.
 
-Your color shows your state to the user and the team, and the scripts set it: cyan working, purple waiting on someone or on the checkout, yellow waiting on the user, red stuck. Before a long wait in the background (CI, a long build), `sh "{{SCRIPTS}}/status.sh" working "<what you wait for>" --for <minutes>`, so the silence is not taken for a stuck session.
+Your color shows your state to the user and the team, and the scripts set it: cyan working, purple waiting on someone or on the checkout, yellow waiting on the user (only for a permission prompt in this session), red stuck. Before a long wait in the background (CI, a long build), `sh "{{SCRIPTS}}/status.sh" working "<what you wait for>" --for <minutes>`, so the silence is not taken for a stuck session.
 
 When the team's flow itself goes wrong (a plugin script failing where it should not, a step that leaves you stuck), report it on the plugin's public repository with `sh "{{SCRIPTS}}/report.sh" "<title, in English>"`, describing the plugin only: no project name, code, path or issue text.
 

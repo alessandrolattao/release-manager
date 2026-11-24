@@ -6,7 +6,8 @@
 #   the message, in the issue's language
 #   EOF
 # <to>:
-#   you          the user: a real @mention (GitHub notifies them), the label question on the issue
+#   you          the user, from a tech lead only: a real @mention (GitHub notifies them), the label
+#                question on the issue. The user talks only with the tech leads: other sessions ask a tech lead.
 #   tech lead    the tech lead who follows the issue (follow.sh), or any tech lead
 #   dev | qa     the developer or the QA agent of that issue
 #   "<address>"  a session by its address, as "tech lead admin-app" or "dev #42"
@@ -28,6 +29,11 @@ body=$(cat)
 }
 me=${CLAUDE_CODE_SESSION_ID:-}
 from=$(address_of "$me")
+# The user talks only with the tech leads: no other session writes to them.
+if [ "$to" = you ] && [ "$(jq -r '.role // ""' "$sessions_dir/$me/status" 2>/dev/null)" != tech-lead ]; then
+	echo "the user talks only with the tech leads: write to the tech lead (comment.sh $target \"tech lead\"), who answers or brings it to the user" >&2
+	exit 2
+fi
 
 # The issue the target belongs to: the number itself, or the issue a pull request closes.
 issue=$target

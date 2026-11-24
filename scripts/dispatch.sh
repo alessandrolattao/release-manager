@@ -127,17 +127,17 @@ else
 	rm -f "$cursor.next"
 fi
 
-# 2. Questions left in an agent's own chat, unanswered for 5 minutes, go to the tech lead on the issue.
+# 2. Questions an agent left in its own chat, which nobody reads, go to the tech lead on the issue.
 for id in $(sessions_of dev) $(sessions_of qa); do
 	asked="$sessions_dir/$id/asked"
 	waiting_in_chat "$id" || continue
 	[ ! -f "$asked.told" ] || continue
 	at=$(sed -n 1p "$asked")
 	case "$at" in "" | *[!0-9]*) continue ;; esac
-	[ $((now - at)) -ge 300 ] || continue
+	[ $((now - at)) -ge 30 ] || continue
 	issue=$(jq -r .issue "$sessions_dir/$id/status")
 	follower=$(follower_of "$issue")
-	printf '**%s → %s**\n\nAsked in its own chat, where nobody answered:\n\n%s\n' "$(address_of "$id")" "$follower" "$(sed -n '4,$p' "$asked")" |
+	printf '**%s → %s**\n\nAsked in its own chat:\n\n%s\n' "$(address_of "$id")" "$follower" "$(sed -n '4,$p' "$asked")" |
 		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
 		touch "$asked.told"
 		state_set "$id" others "waits for $follower: $(sed -n 4p "$asked")"

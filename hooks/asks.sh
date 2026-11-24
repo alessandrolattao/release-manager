@@ -2,9 +2,9 @@
 # Stop: a team session ended its turn asking something in its own chat (a "needs input:" line, a last line
 # that asks, or a request for a go-ahead written without a question mark).
 #   - a tech lead asks the user, who talks to it: its state becomes "waits on you" (yellow);
-#   - a developer or QA agent asks in a chat nobody may be reading: its state becomes "waits on you" and the
-#     question is recorded; if nobody answers within 5 minutes the dispatcher turns it into a comment to the
-#     tech lead who follows the issue.
+#   - a developer or QA agent asks in a chat nobody reads (the user talks only with the tech leads): the
+#     question is recorded, its state becomes "waits on others", and the dispatcher turns it into a comment
+#     to the tech lead who follows the issue.
 # A turn that asked on GitHub (comment.sh) or that asks nothing changes nothing here.
 #   asks.sh   (hook payload on stdin)
 set -eu
@@ -40,7 +40,13 @@ if [ -n "$transcript" ] && [ -f "$transcript" ]; then
 	[ "${asked_on_github:-0}" -eq 0 ] || exit 0
 fi
 
-state_set "$sid" you "$short"
-# Asked in its own chat: the user answers it there, not on GitHub.
-status_set "$sid" 'del(.asked_on)'
-[ "$role" = tech-lead ] || want "$sid" asked "$(printf '%s\n%s\n%s\n%s' "$(date +%s)" "$short" "$(jq -r '.issue // ""' "$sessions_dir/$sid/status")" "$short")"
+if [ "$role" = tech-lead ]; then
+	state_set "$sid" you "$short"
+	# Asked in its own chat: the user answers it there, not on GitHub.
+	status_set "$sid" 'del(.asked_on)'
+else
+	# An agent never waits on the user: the dispatcher hands the question to the tech lead at once.
+	state_set "$sid" others "asks the tech lead: $short"
+	rm -f "$sessions_dir/$sid/asked.told"
+	want "$sid" asked "$(printf '%s\n%s\n%s\n%s' "$(date +%s)" "$short" "$(jq -r '.issue // ""' "$sessions_dir/$sid/status")" "$short")"
+fi

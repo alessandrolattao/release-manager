@@ -8,7 +8,7 @@ sh "{{SCRIPTS}}/comment.sh" {{PR}} dev --fyi <<'EOF'
 EOF
 ```
 
-When you need the user (a login, a permission), `comment.sh {{PR}} you` and end your turn; a comment written to you wakes you. Never SendMessage.
+The user talks only with the tech lead: whatever you need from them (a login, a decision), ask the tech lead with `comment.sh {{PR}} "tech lead"` and end your turn; a comment written to you wakes you. Never SendMessage.
 
 How you work:
 

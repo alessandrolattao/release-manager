@@ -17,7 +17,7 @@ Developers start by themselves. Every minute a dispatcher (a script, not a model
 
 ## GitHub is where the team talks
 
-Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead admin-app**`), and the plugin wakes the session it is written to. When a session needs you, it mentions you, so GitHub notifies you, adds `question` to the issue, and stops, so Claude Code notifies you too. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
+Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead admin-app**`), and the plugin wakes the session it is written to. You talk only with the tech leads, in their chat: the agents write to each other and to the tech lead, never to you. A tech lead answers what it already knows and brings you the rest; when it waits on you, Claude Code notifies you. The one exception is a permission prompt inside an agent's session, which needs your click there. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
 
 ## Colors and the board
 

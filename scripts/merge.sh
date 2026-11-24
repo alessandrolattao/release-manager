@@ -5,7 +5,7 @@
 #   - every check of the pull request is green;
 #   - the default branch's CI is not red, unless this pull request closes the bug opened for it.
 # The method comes from the user's rules for the repository ("merge: merge|rebase|squash", merge commit when
-# none); "merge: user" means the user merges here: hand the pull request over with comment.sh <pr> you.
+# none); "merge: user" means the user merges here: hand the pull request over to the tech lead.
 # Then run main-ci.sh --wait in the background: the default branch's CI is yours until it is green.
 #   merge.sh <pr>
 set -eu
@@ -24,7 +24,7 @@ method=$(rule merge)
 method=${method:-merge}
 case "${method:-merge}" in
 merge | rebase | squash) ;;
-user) refuse "the user merges in this repository: hand the pull request over with comment.sh $pr you" ;;
+user) refuse "the user merges in this repository: hand the pull request over to the tech lead with comment.sh $pr \"tech lead\"" ;;
 *) refuse "the user's rules say 'merge: $method', which is not merge, rebase, squash or user" ;;
 esac
 

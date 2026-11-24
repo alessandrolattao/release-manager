@@ -107,7 +107,7 @@ take)
 		exit 1
 	}
 	if [ "$holder" != "$me" ] && [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
-		echo "the main checkout has local changes: they are the user's, ask them (comment.sh <issue> you)" >&2
+		echo "the main checkout has local changes: they are not yours, ask the tech lead (comment.sh <issue> \"tech lead\")" >&2
 		exit 1
 	fi
 	git -C "$root" fetch -q origin "$branch"

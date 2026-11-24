@@ -23,7 +23,13 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 trap 'rm -rf "$lock"' EXIT
 trap 'exit 1' INT TERM
-login=$(gh api user --jq .login 2>/dev/null) || exit 0
+# The team's GitHub account, asked once a day.
+login_file="$team_state/login"
+login=$( [ -z "$(find "$login_file" -mmin -1440 2>/dev/null)" ] || cat "$login_file")
+if [ -z "$login" ]; then
+	login=$(gh api user --jq .login 2>/dev/null) || exit 0
+	echo "$login" >"$login_file"
+fi
 now=$(date +%s)
 tab=$(printf '\t')
 listing=$(claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]')
@@ -35,6 +41,14 @@ job_of() { printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId
 running() { [ "$(printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId == $s and .status != null)] | length')" != 0 ]; }
 # wake <session-id> <from> <text> <link>: the monitor of that session wakes it between turns.
 wake() { printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "$2" "$(printf '%s' "$3" | tr '\t\n' '  ' | cut -c1-200)" "$4" >>"$sessions_dir/$1/wake"; }
+# note <issue> <jq filter> [jq args]: what last happened on an issue, from the comments read here (which
+# machine took it, the last team message and when), for the board's agents of other machines.
+note() {
+	f="$repo_dir/activity/$1.json"
+	shift
+	mkdir -p "$repo_dir/activity"
+	{ cat "$f" 2>/dev/null || echo '{}'; } | jq -c --argjson now "$now" "$@" >"$f.$$" && mv "$f.$$" "$f"
+}
 # live_of <role> [issue]: the sessions of that role (and issue) alive and not done.
 live_of() {
 	for id in $(sessions_of "$1" "${2:-}"); do
@@ -89,10 +103,24 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 		# else can pass for a session or the user. Anyone else's comment wakes nobody.
 		[ "$author" = "$login" ] || continue
 		issue=$(issue_of "$issue" "$link")
+		# A machine taking or releasing the issue (claim.sh): no message for anyone, a note for the board.
+		case "$first" in
+		"**dispatcher · "*"** takes #"*)
+			h=$(printf '%s' "$first" | sed -n 's/^\*\*dispatcher · \([a-z0-9-]*\)\*\* takes #[0-9]*$/\1/p')
+			[ -z "$h" ] || note "$issue" --arg h "$h" '.host = $h | .at = $now'
+			continue
+			;;
+		"**"*"** releases #"*)
+			note "$issue" '.host = null | .at = $now'
+			continue
+			;;
+		esac
 		if [ -n "$header" ]; then
 			from=${header%%"$tab"*}
 			to=${header#*"$tab"}
 			text=$second
+			case "$first" in *"** · fyi") fyi=true ;; *) fyi=false ;; esac
+			note "$issue" --arg f "$from" --arg t "$to" --argjson fyi "$fyi" '.from = $f | .to = $t | .fyi = $fyi | .at = $now'
 		else
 			from="the user"
 		fi
@@ -258,10 +286,35 @@ fi
 sh "$here/checkout.sh" next >/dev/null 2>&1 || true
 holder=$(sed -n 1p "$repo_dir/checkout" 2>/dev/null || true)
 base=$(base_branch)
-sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)
-ci=$(gh run list --branch "$base" --commit "$sha" --limit 50 --json status,conclusion 2>/dev/null |
-	jq -r 'if length == 0 then "no runs" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "red"
-		elif any(.[]; .status != "completed") then "running" else "green" end' 2>/dev/null || echo "?")
+# The default branch's CI, asked at most every 5 minutes: every machine shares one GitHub account and its
+# hourly API allowance.
+ci_file="$repo_dir/ci"
+if [ -n "$(find "$ci_file" -mmin -5 2>/dev/null)" ]; then
+	ci=$(cat "$ci_file")
+else
+	sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)
+	ci=$(gh run list --branch "$base" --commit "$sha" --limit 50 --json status,conclusion 2>/dev/null |
+		jq -r 'if length == 0 then "no runs" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "red"
+			elif any(.[]; .status != "completed") then "running" else "green" end' 2>/dev/null || echo "?")
+	[ "$ci" = "?" ] || echo "$ci" >"$ci_file"
+fi
+# The agents of other machines: the started issues another machine took, their state guessed from the notes
+# of the comments read here: stuck when nothing happened on the issue for an hour, waiting when the agent's
+# last message is still unanswered, working otherwise.
+myhost=$(sh "$here/claim.sh" host 2>/dev/null || true)
+elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {number, title}' 2>/dev/null |
+	while read -r row; do
+		f="$repo_dir/activity/$(printf '%s' "$row" | jq -r .number).json"
+		h=$(jq -r '.host // ""' "$f" 2>/dev/null || true)
+		[ -n "$h" ] && [ "$h" != "$myhost" ] || continue
+		jq -c --argjson row "$row" --argjson now "$now" '
+			($now - (.at // $now)) as $quiet
+			| (((.from // "") | test("^(dev|qa) #")) and (.fyi != true)) as $asks
+			| {issue: $row.number, title: $row.title, host: .host, since: (.at // $now),
+				state: (if $quiet > 3600 then "stuck" elif $asks then "others" else "working" end),
+				detail: (if $quiet > 3600 then "quiet \($quiet / 3600 | floor)h, on \(.host)"
+					elif $asks then "waits for \(.to), on \(.host)" else "on \(.host)" end)}' "$f"
+	done | jq -s -c '.')
 jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$holder")" \
 	--arg held_since "$(sed -n 2p "$repo_dir/checkout" 2>/dev/null)" \
 	--arg waiting "$(while read -r w; do [ -n "$w" ] && address_of "$w"; done <"$repo_dir/checkout.queue" 2>/dev/null | paste -sd, -)" \
@@ -269,6 +322,8 @@ jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$hol
 	--argjson backlog "$(printf '%s\n' "$queue" | jq -s '[.[] | select(.backlog)] | length' 2>/dev/null || echo 0)" \
 	--argjson questions "$(printf '%s\n' "$queue" | jq -s '[.[] | select(.question)] | length' 2>/dev/null || echo 0)" \
 	--arg ci "$ci" --argjson busy "$busy" --argjson h5 "$(window 5h)" --argjson d7 "$(window 7d)" \
+	--argjson elsewhere "${elsewhere:-[]}" \
 	'{updated: $now, checkout: {holder: $holder, since: $held_since, waiting: $waiting}, queue: {ready: $ready, next: $next,
-	backlog: $backlog, questions: $questions}, ci: $ci, developers: {busy: $busy}, usage: {h5: $h5, d7: $d7}}' \
+	backlog: $backlog, questions: $questions}, ci: $ci, developers: {busy: $busy}, usage: {h5: $h5, d7: $d7},
+	elsewhere: $elsewhere}' \
 	>"$repo_dir/board.json.tmp" && mv "$repo_dir/board.json.tmp" "$repo_dir/board.json"

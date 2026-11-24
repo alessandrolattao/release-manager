@@ -387,7 +387,21 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       ci?: string
       developers?: { busy?: number }
       usage?: { h5?: { text?: string; tone?: string }; d7?: { text?: string; tone?: string } }
+      elsewhere?: { issue: number; host: string; state: string; detail: string; since: number }[]
     }
+    // The developers of other machines, as the dispatcher guesses them from GitHub (scripts/dispatch.sh).
+    for (const remote of written.elsewhere ?? []) {
+      rows.push({
+        id: `remote-${remote.issue}`,
+        label: `dev #${remote.issue}`,
+        role: 'dev',
+        state: remote.state,
+        place: remote.host,
+        detail: remote.detail,
+        since: remote.since,
+      })
+    }
+    rows.sort((a, b) => (ORDER[a.role] ?? 9) - (ORDER[b.role] ?? 9) || a.label.localeCompare(b.label, undefined, { numeric: true }))
     const waiting = written.checkout?.waiting ? ` · queued: ${written.checkout.waiting}` : ''
     summary = {
       checkout: `${written.checkout?.holder || 'free'}${waiting}`,

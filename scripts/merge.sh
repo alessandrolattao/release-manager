@@ -2,11 +2,11 @@
 # The developer merges its own pull request, once everything holds for its current head:
 #   - the decision review passed (review.sh);
 #   - the QA passed, when the issue carries the label qa (qa.sh);
-#   - every check of the pull request is green;
-#   - the default branch's CI is not red, unless this pull request closes the bug opened for it.
+#   - every check of the pull request is green.
+# A red default branch stops nobody: it is red for many reasons, most of them someone else's.
 # The method is the one the repository's own instructions ask for (--rebase, --squash); without one, a merge
 # commit when the repository allows it, else the method it allows.
-# Then run main-ci.sh --wait in the background: the default branch's CI is yours until it is green.
+# Then run main-ci.sh <pr> --wait in the background: it follows the CI and deploy of the merge.
 #   merge.sh <pr> [--merge|--rebase|--squash]
 set -eu
 
@@ -73,17 +73,8 @@ rm -f "$err"
 bad=$(printf '%s' "$checks" | jq -r '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL") | "\(.name): \(.state)"] | join(", ")')
 [ -z "$bad" ] || refuse "checks not green: $bad"
 
-if [ -f "$repo_dir/main-red" ]; then
-	bug=$(sed -n 2p "$repo_dir/main-red")
-	closes=$(printf '%s' "$info" | jq -r '[.closingIssuesReferences[].number] | map(tostring) | join(" ")')
-	case " $closes " in
-	*" $bug "*) ;;
-	*) refuse "the default branch's CI is red (issue #$bug): only the pull request that closes #$bug merges now" ;;
-	esac
-fi
-
 # Only the head that was reviewed and checked: a push in between makes GitHub refuse the merge.
 gh pr merge "$pr" "--$method" --match-head-commit "$head"
 echo "merged #$pr ($method)"
-[ -z "$me" ] || state_set "$me" working "merged #$pr, waits for the default branch's CI"
-echo "next: sh \"$here/main-ci.sh\" --wait, in the background"
+[ -z "$me" ] || state_set "$me" working "merged #$pr, waits for its CI and deploy"
+echo "next: sh \"$here/main-ci.sh\" $pr --wait, in the background"

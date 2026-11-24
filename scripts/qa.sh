@@ -23,7 +23,7 @@ request)
 	head=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
 	issue=$(jq -r '.issue // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 	printf 'requested\t%s\t%s\t%s\n' "$head" "${issue:-?}" "$me" >"$repo_dir/qa/$number"
-	[ -z "$me" ] || state_set "$me" others "aspetta il QA della PR #$number"
+	[ -z "$me" ] || state_set "$me" others "waits for QA on PR #$number"
 	echo "QA requested for #$number at ${head%"${head#???????}"}: the plugin starts a QA agent"
 	;;
 pass | fail)

@@ -2,7 +2,10 @@
 
 export type BoardRow = {
   id: string
-  name: string
+  // What the board shows: "tech lead", "tech lead admin-app", "dev #318", "qa #42", "spike flaky ci".
+  label: string
+  // The session's own name, for `claude attach`.
+  session: string
   role: string
   state: string
   place: string
@@ -10,11 +13,18 @@ export type BoardRow = {
   since: number
 }
 
+export type BoardSummary = {
+  checkout: string
+  developers: string
+  queue: string
+  ci: string
+  capacity: string
+}
+
 export type Board = {
   repo: string
   rows: BoardRow[]
-  footer: string
-  waitingOnUser: number
+  summary: BoardSummary | null
   updated: number
 }
 

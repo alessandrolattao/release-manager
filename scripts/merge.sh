@@ -77,5 +77,5 @@ fi
 # Only the head that was reviewed and checked: a push in between makes GitHub refuse the merge.
 gh pr merge "$pr" "--$method" --match-head-commit "$head"
 echo "merged #$pr ($method)"
-[ -z "$me" ] || state_set "$me" working "mergiata #$pr, aspetta la CI di main"
+[ -z "$me" ] || state_set "$me" working "merged #$pr, waits for the default branch's CI"
 echo "next: sh \"$here/main-ci.sh\" --wait, in the background"

@@ -140,7 +140,7 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	printf '**%s → %s**\n\nAsked in its own chat, where nobody answered:\n\n%s\n' "$(address_of "$id")" "$follower" "$(sed -n '4,$p' "$asked")" |
 		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
 		touch "$asked.told"
-		state_set "$id" others "aspetta $follower: $(sed -n 4p "$asked" | cut -c1-80)"
+		state_set "$id" others "waits for $follower: $(sed -n 4p "$asked" | cut -c1-80)"
 	}
 done
 
@@ -172,7 +172,7 @@ for f in "$sessions_dir"/*/status; do
 		continue
 	fi
 	if ! alive "$id" && ! running "$id" && [ "$state" != stuck ]; then
-		state_set "$id" stuck "sessione ferma"
+		state_set "$id" stuck "session stopped"
 		state_json="$jobs_dir/$job/state.json"
 		if [ -n "$job" ] && [ -f "$state_json" ] && jq '.color = "red"' "$state_json" >"$state_json.team" 2>/dev/null; then
 			chmod 600 "$state_json.team"
@@ -197,15 +197,28 @@ done
 max=$(rule agents)
 case "$max" in "" | *[!0-9]*) max=2 ;; esac
 capacity="ok"
-if command -v clessidra >/dev/null 2>&1 && usage=$(clessidra 2>/dev/null); then
+# The plan usage of this account, read at most every 5 minutes for all its repositories (the usage API
+# rate-limits frequent readers); when a read fails, the last good one holds for 30 minutes.
+usage_file="$team_state/usage/$(printf '%s' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" | tr '/' '_')"
+mkdir -p "$team_state/usage"
+usage=""
+if [ -n "$(find "$usage_file" -mmin -5 2>/dev/null)" ]; then
+	usage=$(cat "$usage_file")
+elif command -v clessidra >/dev/null 2>&1 && fresh=$(clessidra 2>/dev/null) && [ -n "$fresh" ]; then
+	usage=$fresh
+	printf '%s\n' "$usage" >"$usage_file.$$" && mv "$usage_file.$$" "$usage_file"
+elif [ -n "$(find "$usage_file" -mmin -30 2>/dev/null)" ]; then
+	usage=$(cat "$usage_file")
+fi
+if [ -n "$usage" ]; then
 	lines=$usage
 	[ "$(rule capacity)" != 5h ] || lines=$(printf '%s\n' "$usage" | grep -i '5h' || true)
 	if printf '%s\n' "$lines" | grep -q 'runs out in'; then
-		capacity="esaurita prima del reset"
+		capacity="runs out before the reset"
 		max=0
 	fi
 else
-	capacity="non leggibile, al massimo 1 agente"
+	capacity="unreadable, at most 1 developer"
 	[ "$max" -le 1 ] || max=1
 fi
 # Busy: the live developers, and the ones resumed in this run, which have no heartbeat yet.
@@ -231,8 +244,8 @@ holder=$(sed -n 1p "$repo_dir/checkout" 2>/dev/null || true)
 base=$(base_branch)
 sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)
 ci=$(gh run list --branch "$base" --commit "$sha" --limit 50 --json status,conclusion 2>/dev/null |
-	jq -r 'if length == 0 then "nessuna run" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "rossa"
-		elif any(.[]; .status != "completed") then "in corso" else "verde" end' 2>/dev/null || echo "?")
+	jq -r 'if length == 0 then "no runs" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "red"
+		elif any(.[]; .status != "completed") then "running" else "green" end' 2>/dev/null || echo "?")
 jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$holder")" \
 	--arg held_since "$(sed -n 2p "$repo_dir/checkout" 2>/dev/null)" \
 	--arg waiting "$(while read -r w; do [ -n "$w" ] && address_of "$w"; done <"$repo_dir/checkout.queue" 2>/dev/null | paste -sd, -)" \

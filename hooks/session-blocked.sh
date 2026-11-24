@@ -15,11 +15,11 @@ record="$sessions_dir/$sid/blocked"
 if [ "$mode" = go ]; then
 	[ -f "$record" ] || exit 0
 	rm -f "$record"
-	state_set "$sid" working "riprende dopo il permesso"
+	state_set "$sid" working "going on after the permission"
 	exit 0
 fi
 
 tool=$(printf '%s' "$payload" | jq -r '.tool_name // empty' 2>/dev/null || true)
 what=$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.file_path // .tool_input.url // empty' 2>/dev/null | head -1 | cut -c1-80 || true)
 want "$sid" blocked "$(date +%s)"
-state_set "$sid" you "permesso: ${what:-$tool}"
+state_set "$sid" you "permission: ${what:-$tool}"

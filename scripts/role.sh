@@ -48,7 +48,7 @@ tech-lead)
 	name=$(tech_lead_name "$topic")
 	status_set "$id" --arg r tech-lead --arg repo "$repo_full" --arg n "$name" --arg t "$topic" --arg p "$place" \
 		'.role = $r | .repo = $repo | .name = $n | .topic = $t | .place = $p | del(.issue)'
-	state_set "$id" working "con te"
+	state_set "$id" working "with you"
 	;;
 dev | qa)
 	issue=${arg:?issue number}
@@ -56,13 +56,13 @@ dev | qa)
 	if [ "$role" = dev ]; then name=$(dev_name "$issue" "${branch:-$issue-$title}"); else name=$(qa_name "$issue"); fi
 	status_set "$id" --arg r "$role" --arg repo "$repo_full" --arg n "$name" --argjson i "$issue" --arg t "$title" \
 		--arg p "$place" --arg b "$branch" '.role = $r | .repo = $repo | .name = $n | .issue = $i | .title = $t | .place = $p | .branch = $b'
-	state_set "$id" working "parte"
+	state_set "$id" working "starting"
 	;;
 spike)
 	name=$(spike_name "${arg:?topic}")
 	status_set "$id" --arg r spike --arg repo "$repo_full" --arg n "$name" --arg t "$arg" --arg p "$place" \
 		'.role = $r | .repo = $repo | .name = $n | .topic = $t | .place = $p'
-	state_set "$id" working "analizza"
+	state_set "$id" working "analyzing"
 	;;
 *)
 	echo "usage: role.sh <session-id> tech-lead|dev|qa|spike ..." >&2

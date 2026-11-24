@@ -38,11 +38,14 @@ done
 trap 'rmdir "$mutex" 2>/dev/null || true' EXIT INT TERM
 touch "$queue"
 
-# usable <session-id>: alive (or still starting) and not done.
+# usable <session-id>: not done, with a heartbeat from the last 10 minutes, so a session restarted (a
+# plugin update, a resume) keeps its place in the checkout and in the queue.
 usable() {
 	[ -f "$sessions_dir/$1/status" ] || return 1
 	[ "$(jq -r '.state // ""' "$sessions_dir/$1/status" 2>/dev/null)" != done ] || return 1
-	alive "$1"
+	t=$(cat "$sessions_dir/$1/alive" 2>/dev/null || true)
+	case "$t" in "" | *[!0-9]*) return 1 ;; esac
+	[ $(($(date +%s) - t)) -le 600 ]
 }
 
 # wake_next: drops from the queue who is gone or done, and wakes the first one left.
@@ -94,7 +97,7 @@ take)
 	}
 	if [ -n "$holder" ] && [ "$holder" != "$me" ]; then
 		grep -qx "$me" "$queue" || echo "$me" >>"$queue"
-		state_set "$me" others "in coda per il checkout (lo tiene $(address_of "$holder"))"
+		state_set "$me" others "queued for the checkout (held by $(address_of "$holder"))"
 		echo "QUEUED: $(address_of "$holder") holds the checkout; you are in the queue and the plugin wakes you when it is yours"
 		exit 3
 	fi
@@ -115,7 +118,7 @@ take)
 	mv "$queue.tmp" "$queue"
 	# What QA passes or fails is the head tested here (qa.sh), not whatever the branch has by then.
 	status_set "$me" --arg p checkout --arg h "$tested" '.place = $p | .tested_head = $h'
-	state_set "$me" working "prova nel checkout"
+	state_set "$me" working "testing in the checkout"
 	echo "TAKEN: the main checkout $root is on $branch at $(git -C "$root" rev-parse --short HEAD), detached; test there, then checkout.sh give"
 	;;
 give)
@@ -136,7 +139,7 @@ give)
 	"$root/.claude/worktrees/"*) status_set "$me" --arg p "worktree $(basename "$cwd" | cut -d- -f1)" '.place = $p' ;;
 	*) status_set "$me" '.place = ""' ;;
 	esac
-	state_set "$me" working "ha liberato il checkout"
+	state_set "$me" working "gave the checkout back"
 	wake_next
 	next=$(head -1 "$queue")
 	echo "given back: the checkout is on $base${next:+, $(address_of "$next") is next}"

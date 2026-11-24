@@ -59,6 +59,6 @@ fi
 		# Asked on GitHub, so the answer comes on GitHub: the plugin wakes the session with it.
 		status_set "$me" --argjson n "$issue" '.asked_on = $n'
 	else
-		state_set "$me" others "aspetta $address: $first"
+		state_set "$me" others "waits for $address: $first"
 	fi
 }

@@ -1,61 +1,55 @@
-# release-manager
+# team
 
-A release manager and a planner for one repository, as a [Claude Code](https://code.claude.com) plugin: two background sessions, started from the main checkout.
+A development team of Claude Code sessions for one repository, as a [Claude Code](https://code.claude.com) plugin. You are the product owner: you decide what to build and take the technical decisions. The team does the rest.
 
 ```sh
-claude --bg --name "release manager" "/release-manager:run"   # builds, tests, merges
-claude --bg --name planner "/release-manager:planner"          # the one you talk to
+claude --bg --name "tech lead" "/team:tech-lead"            # the one you talk to
+claude --bg --name "tech lead" "/team:tech-lead admin-app"  # another one, on its own topic
 ```
 
-They rename themselves after the repository, with a counter: `release manager · my-app 🚀3` (merged today) and `planner · my-app 🙋2` (what only you can move on). Open either from `claude agents`. The release manager's color tells you its state when its turn ends: orange when it needs you, yellow while work is under way (its agents, a test, the default branch's CI), green when there is nothing to do. Its agents are named after their state and branch, so `claude agents` reads like a board: `[dev]`, `[review]`, `[test]`, `[fix]`, `[ask]`, `[ready]` (the pull request is ready and you test and/or merge it), `[done]` (you merged it), `[closed]` (its session ended with no merged pull request), with 🔥 for urgent and 🐛 ✨ 🔧 for bugs, features and tasks; agents are cyan while they work and go away, session and worktree, when the release manager merges their pull request; a session that ends any other way, a Pulse check's included, loses its color and shows `[done]` or `[closed]` as soon as the release manager or the planner looks at the list, and gets its live name and color back if it is resumed; the planner is purple. Names and colors change between turns, through the plugin's hooks module: nothing is typed into a session, so a message you are writing there is never touched, and no row is left in its conversation.
+## Who is in the team
 
-Neither is ever interrupted during a turn. As soon as a turn is over, the plugin's monitor wakes them when a message waits in their inbox, and the release manager also when an agent changes state or ends, a question is answered, an issue becomes workable or the default branch's CI is green again. The planner is not woken while its last message waits for your answer. After a restart of the machine, the first Claude Code session that starts resumes the release managers and planners that were running when it went down, and each release manager resumes the developer agents that were working and whose session died; live idle agents, agents waiting for you and parked issues are left alone.
+- **Tech leads**, the sessions you talk to, one per topic when several work in parallel. A tech lead designs with you, prepares and follows the issues, answers the developers, and starts **spikes** (`spike · …`), read-only background sessions, for the technical analyses you ask for. It never develops, and a hook makes sure of it. New issues and the first technical decision of an issue are always taken with you; on an issue that already has decisions it takes the next ones when they follow from those and it has no doubt.
+- **Developers** (`dev #<n> · …`), one per issue, in their own worktree. A developer reads the issue and its `## Technical decisions`, builds and tests the change, opens the pull request, follows its reviews, merges it and watches the default branch's CI. Whatever needs the running stack (sst dev, a server) runs in the main checkout, one agent at a time, through a lock with a queue. Before merging, a reviewer with a clean context checks the change against the decisions.
+- **QA agents** (`qa #<n> · …`) for the delicate issues, the ones with the label `qa`: a second agent tests the pull request before its merge.
 
-The release manager works through your GitHub issues on its own:
+Developers start by themselves. Every minute a dispatcher (a script, not a model) starts one on the next workable issue: assigned to you, labelled `ready for development`, nothing blocking it, no `question`, best priority first, within capacity (2 at once by default, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets).
 
-1. Takes the next open issue assigned to you that is ready: it carries the label `ready for development`, nothing blocks it (GitHub "blocked by" relationships) and it is not waiting on you (`question` label). Priority, when the repository has it, decides the order; otherwise the oldest first. Issues without the label are the backlog: it leaves them alone.
-2. Checks that the technical decisions are in the issue's comments. If they are not, it does not start: it asks you.
-3. Creates the linked branch and a worktree, and starts a background developer agent named `[dev] <n>-<slug>`, at most 2 at once, fewer when [clessidra](https://github.com/alessandrolattao/clessidra) says the plan usage would run out before it resets.
-4. Answers the agent's questions only with what is written (issue comments, repository rules, product docs).
-5. When the agent opens its pull request, tests it in the main checkout (the browser for what a person sees, the right tool otherwise), merges it when it passes, or sends the bugs back. After 3 failed rounds it asks you. A pull request you keep for yourself goes to `[ready]` instead: the planner tells you it is your turn and counts it in its 🙋 until you test or merge it.
-6. Watches the CI of the default branch after every merge. When it turns red it opens an urgent bug issue and merges nothing else until it is green again, except the fix.
-7. Starts over. With nothing left to do it has the planner tell you once, and starts again as soon as an issue is workable.
+## GitHub is where the team talks
 
-It also opens issues, for you or for whoever the repository's `.md` files name; they wait in the backlog until you and the planner mark them ready.
+Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead admin-app**`), and the plugin wakes the session it is written to. When a session needs you, it mentions you, so GitHub notifies you, adds `question` to the issue, and stops, so Claude Code notifies you too. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
 
-## Preparing the work
+## Colors and the board
 
-The planner works by `/release-manager:plan`, which you can also use in any session: you talk with Claude (a backlog review, a new project, the technical analysis of an issue) and it turns what you decide into issues the release manager can take: written with the repository's conventions, assigned, with Priority, Effort, "blocked by" relationships and the technical decisions in a comment. It reads the release manager's own rules and the repository's skills first, creates an issue only when you ask or say yes, takes every issue's first technical decision with you, goes on alone with what is mechanical (labels, fields, writing down your decisions) and with the next decisions of an issue that already has some, when it has no doubt (`ready for development` included when every decision of the issue was discussed), stops and asks at the first doubt, and ends by telling you which issues are ready and which are not.
+Every session has the color of its state, in `claude agents` too:
 
-The release manager never waits on you in silence: whatever only you can do (approve a login and its device code, say yes to a privileged profile, take a decision) goes to the planner at once. When something has waited for you for 30 minutes (a question of the planner or of the release manager, a permission prompt that stops the release manager or a developer agent, a developer agent waiting for an answer in its own chat), the planner says it out loud through [TitTieS](https://github.com/alessandrolattao/titties), once, in one short sentence.
+- **cyan**: working;
+- **purple**: waiting on another agent or on the main checkout;
+- **yellow**: waiting on you;
+- **red**: stuck (its session died, a turn failed, or it has been silent for 20 minutes with nothing to wait for);
+- **no color**: done. It goes away soon after, with its worktree; its conversation stays (`claude --resume`).
 
-A technical analysis or an opinion you ask the planner for is its own work: it starts consultants, read-only background sessions named `[plan] <topic>`, waits for their reports and brings you the options with a recommendation. The release manager only develops.
+A color changes between turns: during a long turn the list shows the state of the turn before. The **board** beside a tech lead, a pane that opens by itself on a wide terminal or with `/team-board`, is always live: one row per agent with its color, where it works (its worktree or the main checkout), what it does and for how long, and under them the checkout lock, the queue, the default branch's CI and the capacity. A row copies its `claude attach` command.
 
-## The model chooses, the plugin does
+## Your rules
 
-Claude only makes the choices: which issue, what to answer, whether a test passed. Everything that follows from a choice is a script or a hook, so it cannot be forgotten: the release manager's color comes from hooks on its own turns, an agent moves to `[review]` when a hook sees it open its pull request or push its fixes, back from `[ask]` to `[dev]` when a hook sees it edit or commit again (wherever you answered it), and every other step (start an agent, test, fail, merge, ask) is one script that also renames the agent and moves the board.
+Your own rules for a repository ("up to 3 agents at once", "this repository keeps a linear history") are yours: they live on this machine, in `~/.local/share/team/rules/`, never in the repository or on GitHub. The tech lead writes them when you state them, and every session reads them at start and after a compaction. A few are read by the scripts: `agents: <n>`, `merge: merge|rebase|squash|user`, `capacity: 5h`.
 
-## One thread at a time
+## When something goes wrong
 
-The release manager and the planner never interrupt each other, or another repository's planner: they leave messages in an inbox (one file per message, Maildir style, under `~/.local/share/release-manager/inbox/`), typed `question` or `info`, and the receiver's name shows `📨<n>`. The issues hold what matters: decisions, questions and answers are written there, and a message about an issue is one line pointing at it. The user's standing rules ("up to 3 agents at once") live in one pinned issue per repository, which the planner keeps and every session reads at start and after a compaction. Both read it as soon as their turn is over; the planner waits while its last message waits for your answer, so a message never pulls a discussion off course. Only the developer agents talk to the release manager directly.
-
-## It never decides how
-
-Engineering manager, delivery manager, QA and release manager, yes; tech lead and product owner, no. Every technical doubt stops the work on that point and becomes a question for you: a comment on the issue and the `question` label. The planner raises its 🙋 counter; you go through the question with the planner, which writes your decisions on the issue, removes `question` and tells the release manager, which picks the issue up again.
+After a restart of the machine, the first Claude Code session that starts resumes the tech leads that were running, and their dispatcher resumes the developers and QA agents. When a session meets a problem of the plugin itself, it reports it as an issue on this repository, describing the plugin only.
 
 ## Install
 
 ```
-/plugin install release-manager --marketplace alessandrolattao/release-manager
+/plugin install team --marketplace alessandrolattao/team
 ```
 
 Needs:
 
-- Claude Code with background sessions (`claude --bg`, `claude agents`), plugin monitors (`monitors/monitors.json`) and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
-- [`gh`](https://cli.github.com), logged in, and `jq`.
-- [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one agent at a time).
-- TitTieS, optional, for the planner's voice (without it, nothing is said out loud).
-- `python3`, for the planner's guard on other repositories.
+- Claude Code with background sessions (`claude --bg`, `claude agents`) and plugin hooks modules (`modules` in `hooks/hooks.json`, an early-access API).
+- [`gh`](https://cli.github.com), logged in, `jq` and `python3`.
+- [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one developer at a time).
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.
 

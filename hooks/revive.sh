@@ -1,17 +1,17 @@
 #!/bin/sh
-# After the machine restarts, resumes the release managers and planners that were running when it went
-# down. A SessionStart hook: the first Claude Code session that starts after a boot does it, any other
-# one exits at once. Each comes back with its own skill (/release-manager:run, /release-manager:planner),
-# on its own account, as if started again; the release manager then resumes its developer agents.
+# After the machine restarts, resumes the tech leads that were running when it went down. A SessionStart
+# hook: the first Claude Code session that starts after a boot does it, any other one exits at once. Each
+# comes back with its own skill (/team:tech-lead <topic>), on its own account, as if started again; then its
+# dispatcher resumes the developer and QA agents that died with the machine.
 # "Running when it went down": its heartbeat (hooks/sessions.tsx writes it every minute) is from before
 # this boot and within 3 minutes of the last heartbeat of that boot. One stopped earlier stays stopped.
 #   revive.sh   (hook payload on stdin, unused)
 set -eu
 
-# shellcheck source=skills/run/scripts/session-dir.sh
-. "${CLAUDE_PLUGIN_ROOT:?}/skills/run/scripts/session-dir.sh"
+# shellcheck source=scripts/session-dir.sh
+. "${CLAUDE_PLUGIN_ROOT:?}/scripts/session-dir.sh"
 [ -d "$sessions_dir" ] || exit 0
-state=${sessions_dir%/*}
+state=$team_state
 
 if [ -r /proc/stat ]; then
 	boot=$(awk '/^btime/ {print $2}' /proc/stat)
@@ -66,11 +66,8 @@ for folder in "$sessions_dir"/*; do
 	id=${folder##*/}
 	cwd=$(cat "$folder/cwd" 2>/dev/null || true)
 	config=$(cat "$folder/config" 2>/dev/null || true)
-	case "$(cat "$folder/role")" in
-	manager) skill=/release-manager:run ;;
-	planner) skill=/release-manager:planner ;;
-	*) continue ;;
-	esac
+	[ "$(cat "$folder/role")" = tech-lead ] || continue
+	skill="/team:tech-lead $(jq -r '.topic // ""' "$folder/status" 2>/dev/null)"
 	[ -d "$cwd" ] || continue
 	running=$(as_account claude agents --json 2>/dev/null |
 		jq -r --arg s "$id" '[.[] | select(.sessionId == $s and .status != null)] | length' 2>/dev/null || echo 0)

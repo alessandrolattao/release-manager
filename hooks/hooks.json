@@ -1,20 +1,19 @@
 {
-  "modules": [
-    "./sessions.tsx"
-  ],
+  "modules": ["./sessions.tsx"],
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/migrate.sh\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/revive.sh\"",
             "async": true
-          }
-        ]
-      },
-      {
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/rules-context.sh\"",
@@ -28,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-guard.sh\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.sh\"",
             "timeout": 15
           }
         ]
@@ -39,17 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/manager-color.sh\"",
-            "async": true
-          },
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-asks.sh\"",
-            "async": true
-          },
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-asks.sh\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/asks.sh\"",
             "async": true
           }
         ]
@@ -75,31 +64,6 @@
             "async": true
           }
         ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-progress.sh\"",
-            "async": true
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-progress.sh\"",
-            "async": true
-          },
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-sync.sh\"",
-            "async": true
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -107,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/planner-inbox.sh\"",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/tech-lead-inbox.sh\"",
             "timeout": 15
           }
         ]

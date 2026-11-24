@@ -45,6 +45,9 @@ start)
 	old=$(cat "$pid_file" 2>/dev/null || true)
 	case "$old" in "" | *[!0-9]*) ;; *) kill "$old" 2>/dev/null || true ;; esac
 	cd "$root"
+	# Where and on which account it runs, so update.sh can restart it on a new version of the plugin.
+	printf '%s\n' "$root" >"$repo_dir/dispatcher.root"
+	printf '%s\n' "${CLAUDE_CONFIG_DIR:-}" >"$repo_dir/dispatcher.config"
 	[ ! -f "$log" ] || { tail -n 1000 "$log" >"$log.tmp" && mv "$log.tmp" "$log"; }
 	setsid nohup sh "$here/dispatcher.sh" run >>"$log" 2>&1 </dev/null &
 	n=0

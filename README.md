@@ -14,7 +14,7 @@ claude --bg --name "tech lead" "/team:tech-lead"   # the one you talk to, one pe
 
 Developers start by themselves. Every minute a dispatcher (a process of its own, not a model) starts one on the next workable issue: assigned to you, labelled `ready for development`, nothing blocking it, no `question`, best priority first. There is no cap: what is ready is what you want built, so you decide the pace by what you mark ready. The board's summary shows how long the plan usage lasts at this pace, as [clessidra](https://github.com/alessandrolattao/clessidra) estimates it. The same dispatcher wakes the sessions with the comments written to them and keeps the board's summary.
 
-The dispatcher runs only when you start it, one per repository on each machine that works on it: click its red `stopped` row in the board's summary, or run `/team:dispatcher` in a Claude Code session in the repository's checkout (`/team:dispatcher stop` stops it, `status` tells). It goes on after that session ends; after a restart of the machine it stays stopped until you start it again. After a plugin update, restart it to run the new version: the summary shows the version it runs.
+The dispatcher runs only when you start it, one per repository on each machine that works on it: click its red `stopped` row in the board's summary, or run `/team:dispatcher` in a Claude Code session in the repository's checkout (`/team:dispatcher stop` stops it, `status` tells). It goes on after that session ends; after a restart of the machine it stays stopped until you start it again. After a plugin update, `/team:update` restarts it on the new version; the summary shows the version it runs.
 
 ## GitHub is where the team talks
 
@@ -72,6 +72,10 @@ Needs:
 - [clessidra](https://github.com/alessandrolattao/clessidra) to read the plan usage (without it, one developer at a time).
 
 How a repository is developed and tested comes from the repository itself: its CLAUDE.md files and skills. Priority and Effort are GitHub organization issue fields; repositories of a personal account have none.
+
+## Updating
+
+After a new version is published, run `/team:update` in any Claude Code session on each machine. It updates the plugin on every account the team uses there, restarts every live team session on the new version once it is quiet (no turn is cut, the conversation goes on), and restarts the dispatchers that were running. Its log is `~/.local/state/team/update.log`.
 
 ## License
 

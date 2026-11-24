@@ -22,10 +22,18 @@ base_branch() {
 
 
 # The names of the sessions, without counters, so an address never goes stale.
-tech_lead_name() { printf 'tech lead · %s' "$repo_short"; }
-dev_name() { printf 'dev #%s · %s · %s' "$1" "$repo_short" "$(printf '%s' "${2#*-}" | cut -c1-40)"; }
-qa_name() { printf 'qa #%s · %s' "$1" "$repo_short"; }
-spike_name() { printf 'spike · %s · %s' "$repo_short" "$1"; }
+# Every name is "<repo> · <role> · <detail>", so the agent list keeps a project's sessions together; a
+# developer's and a QA agent's also say where the issue stands (its stage: in progress, in review).
+tech_lead_name() { printf '%s · tech lead' "$repo_short"; }
+dev_name() { printf '%s · dev #%s · %s%s' "$repo_short" "$1" "${3:+$3 · }" "$(short_title "$2")"; }
+qa_name() { printf '%s · qa #%s · %s%s' "$repo_short" "$1" "${3:+$3 · }" "$(short_title "$2")"; }
+spike_name() { printf '%s · spike · %s' "$repo_short" "$1"; }
+# short_title <title>: an issue title cut to about 40 characters at a word, without Markdown marks.
+short_title() {
+	printf '%s\n' "$1" | tr -d '`*_' | awk -v max=40 '{
+		if (length($0) <= max) { print; exit }
+		s = substr($0, 1, max); sub(/ [^ ]*$/, "", s); print s "…"; exit }'
+}
 
 # address_of <session-id>: how comments name the session: "tech lead", "dev #<n>", "qa #<n>", "spike <topic>".
 address_of() {

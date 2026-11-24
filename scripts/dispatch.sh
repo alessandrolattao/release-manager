@@ -302,7 +302,7 @@ fi
 # of the comments read here: stuck when nothing happened on the issue for an hour, waiting when the agent's
 # last message is still unanswered, working otherwise.
 myhost=$(sh "$here/claim.sh" host 2>/dev/null || true)
-elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {number, title}' 2>/dev/null |
+elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {number, title, statusName}' 2>/dev/null |
 	while read -r row; do
 		f="$repo_dir/activity/$(printf '%s' "$row" | jq -r .number).json"
 		h=$(jq -r '.host // ""' "$f" 2>/dev/null || true)
@@ -311,6 +311,7 @@ elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {numb
 			($now - (.at // $now)) as $quiet
 			| (((.from // "") | test("^(dev|qa) #")) and (.fyi != true)) as $asks
 			| {issue: $row.number, title: $row.title, host: .host, since: (.at // $now),
+				stage: (($row.statusName // "in progress") | ascii_downcase),
 				state: (if $quiet > 3600 then "stuck" elif $asks then "others" else "working" end),
 				detail: (if $quiet > 3600 then "quiet \($quiet / 3600 | floor)h, on \(.host)"
 					elif $asks then "waits for \(.to), on \(.host)" else "on \(.host)" end)}' "$f"

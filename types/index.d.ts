@@ -7,6 +7,8 @@ export type BoardRow = {
   role: string
   state: string
   place: string
+  // Where the issue stands, for a developer or a QA agent: in progress, in review.
+  stage: string
   detail: string
   since: number
 }

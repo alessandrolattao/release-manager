@@ -24,7 +24,7 @@ brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{PR}}|$pr|g" -e "s|{{REPO}}|$repo_f
 	-e "s|{{BASE}}|$(base_branch)|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/qa.md")
 
 cd "$root"
-name=$(qa_name "$issue")
+name=$(qa_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in review")
 id=$(launch "$name" "$brief")
 sh "$here/role.sh" "$id" qa "$issue" "$branch" >/dev/null
 status_set "$id" --argjson p "$pr" '.pr = $p'

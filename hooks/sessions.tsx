@@ -48,7 +48,7 @@ const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 
 const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', working: 'working', stuck: 'stuck', idle: 'idle' }
 
 const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, dispatcher: { running: false, version: '' }, updated: 0 }, {
-  shape: 'board-3',
+  shape: 'board-4',
 })
 
 let stateRoot: string | undefined
@@ -73,6 +73,7 @@ type Status = {
   detail?: string
   since?: number
   busy_until?: number
+  stage?: string
   resume_to?: { state: string; detail: string; since: number }
 }
 
@@ -373,6 +374,7 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       role: status.role,
       state: status.state ?? 'working',
       place: status.place ?? '',
+      stage: status.stage ?? '',
       detail: status.detail ?? '',
       since: status.since ?? 0,
     })
@@ -387,7 +389,7 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
       ci?: string
       developers?: { busy?: number }
       usage?: { h5?: { text?: string; tone?: string }; d7?: { text?: string; tone?: string } }
-      elsewhere?: { issue: number; host: string; state: string; detail: string; since: number }[]
+      elsewhere?: { issue: number; host: string; stage?: string; state: string; detail: string; since: number }[]
     }
     // The developers of other machines, as the dispatcher guesses them from GitHub (scripts/dispatch.sh).
     for (const remote of written.elsewhere ?? []) {
@@ -396,7 +398,8 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
         label: `dev #${remote.issue}`,
         role: 'dev',
         state: remote.state,
-        place: remote.host,
+        place: `other PC ${remote.host}`,
+        stage: remote.stage ?? '',
         detail: remote.detail,
         since: remote.since,
       })
@@ -643,6 +646,7 @@ export const register: Register = on => {
                       <Text dimColor>
                         {'  '}
                         {row.place ? `${row.place} · ` : ''}
+                        {row.stage ? `${row.stage} · ` : ''}
                         {`${VERBS[row.state] ?? row.state} ${age(row.since, now)}`}
                       </Text>
                     </Box>

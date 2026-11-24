@@ -12,9 +12,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/repo.sh"
 
 case "$want" in
-todo) name="Todo" board="Todo" ;;
-in_progress) name="In progress" board="In Progress" ;;
-in_review) name="In review" board="In Review" ;;
+todo) name="Todo" board="Todo" stage="todo" ;;
+in_progress) name="In progress" board="In Progress" stage="in progress" ;;
+in_review) name="In review" board="In Review" stage="in review" ;;
 *)
 	echo "usage: issue-status.sh <issue> todo|in_progress|in_review" >&2
 	exit 2
@@ -43,3 +43,12 @@ gh api graphql -f query='mutation($i: ID!, $s: ID!) { setIssueStatus(input: {iss
 	issue { number } } }' -F i="$issue_id" -F s="$status_id" >/dev/null
 echo "issue $issue: $name"
 sh "$here/project.sh" "$issue" "$board" 2>/dev/null || true
+# The developer and QA agent of the issue on this machine say the new stage in their names.
+for id in $(sessions_of dev "$issue") $(sessions_of qa "$issue"); do
+	f="$sessions_dir/$id/status"
+	[ "$(jq -r .state "$f")" != done ] || continue
+	title=$(jq -r '.title // ""' "$f")
+	if [ "$(jq -r .role "$f")" = dev ]; then new=$(dev_name "$issue" "$title" "$stage"); else new=$(qa_name "$issue" "$title" "$stage"); fi
+	status_set "$id" --arg s "$stage" --arg n "$new" '.stage = $s | .name = $n'
+	want "$id" name "$new"
+done

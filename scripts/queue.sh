@@ -45,7 +45,8 @@ gh api graphql --paginate -f query="$query" -F owner="$owner" -F name="$name" -F
 				| if .repository.nameWithOwner == $repo then .number else "\(.repository.nameWithOwner)#\(.number)" end],
 			question: ([.labels.nodes[].name] | index("question") != null),
 			ready: ([.labels.nodes[].name] | index("ready for development") != null),
-			status: (.status.category.key // null)
+			status: (.status.category.key // null),
+			statusName: (.status.name // null)
 		}
 		| .backlog = (.ready | not)
 		| .workable = ((.backlog | not) and (.blockedBy | length) == 0 and (.question | not)

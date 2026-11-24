@@ -607,36 +607,39 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {title === null ? <Text bold>{project}</Text> : draw(title, 'title')}
-        {data.rows.length === 0 && <Text dimColor>No agents at work.</Text>}
-        {groups.map(group => (
-          <Box key={group.state} flexDirection="column" marginTop={1}>
-            <Text bold>
-              {group.title} ({group.count})
-            </Text>
-            {group.shown.map(row => {
-              const look = BACKGROUNDS[row.state] ?? { bg: 'gray', fg: 'white' }
-              return (
-                <Box key={row.id} flexDirection="column">
-                  <Box flexDirection="row">
-                    <Text backgroundColor={look.bg} color={look.fg}> {row.label} </Text>
-                    <Text dimColor>
-                      {'  '}
-                      {row.place ? `${row.place} · ` : ''}
-                      {`${VERBS[row.state] ?? row.state} ${age(row.since, now)}`}
-                    </Text>
-                  </Box>
-                  {row.detail !== '' && (
-                    <Box paddingLeft={2}>
-                      <Text wrap="wrap">
-                        {row.detail}
+        {/* The agents, one column in from each side of the pane. */}
+        <Box flexDirection="column" paddingLeft={1} paddingRight={1}>
+          {data.rows.length === 0 && <Text dimColor>No agents at work.</Text>}
+          {groups.map(group => (
+            <Box key={group.state} flexDirection="column" marginTop={1}>
+              <Text bold>
+                {group.title} ({group.count})
+              </Text>
+              {group.shown.map(row => {
+                const look = BACKGROUNDS[row.state] ?? { bg: 'gray', fg: 'white' }
+                return (
+                  <Box key={row.id} flexDirection="column">
+                    <Box flexDirection="row">
+                      <Text backgroundColor={look.bg} color={look.fg}> {row.label} </Text>
+                      <Text dimColor>
+                        {'  '}
+                        {row.place ? `${row.place} · ` : ''}
+                        {`${VERBS[row.state] ?? row.state} ${age(row.since, now)}`}
                       </Text>
                     </Box>
-                  )}
-                </Box>
-              )
-            })}
-          </Box>
-        ))}
+                    {row.detail !== '' && (
+                      <Box paddingLeft={2}>
+                        <Text wrap="wrap">
+                          {row.detail}
+                        </Text>
+                      </Box>
+                    )}
+                  </Box>
+                )
+              })}
+            </Box>
+          ))}
+        </Box>
         <Box flexDirection="column" marginTop={1}>
           {bottom === null
             ? items.map(item => (

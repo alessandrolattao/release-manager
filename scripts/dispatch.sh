@@ -1,6 +1,6 @@
 #!/bin/sh
-# The team's dispatcher. A tech lead's hooks module runs it every minute; one run at a time per repository,
-# whichever tech lead takes the lock. No model: it only does what follows from the state.
+# One cycle of the team's dispatcher. dispatcher.sh, a process started by hand, runs it every minute; one
+# run at a time per repository and machine (a lock). No model: it only does what follows from the state.
 #   1. hands each new GitHub comment of the repository to the session it is written to;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      tech lead who follows the issue;

@@ -3,7 +3,7 @@ import type { ApiContentBlock, EngineInterface, Register } from 'claude-code'
 
 import type { Board, BoardRow } from '../types'
 
-// Every team session's look, and a tech lead's dispatcher and board.
+// Every team session's look, and a tech lead's board.
 //
 // The scripts and hooks write each session's status in its own folder,
 // <state>/team/sessions/<session id>/status (scripts/session-dir.sh). This module runs inside every session:
@@ -14,14 +14,15 @@ import type { Board, BoardRow } from '../types'
 //     while it should be working, means stuck.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn (hooks/session-events.sh wakes a session only between turns).
-//   - in a tech lead it runs scripts/dispatch.sh every minute and draws the board, one row per agent of the
-//     repository with the color of its state (/team-board opens it).
+//   - in a tech lead it draws the board (/team-board opens it): the agents of the repository by state, and a
+//     summary with the dispatcher, a process of its own (scripts/dispatcher.sh) started by hand, which a
+//     click on its row starts when it is stopped.
 
 const TICK_MS = 2000
 const ALIVE_EVERY_TICKS = 30
-const DISPATCH_EVERY_TICKS = 30
 const BOARD_EVERY_TICKS = 2
-const DISPATCH_TIMEOUT_MS = 600000
+const DISPATCHER_START_MS = 30000
+const DISPATCHER_ALIVE_S = 660
 const STUCK_AFTER_S = 20 * 60
 const EXPECT_MS = 15000
 const PANE = 'team-board'
@@ -46,14 +47,14 @@ const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 
 // What the board writes before how long an agent has been in its state: "waiting 9m", "idle 1h20m".
 const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', working: 'working', stuck: 'stuck', idle: 'idle' }
 
-const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, updated: 0 }, {
-  shape: 'board-2',
+const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, dispatcher: { running: false, version: '' }, updated: 0 }, {
+  shape: 'board-3',
 })
 
 let stateRoot: string | undefined
 let isBusy = false
 let isSyncing = false
-let isDispatching = false
+let isStartingDispatcher = false
 let isPaneOpened = false
 let ticks = 0
 const applied = new Map<string, string>()
@@ -187,26 +188,37 @@ async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
   }
 }
 
-async function dispatch($: EngineInterface, folder: string): Promise<void> {
-  if (isDispatching) {
+// Starts this repository's dispatcher on this machine, when the user clicks its stopped row on the board: a
+// process of its own (scripts/dispatcher.sh), which goes on after this session ends.
+async function startDispatcher($: EngineInterface): Promise<void> {
+  if (isStartingDispatcher) {
     return
   }
-  isDispatching = true
+  isStartingDispatcher = true
   try {
+    const folder = await folderOf($)
     const cwd = (await readText($, `${folder}/cwd`)) || (await $.session.cwd())
-    await $.process.run(['sh', `${$.plugin.root}/scripts/dispatch.sh`], { cwd, timeoutMs: DISPATCH_TIMEOUT_MS })
+    const ran = await $.process.run(['sh', `${$.plugin.root}/scripts/dispatcher.sh`, 'start'], { cwd, timeoutMs: DISPATCHER_START_MS })
+    $.ui.toast((ran.exitCode === 0 ? ran.stdout : ran.stderr || ran.stdout).trim() || 'dispatcher: no answer')
+    const status = await readStatus($, folder)
+    if (status.repo) {
+      await refreshBoard($, status.repo)
+    }
   } catch (err) {
-    $.ui.log(`dispatch: ${String(err)}`)
+    $.ui.log(`dispatcher: ${String(err)}`)
+    $.ui.toast('the dispatcher did not start: see the log in its state folder')
   } finally {
-    isDispatching = false
+    isStartingDispatcher = false
   }
 }
 
 // The board's windows: dialogs of the DOS programs of the 80s and 90s (dialogRows), one for the title and
 // one for the summary, 2 columns in from each side of the pane. A row is a list of segments, each drawn
 // with its own look.
-type Look = 'frame' | 'shadow' | 'label' | 'text' | 'strong'
-type Segment = { text: string; look: Look }
+// A segment with a press is a control: a click on it runs that action.
+type Look = 'frame' | 'shadow' | 'label' | 'text' | 'strong' | 'ok' | 'alert'
+type Press = 'start-dispatcher'
+type Segment = { text: string; look: Look; press?: Press }
 type Row = Segment[]
 
 const LOOKS: Record<Look, { color?: string; dimColor?: boolean; bold?: boolean }> = {
@@ -215,6 +227,8 @@ const LOOKS: Record<Look, { color?: string; dimColor?: boolean; bold?: boolean }
   label: { dimColor: true },
   text: {},
   strong: { bold: true },
+  ok: { color: 'green' },
+  alert: { color: 'red', bold: true },
 }
 const SIDE = 2
 
@@ -304,18 +318,21 @@ function dialogRows(inside: number, left: number, content: Row[], title: string)
 
 // The summary: a dialog across the pane with 2 columns of room on each side, one
 // row per item, long values wrapped inside it, never cut. Null when the pane is too narrow.
-function summaryRows(items: [string, string][], columns: number): Row[] | null {
+type Item = { label: string; value: string; look?: Look; press?: Press }
+
+function summaryRows(items: Item[], columns: number): Row[] | null {
   const inside = columns - 5 - 2 * SIDE
   const room = inside - 12
   if (room < 8) {
     return null
   }
   const content: Row[] = []
-  for (const [label, value] of items) {
-    wrap(value, room).forEach((part, i) => {
+  for (const item of items) {
+    wrap(item.value, room).forEach((part, i) => {
       content.push([
-        { text: (i === 0 ? label : '').padEnd(11), look: 'label' },
-        { text: ` ${part}`, look: 'text' },
+        { text: (i === 0 ? item.label : '').padEnd(11), look: 'label' },
+        { text: ' ', look: 'text' },
+        { text: part, look: item.look ?? 'text', press: item.press },
       ])
     })
   }
@@ -359,8 +376,8 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
   }
   rows.sort((a, b) => (ORDER[a.role] ?? 9) - (ORDER[b.role] ?? 9) || a.label.localeCompare(b.label, undefined, { numeric: true }))
   let summary: Board['summary'] = null
+  const key = repo.replace('/', '_')
   try {
-    const key = repo.replace('/', '_')
     const written = JSON.parse(await $.fs.read(`${root}/repos/${key}/board.json`)) as {
       checkout?: { holder?: string; waiting?: string }
       queue?: { ready?: number; next?: string; backlog?: number; questions?: number }
@@ -380,7 +397,13 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
     summary = null
   }
   const now = Math.floor((await $.clock.now()) / 1000)
-  await update($, board, () => ({ repo, rows, summary, updated: now }))
+  // The dispatcher runs when its last cycle is recent (scripts/dispatcher.sh writes it at each one).
+  const lastCycle = Number(await readText($, `${root}/repos/${key}/dispatcher.alive`)) || 0
+  const dispatcher = {
+    running: now - lastCycle <= DISPATCHER_ALIVE_S,
+    version: await readText($, `${root}/repos/${key}/dispatcher.version`),
+  }
+  await update($, board, () => ({ repo, rows, summary, dispatcher, updated: now }))
 }
 
 // The plugin's version, read once from its manifest, for the foot of the board.
@@ -429,9 +452,6 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (role === 'tech-lead') {
-      if (tickNumber % DISPATCH_EVERY_TICKS === 0) {
-        void dispatch($, folder)
-      }
       if (tickNumber % BOARD_EVERY_TICKS === 0 && status.repo) {
         await refreshBoard($, status.repo)
         if (!isPaneOpened) {
@@ -530,7 +550,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const data: Board = await read($, board)
     const now = Math.floor((await $.clock.now()) / 1000)
     // Every agent is drawn: the pane's body scrolls (the wheel, or the keys while the pane has the focus).
@@ -542,29 +562,48 @@ export const register: Register = on => {
     const project = data.repo.split('/')[1] ?? '...'
     const title = titleRows(project, columns)
     const summary = data.summary
-    const items: [string, string][] =
+    // The dispatcher first: stopped, in red, it is a control that starts it.
+    const dispatcher: Item = data.dispatcher.running
+      ? { label: 'dispatcher', value: `running${data.dispatcher.version ? ` · team ${data.dispatcher.version}` : ''}`, look: 'ok' }
+      : { label: 'dispatcher', value: 'stopped · click to start', look: 'alert', press: 'start-dispatcher' }
+    const items: Item[] =
       summary === null
-        ? [['', 'the dispatcher has not written its summary yet']]
+        ? [dispatcher, { label: '', value: 'the dispatcher has not written its summary yet' }]
         : [
-            ['checkout', summary.checkout],
-            ['developers', summary.developers],
-            ['queue', summary.queue],
-            ['main CI', summary.ci],
-            ['capacity', summary.capacity],
+            dispatcher,
+            { label: 'checkout', value: summary.checkout },
+            { label: 'developers', value: summary.developers },
+            { label: 'queue', value: summary.queue },
+            { label: 'main CI', value: summary.ci },
+            { label: 'capacity', value: summary.capacity },
           ]
     const bottom = summaryRows(items, columns)
     const version = await versionOf($)
     const footer = version === '' ? 'team' : `team ${version}`
+    const segmentOf = (segment: Segment, key: string) => (
+      <Text key={key} {...LOOKS[segment.look]}>
+        {segment.text}
+      </Text>
+    )
+    // A row holding a control is laid out in a row of its parts, the control a Button around its text.
     const draw = (rows: Row[], key: string) =>
-      rows.map((row, i) => (
-        <Text key={`${key}-${i}`}>
-          {row.map((segment, j) => (
-            <Text key={`${key}-${i}-${j}`} {...LOOKS[segment.look]}>
-              {segment.text}
-            </Text>
-          ))}
-        </Text>
-      ))
+      rows.map((row, i) =>
+        row.some(segment => segment.press !== undefined) ? (
+          <Box key={`${key}-${i}`} flexDirection="row">
+            {row.map((segment, j) =>
+              segment.press === 'start-dispatcher' ? (
+                <Button key={`${key}-${i}-${j}`} plain onPress={() => startDispatcher($)}>
+                  {segmentOf(segment, `${key}-${i}-${j}-text`)}
+                </Button>
+              ) : (
+                segmentOf(segment, `${key}-${i}-${j}`)
+              ),
+            )}
+          </Box>
+        ) : (
+          <Text key={`${key}-${i}`}>{row.map((segment, j) => segmentOf(segment, `${key}-${i}-${j}`))}</Text>
+        ),
+      )
     return (
       <Box flexDirection="column">
         {title === null ? <Text bold>{project}</Text> : draw(title, 'title')}
@@ -600,9 +639,9 @@ export const register: Register = on => {
         ))}
         <Box flexDirection="column" marginTop={1}>
           {bottom === null
-            ? items.map(([label, value]) => (
-                <Text key={`summary-${label}`}>
-                  <Text dimColor>{label.padEnd(11)}</Text> {value}
+            ? items.map(item => (
+                <Text key={`summary-${item.label}`}>
+                  <Text dimColor>{item.label.padEnd(11)}</Text> <Text {...LOOKS[item.look ?? 'text']}>{item.value}</Text>
                 </Text>
               ))
             : draw(bottom, 'summary')}

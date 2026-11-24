@@ -202,6 +202,33 @@ async function dispatch($: EngineInterface, folder: string): Promise<void> {
   }
 }
 
+// The board's title: the project's name in a window with a double frame and a drop shadow, on a dithered
+// background as wide as the pane, the way an Atari ST dialog sat on its desktop. Each line is split in its
+// parts so each gets its own look: background, frame and name, shadow.
+type TitleLine = { left: string; frame: string; shadow: string; right: string }
+
+function titleLines(name: string, columns: number): TitleLine[] | null {
+  const inner = Math.min(columns - 6, Math.max(name.length + 12, 24))
+  if (inner < name.length + 2) {
+    return null
+  }
+  const left = Math.max(1, Math.floor((columns - inner - 3) / 2))
+  const right = Math.max(0, columns - left - inner - 3)
+  const pad = Math.floor((inner - name.length) / 2)
+  const bg = (n: number) => '░'.repeat(n)
+  const empty = { left: bg(left), frame: `║${' '.repeat(inner)}║`, shadow: '▓', right: bg(right) }
+  return [
+    { left: bg(columns), frame: '', shadow: '', right: '' },
+    { left: bg(left), frame: `╔${'═'.repeat(inner)}╗`, shadow: '', right: bg(right + 1) },
+    empty,
+    { left: bg(left), frame: `║${' '.repeat(pad)}${name}${' '.repeat(inner - pad - name.length)}║`, shadow: '▓', right: bg(right) },
+    empty,
+    { left: bg(left), frame: `╚${'═'.repeat(inner)}╝`, shadow: '▓', right: bg(right) },
+    { left: bg(left + 1), frame: '', shadow: '▓'.repeat(inner + 2), right: bg(right) },
+    { left: bg(columns), frame: '', shadow: '', right: '' },
+  ]
+}
+
 function age(since: number, now: number): string {
   const minutes = Math.max(0, Math.floor((now - since) / 60))
   return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60 === 0 ? '' : `${minutes % 60}m`}`
@@ -411,9 +438,26 @@ export const register: Register = on => {
         {value}
       </Text>
     )
+    const project = data.repo.split('/')[1] ?? '...'
+    const title = titleLines(project, Math.max(24, e.viewport?.columns ?? 60))
     return (
       <Box flexDirection="column">
-        <Text bold>TEAM · {data.repo.split('/')[1] ?? '...'}</Text>
+        {title === null ? (
+          <Text bold>{project}</Text>
+        ) : (
+          title.map((part, i) => (
+            <Text key={`title-${i}`}>
+              <Text color="gray" dimColor>
+                {part.left}
+              </Text>
+              <Text bold>{part.frame}</Text>
+              <Text color="gray">{part.shadow}</Text>
+              <Text color="gray" dimColor>
+                {part.right}
+              </Text>
+            </Text>
+          ))
+        )}
         {data.rows.length === 0 && <Text dimColor>No agents at work.</Text>}
         {groups.map(group => (
           <Box key={group.state} flexDirection="column" marginTop={1}>

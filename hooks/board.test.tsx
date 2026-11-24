@@ -19,10 +19,10 @@ const PANE = {
 const BOARD: Board = {
   repo: 'equokar/equokar.com',
   rows: [
-    { id: 'a', label: 'tech lead', session: 'tech lead · equokar.com', role: 'tech-lead', state: 'you', place: '', detail: 'Registro come tua regola fissa che le domande per te passano tutte da me?', since: 0 },
-    { id: 'b', label: 'dev #318', session: 'dev #318 · equokar.com · il-banco', role: 'dev', state: 'you', place: 'checkout', detail: 'giro vero di #318 sul bucket e su Google Drive, comandi in issue', since: 0 },
-    { id: 'd', label: 'tech lead api', session: 'tech lead · equokar.com · api', role: 'tech-lead', state: 'idle', place: '', detail: 'waiting for work', since: 0 },
-    { id: 'c', label: 'dev #8', session: 'dev #8 · equokar.com · una-pull', role: 'dev', state: 'working', place: 'worktree 8', detail: 'removal of preview pr-317 with SST .38', since: 0 },
+    { id: 'a', label: 'tech lead', role: 'tech-lead', state: 'you', place: '', detail: 'Registro come tua regola fissa che le domande per te passano tutte da me?', since: 0 },
+    { id: 'b', label: 'dev #318', role: 'dev', state: 'you', place: 'checkout', detail: 'giro vero di #318 sul bucket e su Google Drive, comandi in issue', since: 0 },
+    { id: 'd', label: 'tech lead api', role: 'tech-lead', state: 'idle', place: '', detail: 'waiting for work', since: 0 },
+    { id: 'c', label: 'dev #8', role: 'dev', state: 'working', place: 'worktree 8', detail: 'removal of preview pr-317 with SST .38', since: 0 },
   ],
   summary: { checkout: 'dev #318', developers: '2/2', queue: '0 ready · 5 backlog', ci: 'verde', capacity: 'ok' },
   updated: 0,

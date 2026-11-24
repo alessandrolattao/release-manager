@@ -299,11 +299,10 @@ function dialogRows(inside: number, left: number, content: Row[], title: string)
     ]),
     [margin, { text: `╚${'═'.repeat(across)}╝`, look: 'frame' }, { text: '▓', look: 'shadow' }],
     [margin, { text: ' ', look: 'text' }, { text: '▓'.repeat(across + 2), look: 'shadow' }],
-    [{ text: '', look: 'text' }],
   ]
 }
 
-// The summary: a dialog across the pane with 2 columns of room on each side and an empty row under it, one
+// The summary: a dialog across the pane with 2 columns of room on each side, one
 // row per item, long values wrapped inside it, never cut. Null when the pane is too narrow.
 function summaryRows(items: [string, string][], columns: number): Row[] | null {
   const inside = columns - 5 - 2 * SIDE
@@ -608,7 +607,8 @@ export const register: Register = on => {
               ))
             : draw(bottom, 'summary')}
         </Box>
-        {bottom === null && <Text> </Text>}
+        {/* An empty row, then the version: a Text holding a space, since an empty one takes no height. */}
+        <Text> </Text>
         <Text dimColor>
           {' '.repeat(Math.max(0, Math.floor((columns - footer.length) / 2)))}
           {footer}

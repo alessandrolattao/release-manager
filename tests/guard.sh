@@ -84,8 +84,8 @@ check deny spike "cd $S && git symbolic-ref HEAD refs/heads/x"
 check deny spike "git -C $S symbolic-ref --delete refs/remotes/origin/HEAD"
 check deny spike "git -C $S symbolic-ref -d refs/remotes/origin/HEAD"
 check deny spike "git -C $S symbolic-ref -m why HEAD refs/heads/x"
-# The API rule: repos/<owner>/<name> counts only in the words of gh api and in a curl or wget URL to
-# api.github.com, whatever the method; a local path or a quoted string that holds it calls nothing.
+# The API rule refuses repos/<other>/... by default, whatever the method, as main does; a local path (a folder
+# before repos/), a quoted string that holds it after other text, and a comment call nothing.
 check allow tech-lead 'tail -1 ~/.local/state/team/repos/test_repo/dispatcher.log'
 check allow tech-lead 'tail -5 ~/.local/state/team/repos/someone_else/dispatcher.log'
 check allow spike 'cat ~/.local/state/team/repos/test_repo/review/42'
@@ -167,6 +167,28 @@ check allow tech-lead 'curl -s https://api.github.com/repos/test/repo/issues'
 check deny tech-lead 'curl -s -X POST https://api.github.com/repos/someone/else/issues -d "{}"'
 check deny tech-lead 'wget -qO- api.github.com/repos/someone/else/issues'
 check allow tech-lead 'curl -s https://example.com/repos/a/b'
+check allow tech-lead 'curl -s https://example.com/api/repos/a/b'
+check allow tech-lead 'cat ./repos/someone_else/x.log'
+check allow tech-lead 'ls /var/lib/repos/a/b'
+check allow tech-lead 'gh issue comment 3 --body "see https://api.github.com/repos/someone/else/issues"'
+check deny tech-lead 'gh api "https://api.github.com/repos/someone/else/issues"'
+check deny tech-lead "gh api '/repos/someone/else/issues'"
+check deny tech-lead 'curl -s https://user:token@api.github.com/repos/someone/else/issues'
+check deny tech-lead 'API=https://api.github.com; curl -s $API/repos/someone/else/issues'
+check deny tech-lead 'curl -s "$API/repos/someone/else/issues"'
+check deny tech-lead 'curl -s "$(echo https://api.github.com)/repos/someone/else/issues"'
+check allow tech-lead 'gh issue comment 3 --body "see $X and repos/a/b"'
+# Refused by default: a command name known at run time, or the endpoint as data.
+check deny tech-lead '$(which gh) api repos/someone/else/issues'
+check deny tech-lead 'GH=gh; $GH api repos/someone/else/issues'
+check deny tech-lead 'f() { gh api "$@"; }; f repos/someone/else/issues'
+check deny tech-lead 'echo repos/someone/else/issues | xargs gh api'
+check deny tech-lead 'gh api $(echo repos/someone/else/issues)'
+check deny tech-lead 'for r in repos/someone/else/issues; do gh api "$r"; done'
+# The accepted cost: a word that starts with repos/<x>/<y> outside an API call is refused too.
+check deny tech-lead 'cd ~/.local/state/team && cat repos/test_repo/dispatcher.log'
+check deny tech-lead 'echo repos/a/b'
+check deny tech-lead 'gh issue comment 3 --body "repos/a/b"'
 check deny tech-lead 'curl -s https://API.github.com/repos/someone/else/issues'
 check allow tech-lead 'curl -s https://API.github.com/repos/test/repo/issues'
 check deny tech-lead 'curl -s https://api.github.com:443/repos/someone/else/issues'

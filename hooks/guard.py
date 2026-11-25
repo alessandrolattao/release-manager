@@ -7,8 +7,9 @@ Refused:
   - a command that changes code, branches or pull requests (git commit, push, merge, rebase, ...; gh pr
     create, merge, ...; claude --bg or -p; sed -i or perl -i on a file of the repository);
   - anything aimed at another repository but reading it with git (gh -R, gh search, links to it, writing or
-    building inside it, its API: repos/<other> in the words of gh api or in a curl or wget URL to api.github.com,
-    whatever the method; a local path that holds repos/... or github.com/... is no call and no link);
+    building inside it, its API: any repos/<other>/... in what the shell runs, whatever the method, but after a
+    folder (a local path), inside a quoted string after other text, or in a comment; a local path that holds
+    github.com/... is no link);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 A command inside a command (sh -c, bash -lc, eval, a string echo or printf pipes into a shell or <<< gives it)
 is judged as one of its own; a here-document is data, also into a shell.
@@ -31,13 +32,12 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
-# The API of a repository: a gh api endpoint (repos/..., /repos/..., https://api.github.com/repos/...) or a curl or
-# wget URL to api.github.com. GraphQL names no repository: it is not judged.
-GH_API_ENDPOINT = re.compile(r"^(?:(?i:(?:https?://)?api\.github\.com)(?::\d+)?)?/?repos/([\w.-]+/[\w.-]+)")
-API_URL = re.compile(r"(?<![\w.-])(?i:api\.github\.com)(?::\d+)?/repos/([\w.-]+/[\w.-]+)")
-# gh's flags that take a value, which may come before its command too (gh -X POST api ...).
-GH_VALUE_FLAGS = {"-X", "--method", "-H", "--header", "-f", "--raw-field", "-F", "--field", "--input", "-q", "--jq",
-                  "-t", "--template", "--cache", "-p", "--preview", "--hostname", "-R", "--repo"}
+# The API of a repository: repos/<owner>/<name>, refused by default wherever the shell runs it (gh api, curl,
+# wget, a variable, a function, data piped into xargs: all alike). GraphQL names no repository: it is not judged.
+REPOS = re.compile(r"repos/([\w.-]+/[\w.-]+)")
+# What may come before repos/ in its word in an API call: nothing, slashes, or the API's host (any case, any
+# scheme or user before it, a port).
+ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?/*")
 # The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
 SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
@@ -144,72 +144,75 @@ def bare(words):
 
 
 def api_calls(text):
-    """The repositories whose API a shell text calls, as written in it: in its commands and in the command
-    substitutions the shell runs."""
-    found = []
-    for inner in scan(text)[1]:
-        found += api_calls(inner)
+    """The repositories whose API a shell text may call: every repos/<owner>/<name> in what the shell runs (its
+    commands, its substitutions, the strings it hands a shell), but after a folder, inside a quoted string after
+    other text, or in a comment."""
+    _, inners, plain, strings = scan(text)
+    found = [repo for inner in inners for repo in api_calls(inner)]
     previous = None
     for words, separator in commands_of(text):
-        found += api_repos(words, previous if piped(separator) else None)
+        for i, word in enumerate(words):
+            if os.path.basename(word) in SHELLS:
+                inner = handed_to_shell(words[i:], previous if piped(separator) else None)
+                found += api_calls(inner) if inner is not None else []
+                break
         previous = words
-    return found
+    return found + [m.group(1) for m in REPOS.finditer(plain) if is_call(plain, m.start(), strings)]
 
 
-def api_repos(words, piped_from=None):
-    """The repositories whose API a command calls, as written in it: gh api, curl or wget, also when another
-    command runs them (X=1, env, timeout, nice, xargs, ...) or a shell does (sh -c '...', | sh, sh <<< ...)."""
-    for i, word in enumerate(words):
-        head = os.path.basename(word)
-        if head == "gh" and gh_command(words[i + 1:]) == "api":
-            return [m.group(1) for w in words[i + 1:] if (m := GH_API_ENDPOINT.match(w))]
-        if head in ("curl", "wget"):
-            return [m.group(1) for w in words[i + 1:] for m in API_URL.finditer(w)]
-        if head in SHELLS and (inner := handed_to_shell(words[i:], piped_from)) is not None:
-            return api_calls(inner)
-    return []
-
-
-def gh_command(words):
-    """gh's command among the words after gh: the first one that is no flag nor a flag's value."""
-    j = 0
-    while j < len(words) and words[j].startswith("-"):
-        j += 2 if words[j] in GH_VALUE_FLAGS else 1
-    return words[j] if j < len(words) else None
+def is_call(text, at, strings):
+    """Whether the repos/ at this place of a shell text (its substitutions blanked as $) may be an API call:
+    not after a folder (a local path, a URL to another host), not inside a quoted string after other text;
+    unless what comes before it in its word is the API's host, slashes, or a variable or substitution that may
+    stand for them (gh api "repos/...", "$API/repos/..."). strings holds where each quoted string's text starts
+    and ends."""
+    string = next((start for start, end in strings if start <= at < end), None)
+    if string is not None:
+        word = text[string:at]
+        if re.search(r"\s", word):
+            return False
+    else:
+        word = re.search(r"[^\s'\"=;&|()<>`]*$", text[:at]).group()
+    if ENDPOINT_PREFIX.fullmatch(word) or "$" in word:
+        return True
+    return string is None and "/" not in word
 
 
 def scan(text):
-    """Reads a shell text as the shell does, near enough: the text, as long as it was, with its comments
-    blanked, and the command texts of its substitutions. A substitution is $(...) or `...`, bare or double-
-    quoted; inside single quotes or escaped (an odd number of backslashes) it is text. A comment starts where a
-    word does (not in a#b, nor right after a substitution: $(x)#b) and ends with its line."""
-    out, inners, quote, i, after = list(text), [], None, 0, -1
+    """Reads a shell text as the shell does, near enough. Gives the text, as long as it was, with its comments
+    blanked; the command texts of its substitutions; the text with its substitutions blanked too, as $; and
+    where the text of each quoted string starts and ends. A substitution is $(...) or `...`, bare or double-quoted; inside
+    single quotes or escaped (an odd number of backslashes) it is text. A comment starts where a word does (not
+    in a#b, nor right after a substitution: $(x)#b) and ends with its line."""
+    out, plain, inners, strings = list(text), list(text), [], []
+    quote, opened, i, after = None, 0, 0, -1
     while i < len(text):
         c = text[i]
-        if quote == "'":
-            quote = None if c == "'" else quote
+        if quote == "'" and c != "'":
             i += 1
-        elif c == "\\":
+        elif c == "\\" and quote != "'":
             i += 2
-        elif c == "'" and quote is None:
-            quote = "'"
-            i += 1
-        elif c == '"':
-            quote = None if quote == '"' else '"'
+        elif c in "'\"" and quote in (None, c):
+            if quote:
+                strings.append((opened, i))
+            quote, opened = (None, 0) if quote else (c, i + 1)
             i += 1
         elif c == "#" and quote is None and i != after and (i == 0 or text[i - 1] in " \t\n;&|()<>"):
             end = text.find("\n", i)
             end = len(text) if end < 0 else end
-            out[i:end] = " " * (end - i)
+            out[i:end] = plain[i:end] = " " * (end - i)
             i = end
-        elif text.startswith("$(", i) or c == "`":
+        elif quote != "'" and (text.startswith("$(", i) or c == "`"):
             start = i + (2 if c == "$" else 1)
             end = closing(text, start) if c == "$" else closing_backtick(text, start)
             inners.append(text[start:end])
+            plain[i:end + 1] = "$" * (min(end + 1, len(text)) - i)
             i = after = end + 1
         else:
             i += 1
-    return "".join(out), inners
+    if quote:
+        strings.append((opened, len(text)))
+    return "".join(out), inners, "".join(plain), strings
 
 
 def closing(text, i):

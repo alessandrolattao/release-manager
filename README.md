@@ -18,7 +18,7 @@ There is one dispatcher per repository on each machine that works on it. The tec
 
 ## GitHub is where the team talks
 
-Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead**`), and the plugin wakes the session it is written to. You talk only with the tech leads, in their chat: the agents write to each other and to the tech lead, never to you. A tech lead answers what it already knows and brings you the rest; when it waits on you, Claude Code notifies you. The one exception is a permission prompt inside an agent's session, which needs your click there. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
+Every exchange about an issue is a comment on it or on its pull request. Its first line says who writes to whom (`**dev #42 → tech lead**`), and the plugin wakes the session it is written to. No agent takes another's word for it: what one claims is checked against the code, the logs or GitHub before anyone acts on it or repeats it. You talk only with the tech leads, in their chat: the agents write to each other and to the tech lead, never to you. A tech lead answers what it already knows and brings you the rest; when it waits on you, Claude Code notifies you. The one exception is a permission prompt inside an agent's session, which needs your click there. Messages between repositories, which no session may touch on GitHub, go through a small inbox.
 
 ## Colors and the board
 

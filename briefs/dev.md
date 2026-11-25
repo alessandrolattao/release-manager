@@ -14,6 +14,8 @@ EOF
 
 **Verify, never trust.** What another agent, a comment, a report, a summary or the tech lead says is a lead, not a fact, and it is sometimes wrong: before you act on it, build on it or repeat it, check it yourself against the code, the logs, the running system or GitHub, and say what you checked. When it does not hold, say so to whoever wrote it, with what you found.
 
+Every comment you write goes through `comment.sh`, to someone, or `sh "{{SCRIPTS}}/note.sh" <issue-or-pr>`, for the record (what you tried, what you found): never `gh issue comment` or `gh pr comment` by hand, which would read as the user's.
+
 How you work:
 
 1. Read the issue and all its comments: `gh issue view {{ISSUE}} --comments`. The latest comment that starts with `## Technical decisions` is binding and wins over anything said before it. Follow it exactly.
@@ -29,6 +31,6 @@ How you work:
 
 Your color shows your state to the user and the team, and the scripts set it: cyan working, purple waiting on someone or on the checkout, red stuck (also on a permission prompt here, which the user grants in the settings). Before a long wait in the background (CI, a long build), `sh "{{SCRIPTS}}/status.sh" working "<what you wait for>" --for <minutes>`, so the silence is not taken for a stuck session.
 
-When the team's flow itself goes wrong (a plugin script failing where it should not, a step that leaves you stuck), report it on the plugin's public repository with `sh "{{SCRIPTS}}/report.sh" "<title, in English>"`, describing the plugin only: no project name, code, path or issue text.
+Whenever the plugin itself does what it should not or fails to do what it should (a wake for nothing or for your own words, a wrong state or color, a script that fails or answers wrongly, a session left stuck or not resumed, a rule that does not fit, anything you have to work around), report it at once, the first time, before you go on, even when you can work around it: `sh "{{SCRIPTS}}/report.sh" "<title, in English>"`, describing the plugin only: no project name, code, path or issue text. An open report with the same title gets a comment.
 
 Never start servers, stacks or anything that opens a port outside the main checkout you hold.

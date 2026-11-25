@@ -87,12 +87,15 @@ seen="$repo_dir/comments.seen"
 touch "$seen"
 since=$(cat "$cursor" 2>/dev/null || date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
 date -u +%Y-%m-%dT%H:%M:%SZ >"$cursor.next"
+# Each comment: id, author, issue, link, who signed it (note.sh's hidden last line, "-" when none), its first
+# two non-empty lines.
 if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&per_page=100" --jq '.[] | [
 		(.id | tostring), .user.login, (.issue_url | split("/") | last), .html_url,
+		([.body | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"),
 		((.body | gsub("\r"; "") | split("\n") | map(select(length > 0))) as $l | ($l[0] // ""), ($l[1] // ""))
 	] | map(gsub("\t"; " ")) | @tsv' 2>/dev/null); then
 	mv "$cursor.next" "$cursor"
-	printf '%s\n' "$comments" | while IFS="$tab" read -r cid author issue link first second; do
+	printf '%s\n' "$comments" | while IFS="$tab" read -r cid author issue link signed first second; do
 		[ -n "$cid" ] || continue
 		grep -qx "$cid" "$seen" && continue
 		echo "$cid" >>"$seen"
@@ -121,6 +124,10 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 			text=$second
 			case "$first" in *"** · fyi") fyi=true ;; *) fyi=false ;; esac
 			note "$issue" --arg f "$from" --arg t "$to" --argjson fyi "$fyi" '.from = $f | .to = $t | .fyi = $fyi | .at = $now'
+		elif [ "$signed" != - ]; then
+			# A session's comment for the record (note.sh): not the user's, and to nobody in particular.
+			from=$signed
+			to="(record)"
 		else
 			from="the user"
 		fi
@@ -133,6 +140,7 @@ if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&p
 			[ -n "$targets" ] || targets=$(open_of tech-lead | head -1)
 			;;
 		"dev #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
+		"(record)") targets="$(open_of dev "$issue") $(open_of qa "$issue")" ;;
 		"")
 			# Written on GitHub by the user, without a header: to whoever waits on the user for that issue
 			# (asked there, or in its own chat about it), else to its developer, else to the tech lead.

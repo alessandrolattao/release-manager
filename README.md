@@ -53,6 +53,7 @@ Machines may run different versions of the plugin for a while: the lines they ex
 
 - `**<from> → <to>**`, the first line of a team message, with ` · fyi` after it when no answer is owed;
 - `**dispatcher · <machine>** takes #<n>` and `**<who>** releases #<n>`, the takes;
+- `<!-- team · <from> -->`, the hidden last line of a comment a session writes for the record, to nobody in particular (an issue's technical decisions, findings): not the user's;
 - the issue's own status: Todo, In progress, In review, Done.
 
 ## When something goes wrong

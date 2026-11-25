@@ -196,6 +196,19 @@ check deny tech-lead 'API=https://api.github.com; curl -s $API/repos/someone/els
 check deny tech-lead 'curl -s "$API/repos/someone/else/issues"'
 check deny tech-lead 'curl -s "$(echo https://api.github.com)/repos/someone/else/issues"'
 check allow tech-lead 'gh issue comment 3 --body "see $X and repos/a/b"'
+# A variable counts only right before repos/; one at the start of a local path is no API's host.
+check allow tech-lead 'tail -5 $HOME/.local/state/team/repos/someone_else/dispatcher.log'
+check allow tech-lead 'tail -5 "$HOME/.local/state/team/repos/someone_else/dispatcher.log"'
+check allow tech-lead 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/repos/someone_else/dispatcher.log"'
+check allow tech-lead 'cat "$(pwd)/.local/state/team/repos/a_b/x.log"'
+check deny tech-lead 'curl -s ${API}/repos/someone/else/issues'
+# A word that only names a shell, . or eval is no command that runs code.
+check allow tech-lead 'echo "see repos/a/b" | grep .'
+check allow tech-lead "printf '%s\\n' 'see repos/a/b' | grep -c sh"
+check allow tech-lead "grep sh <<< 'see repos/a/b'"
+check allow tech-lead "grep . <(echo 'it ran gh api repos/a/b')"
+check allow tech-lead "grep -w eval <<< 'see repos/a/b'"
+check deny tech-lead "find . -name x -exec sh -c 'gh api repos/someone/else/issues' \;"
 # Refused by default: a command name known at run time, or the endpoint as data.
 check deny tech-lead '$(which gh) api repos/someone/else/issues'
 check deny tech-lead 'GH=gh; $GH api repos/someone/else/issues'

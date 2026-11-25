@@ -39,11 +39,16 @@ REPOS = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 # What may come before repos/ in its word in an API call: nothing, slashes, or the API's host (any case, any
 # scheme or user before it, a port).
 ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?/*")
+# A variable or a substitution (blanked as $) right before repos/, with only slashes between: it may stand for
+# the API's host ($API/repos/..., ${API}/repos/...). One at the start of a local path does not ($HOME/.../repos/).
+VARIABLE_BEFORE = re.compile(r"\$(?:\{[^}]*\}|[A-Za-z_]\w*|[0-9@*#?!-])?/*$")
 # The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
 SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 # The commands that run a string as code, and ssh's options that take a value.
 CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
+# Commands that run the command after them (timeout 5 sh, xargs -I{} sh -c, nice -n 5 ssh ...).
+WRAPPERS = {"timeout", "nice", "ionice", "command", "builtin", "xargs", "stdbuf", "setsid", "doas"}
 SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
@@ -128,16 +133,23 @@ def printed(words):
 
 
 def code_of(words, piped_from=None):
-    """The text the first command in these words that runs a string as code runs: a shell's -c string (bash -lc
-    too) or <<< string; what echo, printf or cat <<< prints into a shell, or into source or ., through a pipe or
-    a <(...); eval's words; ssh's remote command. None when none of them runs one."""
+    """The text the command in these words runs as code: a shell's -c string (bash -lc too) or <<< string; what
+    echo, printf or cat <<< prints into a shell, or into source or ., through a pipe or a <(...); eval's words;
+    ssh's remote command. The command is the first word, or a later one when the first is a wrapper (timeout,
+    xargs, ...); a shell with -c counts anywhere (find -exec sh -c). A word that only names one (grep -c sh,
+    jq .) runs nothing. None when the command runs no code."""
+    words = bare(words)
+    wrapped = bool(words) and os.path.basename(words[0]) in WRAPPERS
     for i, word in enumerate(words):
         head, rest, code = os.path.basename(word), words[i + 1:], None
+        if head not in CODE_RUNNERS or (i and not wrapped and not (
+                head in SHELLS and any(SHELL_COMMAND.fullmatch(w) for w in rest))):
+            continue
         if head == "eval":
             code = " ".join(rest)
         elif head == "ssh":
             code = remote_command(rest)
-        elif head in CODE_RUNNERS:
+        else:
             k = next((k for k, w in enumerate(rest)
                       if w in ("<<<", "<(") or (head in SHELLS and SHELL_COMMAND.fullmatch(w))), None)
             if k is None:
@@ -194,7 +206,7 @@ def is_call(text, at, strings):
             return False
     else:
         word = re.search(r"[^\s'\"=;&|()<>`]*$", text[:at]).group()
-    if ENDPOINT_PREFIX.fullmatch(word) or "$" in word:
+    if ENDPOINT_PREFIX.fullmatch(word) or VARIABLE_BEFORE.search(word):
         return True
     return string is None and "/" not in word
 

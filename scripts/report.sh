@@ -4,7 +4,9 @@
 # The plugin's repository is public and the projects are not, so the report describes the plugin only:
 # no project or company name, no code, path, issue text, secret or link of the project, nothing the user
 # said in their words. Say what was expected, what happened, which script or step, and how to see it again.
-# An open report with the same title gets a comment instead of a second issue.
+# An open report with the same title gets a comment instead of a second issue. Both go out with the user's
+# GitHub account, so both end with the hidden line note.sh signs with (`<!-- team · <address> -->`): the
+# plugin repository's dispatcher then knows they are not the user's.
 #   report.sh "<title: what went wrong, in English>" <<'EOF'
 #   <what was expected, what happened, which script or step, how to see it again>
 #   EOF
@@ -12,6 +14,9 @@ set -eu
 
 title=${1:?title}
 here=$(cd "$(dirname "$0")" && pwd)
+# It runs from any folder, so the session comes from session-dir.sh, not repo.sh (which needs a repository).
+# shellcheck source=scripts/session-dir.sh
+. "$here/session-dir.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "the report comes on stdin" >&2
@@ -23,11 +28,17 @@ plugin=$(jq -r '.repository // empty' "$here/../.claude-plugin/plugin.json" | se
 	exit 1
 }
 version=$(jq -r '.version // "?"' "$here/../.claude-plugin/plugin.json")
-role=$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/sessions/${CLAUDE_CODE_SESSION_ID:-none}/role" 2>/dev/null || echo "?")
+me=${CLAUDE_CODE_SESSION_ID:-none}
+role=$(cat "$sessions_dir/$me/role" 2>/dev/null || echo "?")
+# The session's address, as repo.sh's address_of computes it.
+from=$(jq -r 'if .role == "tech-lead" then "tech lead"
+	elif .role == "dev" or .role == "qa" then .role + " #" + (.issue | tostring)
+	elif .role == "spike" then "spike " + (.topic // "")
+	else "team" end' "$sessions_dir/$me/status" 2>/dev/null || echo team)
 
 same=$(gh issue list -R "$plugin" --state open --label flow-report --limit 100 --json number,title 2>/dev/null |
 	jq -r --arg t "$title" '.[] | select((.title | ascii_downcase) == ($t | ascii_downcase)) | .number' 2>/dev/null | head -1 || true)
-note=$(printf '%s\n\n_Reported by a %s session, plugin %s._\n' "$body" "$role" "$version")
+note=$(printf '%s\n\n_Reported by a %s session, plugin %s._\n\n<!-- team · %s -->\n' "$body" "$role" "$version" "$from")
 if [ -n "$same" ]; then
 	printf '%s\n' "$note" | gh issue comment "$same" -R "$plugin" --body-file -
 	exit 0

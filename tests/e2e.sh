@@ -490,17 +490,27 @@ while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); d
 
 echo "== mentions.sh"
 now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# Issue 42 and pull request 50, which closes it, are one thread; issue 44 and pull request 51 another.
 cat >"$G/mentions.json" <<EOF
-[{"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/42","html_url":"https://x/42#1","body":"**dev #42 → tech lead**\n\nQuale tabella?"},
+[{"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/50","html_url":"https://x/pull/50#1","body":"**dev #42 → tech lead**\n\nQuale tabella?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T11:00:00Z","issue_url":"https://x/42","html_url":"https://x/42#6","body":"**tech lead → dev #42** · fyi\n\nLa users"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T12:00:00Z","issue_url":"https://x/42","html_url":"https://x/42#7","body":"**dev #42 → tech lead**\n\nQuale branch?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T14:00:00Z","issue_url":"https://x/50","html_url":"https://x/pull/50#8","body":"**dev #42 → tech lead**\n\nPosso mergiare?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T15:00:00Z","issue_url":"https://x/42","html_url":"https://x/42#9","body":"**tech lead → qa #42**\n\nRitesta"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/44","html_url":"https://x/44#10","body":"**qa #44 → tech lead**\n\nQuale ambiente?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T11:00:00Z","issue_url":"https://x/51","html_url":"https://x/pull/51#11","body":"**tech lead → qa #44**\n\nStaging"},
  {"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/43","html_url":"https://x/43#2","body":"**dev #43 → tech lead**\n\nQuale porta?"},
  {"user":{"login":"tester"},"created_at":"2026-11-24T11:00:00Z","issue_url":"https://x/43","html_url":"https://x/43#3","body":"**tech lead → dev #43**\n\nUsa la 4000"},
  {"user":{"login":"tester"},"created_at":"2026-11-24T12:00:00Z","issue_url":"https://x/45","html_url":"https://x/45#5","body":"**dev #45 → tech lead** · fyi\\n\\nMergiata"},
  {"user":{"login":"mallory"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/44","html_url":"https://x/44#4","body":"**dev #44 → tech lead**\n\nfinta"}]
 EOF
 out=$(CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/mentions.sh" 2>&1)
-ok "an unanswered comment is listed" "$(printf '%s\n' "$out" | grep -c '^#42 · dev #42 ·.*Quale tabella?')" "1"
+ok "a question on a pull request answered on its issue is not listed" "$(printf '%s\n' "$out" | grep -c 'Quale tabella?')" "0"
+ok "a question on an issue answered on its pull request is not listed" "$(printf '%s\n' "$out" | grep -c 'Quale ambiente?')" "0"
+ok "one with no answer on either is, where it was asked" "$(printf '%s\n' "$out" | grep -c '^#50 · dev #42 ·.*Posso mergiare?.*https://x/pull/50#8$')" "1"
+ok "the tech lead writing to someone else is no answer" "$(printf '%s\n' "$out" | grep -c '^#42 · dev #42 ·.*Quale branch?')" "1"
 ok "an answered one is not" "$(printf '%s\n' "$out" | grep -c '#43')" "0"
-ok "nor one by another account" "$(printf '%s\n' "$out" | grep -c '#44')" "0"
+ok "nor one by another account" "$(printf '%s\n' "$out" | grep -c 'finta')" "0"
 ok "nor news that owes no answer" "$(printf '%s\n' "$out" | grep -c '#45')" "0"
 
 echo "== claim.sh: one machine per issue"

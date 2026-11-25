@@ -54,16 +54,16 @@ case "$*" in
 "pr view 50 --json number") echo '{"number":50}' ;;
 "pr view "*" --json number") exit 1 ;;
 "pr view 50 --json closingIssuesReferences --jq .closingIssuesReferences[0].number // empty") echo 42 ;;
-"pr view 50 --json headRefOid --jq .headRefOid") echo abc1234567 ;;
-"pr view 50 --json headRefName --jq .headRefName") echo 42-feature ;;
 "pr view 50 --json headRefOid,state,mergeable,closingIssuesReferences")
 	m=MERGEABLE
 	[ ! -f "$G/conflicting" ] || m=CONFLICTING
-	echo '{"headRefOid":"abc1234567","state":"OPEN","mergeable":"'"$m"'","closingIssuesReferences":[{"number":42}]}' ;;
+	echo '{"headRefOid":"'"$(cat "$G/head-50" 2>/dev/null || echo abc1234567)"'","state":"OPEN","mergeable":"'"$m"'","closingIssuesReferences":[{"number":42}]}' ;;
 "pr checks 50 --json state,name") [ ! -f "$G/checks-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; echo '[{"name":"build","state":"SUCCESS"}]' ;;
 "pr view 51 --json closingIssuesReferences --jq .closingIssuesReferences[0].number // empty") echo 44 ;;
-"pr merge 50 --merge --match-head-commit abc1234567") echo merged >"$G/merged-50" ;;
-"pr merge 50 --rebase --match-head-commit abc1234567") echo rebased >"$G/merged-50" ;;
+"pr merge 50 --"*" --match-head-commit "*)
+	# GitHub merges only the head it is told, and only when it is the pull request's.
+	[ "$6" = "$(cat "$G/head-50" 2>/dev/null || echo abc1234567)" ] || { echo "head moved" >&2; exit 1; }
+	case "$4" in --merge) echo merged >"$G/merged-50" ;; --rebase) echo rebased >"$G/merged-50" ;; esac ;;
 "api repos/test/repo --jq "*) cat "$G/merge-methods" 2>/dev/null || echo "merge rebase squash" ;;
 "label list --limit 200 --json name --jq .[].name") echo question ;;
 "issue edit "*" --add-label question") echo "$3" >>"$G/question-labels" ;;
@@ -252,24 +252,39 @@ ok "given back, the checkout is on main" "$(git -C "$ROOT" rev-parse --abbrev-re
 ok "the next in the queue is woken" "$(grep -c 'checkout is free' "$S/$DEV2/wake")" "1"
 ok "the giver is back in its worktree" "$(st "$DEV" place)" "worktree 42"
 
-echo "== review, QA and merge"
+echo "== review, QA and merge: on the branch, before the pull request"
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "no decision review: refused" "$code" "1"
-CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/review.sh" pass 50 "decisioni rispettate" >/dev/null
+# The developer's work, committed on its branch: no pull request yet.
+git -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
+reviewed=$(git rev-parse HEAD)
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/review.sh" pass 42 "decisioni rispettate" >/dev/null
+ok "the decision review is recorded by issue, at the branch's HEAD" "$(cut -f1 "$R/review/42" 2>/dev/null) $([ -f "$R/review/50" ] && echo by-pr || echo not-by-pr)" "$reviewed not-by-pr"
 echo yes >"$G/qa-42"
-out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
-ok "a qa issue without QA: refused" "$(printf '%s' "$out" | grep -c 'carries the label qa')" "1"
-CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/qa.sh" request 50 >/dev/null
+git push -q origin 42-feature
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/qa.sh" request 42 >/dev/null
 ok "asking for QA: waiting, purple" "$(st "$DEV" state)" "others"
-ok "the QA request names the issue" "$(cut -f3 "$R/qa/50")" "42"
-sh "$SC/qa.sh" pass 50 >/dev/null
+ok "the QA request is keyed by the issue, with the pushed head and the branch" "$(cut -f1,2,3,5 "$R/qa/42" 2>/dev/null)" "requested	$reviewed	42	42-feature"
+sh "$SC/qa.sh" pass 42 >/dev/null
+ok "the QA outcome is recorded by issue, at the pushed head" "$(cat "$R/qa/42")" "pass	$reviewed"
+# The pull request is opened only now; at another head than the one reviewed, it is refused.
+echo abc1234567 >"$G/head-50"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a pull request whose head has no passed review: refused" "$code $(printf '%s' "$out" | grep -c 'no decision review for the current head.*review.sh pass 42 ') $([ -f "$G/merged-50" ] && echo merged || echo not-merged)" "1 1 not-merged"
+echo "$reviewed" >"$G/head-50"
+rm -f "$R/qa/42"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a qa issue without QA: refused" "$(printf '%s' "$out" | grep -c 'carries the label qa and the QA has not passed this head: qa.sh request 42')" "1"
+sh "$SC/qa.sh" pass 42 >/dev/null 2>&1; code=$?
+ok "an outcome with no head to name: refused" "$code $([ -f "$R/qa/42" ] && echo recorded || echo not-recorded)" "1 not-recorded"
+printf 'pass\t%s\n' "$reviewed" >"$R/qa/42"
 touch "$G/conflicting"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "a conflict: refused, catching up the way the repository's instructions say" "$code $(printf '%s' "$out" | grep -c "bring it into your branch the way the repository's instructions say (a merge when they say nothing") $([ -f "$G/merged-50" ] && echo merged || echo not-merged)" "1 1 not-merged"
 rm -f "$G/conflicting"
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
-ok "everything holds: merged" "$(cat "$G/merged-50" 2>/dev/null)" "merged"
+ok "a review and a QA recorded on the branch before the pull request existed: merged" "$code $(cat "$G/merged-50" 2>/dev/null)" "0 merged"
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 --rebase >/dev/null 2>&1
 ok "the method the repository asks for" "$(cat "$G/merged-50" 2>/dev/null)" "rebased"
 echo "rebase" >"$G/merge-methods"
@@ -334,16 +349,17 @@ ok "developers at work on the board" "$(jq -r '.developers.busy' "$R/board.json"
 
 echo "== dispatch.sh starts QA once, and QA ends only with an outcome"
 QA=55555555-0000-0000-0000-000000000042
-printf 'requested\tabc1234567\t42\t%s\n' "$DEV" >"$R/qa/50"
+printf 'requested\tabc1234567\t42\t%s\t42-feature\n' "$DEV" >"$R/qa/42"
 cat >"$T/agents.json" <<EOF
 [{"id":"abcd1234","sessionId":"$QA","name":"qa #42 · repo","status":"running","state":"working"},
  {"id":"efgh5678","sessionId":"$NEW","name":"dev #44 · repo · new-thing","status":"running","state":"working"}]
 EOF
 sh "$SC/dispatch.sh" >/dev/null 2>&1
-ok "a QA agent is launched" "$(grep -c -- '--name repo · qa #42 · in review · Title 42' "$T/claude.log")" "1"
+ok "a QA agent is launched, while the issue is in progress" "$(grep -c -- '--name repo · qa #42 · in progress · Title 42' "$T/claude.log")" "1"
+ok "its brief names the issue and the developer's branch, no pull request" "$(grep -c "You are the QA agent of issue #42 of test/repo: you test its developer's branch \`42-feature\`, before its pull request is opened" "$T/claude.log") $(grep -c '{{PR}}' "$T/claude.log")" "1 0"
 ok "on the account's default model too" "$(grep -c -- '--bg --model default --name repo · qa #42' "$T/claude.log")" "1"
-ok "the request is taken" "$(cut -f1 "$R/qa/50")" "testing"
-ok "its role and pull request" "$(st "$QA" role) $(st "$QA" pr)" "qa 50"
+ok "the request is taken" "$(cut -f1 "$R/qa/42")" "testing"
+ok "its role, issue and branch" "$(st "$QA" role) $(st "$QA" issue) $(st "$QA" branch) $(st "$QA" stage)" "qa 42 42-feature in progress"
 ok "no place before it takes the lock" "$(st "$QA" place)" ""
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "not started twice" "$(grep -c -- '--name repo · qa #42' "$T/claude.log")" "1"
@@ -372,7 +388,7 @@ rm -rf "$S/abcd1234-0000-0000-0000-000000000001"
 printf '%s\n' "$saved_agents" >"$T/agents.json"
 CLAUDE_CODE_SESSION_ID=$QA sh "$SC/done.sh" "fatto" >/dev/null 2>&1; code=$?
 ok "done without an outcome is refused" "$code" "1"
-sh "$SC/qa.sh" fail 50 >/dev/null
+sh "$SC/qa.sh" fail 42 >/dev/null
 CLAUDE_CODE_SESSION_ID=$QA sh "$SC/done.sh" "QA failed on #50" >/dev/null 2>&1; code=$?
 ok "done after the outcome" "$code $(st "$QA" state)" "0 done"
 
@@ -414,7 +430,7 @@ date +%s >"$S/$NEW/alive"
 out=$(sh "$SC/start-dev.sh" 44 2>&1); code=$?
 ok "a second developer for an issue is refused" "$code $(printf '%s' "$out" | grep -c 'already has a developer')" "1 1"
 
-printf 'pass\tabc1234567\n' >"$R/qa/50"
+printf 'pass\t%s\n' "$reviewed" >"$R/qa/42"
 touch "$G/checks-broken"
 rm -f "$G/merged-50"
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
@@ -424,8 +440,8 @@ rm -f "$G/checks-broken"
 cd "$ROOT" || exit 1
 
 jq -c '.tested_head = "deadbeef00"' "$S/$QA/status" >"$S/$QA/status.t" && mv "$S/$QA/status.t" "$S/$QA/status"
-CLAUDE_CODE_SESSION_ID=$QA sh "$SC/qa.sh" pass 50 >/dev/null
-ok "QA passes the head it tested, not the branch's newest" "$(cut -f2 "$R/qa/50")" "deadbeef00"
+CLAUDE_CODE_SESSION_ID=$QA sh "$SC/qa.sh" pass 42 >/dev/null
+ok "QA passes the head it tested, not the branch's newest" "$(cut -f2 "$R/qa/42")" "deadbeef00"
 
 ok "a dead agent is resumed without flags, which would start a copy" "$(grep -c -- '--resume "$id" --name' "$W/scripts/resume-agents.sh")" "0"
 

@@ -6,7 +6,7 @@
 #                                cursor, QA and review records, the board
 #   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages
 # The status of a session is one JSON object, written by the scripts and the hooks, never by the model:
-#   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "pr", "branch",
+#   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "branch",
 #    "busy_until", "tested_head", "asked_on"}
 # asked_on: the issue where the session asked the user on GitHub (comment.sh); absent when it asked in its
 # own chat (hooks/asks.sh), where the user answers it directly.

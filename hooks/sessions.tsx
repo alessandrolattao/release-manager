@@ -700,14 +700,15 @@ async function readGithub($: EngineInterface, folder: string, cwd: string, repo:
   }
 }
 
-// The reviews of the pull request (review.sh, qa.sh): each counts only for the worktree's HEAD, as merge.sh
-// wants it for the head it merges. "decision review passed · QA needed".
-async function reviewOf($: EngineInterface, dir: string, cwd: string, pr: DevPr | null, qa: boolean | null): Promise<string> {
+// The reviews of the branch (review.sh, qa.sh), keyed by the issue since they come before the pull request:
+// each counts only for the worktree's HEAD, as merge.sh wants it for the head it merges. "decision review
+// passed · QA needed".
+async function reviewOf($: EngineInterface, dir: string, cwd: string, issue: number, qa: boolean | null): Promise<string> {
   const head = (await gitOf($, cwd, ['rev-parse', 'HEAD'])) ?? ''
-  const reviewed = pr === null ? '' : ((await readText($, `${dir}/review/${pr.number}`)).split('\t')[0] ?? '')
+  const reviewed = issue === 0 ? '' : ((await readText($, `${dir}/review/${issue}`)).split('\t')[0] ?? '')
   const decision = head !== '' && reviewed === head ? 'decision review passed' : 'decision review not passed'
-  // qa/<pr>: "requested <head> <issue> <session>" once asked, then "pass <head>" or "fail <head>".
-  const [outcome = '', tested = ''] = pr === null ? [] : (await readText($, `${dir}/qa/${pr.number}`)).split('\t')
+  // qa/<issue>: "requested <head> <issue> <session> <branch>" once asked, then "pass <head>" or "fail <head>".
+  const [outcome = '', tested = ''] = issue === 0 ? [] : (await readText($, `${dir}/qa/${issue}`)).split('\t')
   let quality = qa === null ? '' : qa ? 'QA needed' : 'no QA'
   if (outcome === 'requested') {
     quality = 'QA asked'
@@ -731,7 +732,7 @@ async function refreshDev($: EngineInterface, folder: string, status: Status, no
   }
   const work = await workOf($, cwd, await readText($, `${dir}/base`))
   const checkout = await checkoutOf($, dir, await $.session.id())
-  const review = await reviewOf($, dir, cwd, github.pr, github.qa)
+  const review = await reviewOf($, dir, cwd, status.issue ?? 0, github.qa)
   const ci = await readText($, `${dir}/ci`)
   const next: Dev = {
     repo,

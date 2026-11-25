@@ -48,8 +48,10 @@ tech-lead)
 dev | qa)
 	issue=${arg:?issue number}
 	title=$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)
-	# A developer starts on an issue its machine just took (in progress); a QA agent on a pull request (in review).
-	if [ "$role" = dev ]; then stage="in progress" name=$(dev_name "$issue" "$title" "in progress"); else stage="in review" name=$(qa_name "$issue" "$title" "in review"); fi
+	# A developer starts on an issue its machine just took, a QA agent on its developer's branch before the pull
+	# request opens: the issue is in progress for both.
+	stage="in progress"
+	if [ "$role" = dev ]; then name=$(dev_name "$issue" "$title" "$stage"); else name=$(qa_name "$issue" "$title" "$stage"); fi
 	status_set "$id" --arg r "$role" --arg repo "$repo_full" --arg n "$name" --argjson i "$issue" --arg t "$title" \
 		--arg p "$place" --arg b "$branch" --arg s "$stage" '.role = $r | .repo = $repo | .name = $n | .issue = $i | .title = $t | .place = $p | .branch = $b | .stage = $s'
 	state_set "$id" working "starting"

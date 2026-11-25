@@ -6,8 +6,11 @@ ones a spike may not run.
 Refused:
   - a command that changes code, branches or pull requests (git commit, push, merge, rebase, ...; gh pr
     create, merge, ...; claude --bg or -p; sed -i or perl -i on a file of the repository);
-  - anything aimed at another repository but reading it with git (gh -R, gh api repos/<other>, gh search,
-    links to it, writing or building inside it);
+  - anything aimed at another repository but reading it with git (gh -R, GH_REPO, gh api repos/<other>,
+    gh search, links to it, writing or building inside it), except, for a tech lead, its issues and comments:
+    gh issue view, list, create, edit, comment and gh pr view, list, diff, comment, whether the repository
+    comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
+    POST and PATCH on repos/<other>/issues...;
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
@@ -28,6 +31,13 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
+# What a tech lead may do on another repository: read its issues and pull requests, write issues and comments.
+GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("issue", "edit"), ("issue", "comment"),
+                ("pr", "view"), ("pr", "list"), ("pr", "diff"), ("pr", "comment")}
+API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
+LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
+# A gh api endpoint: a path or a URL of the API, the repository, then the rest of the path.
+ENDPOINT = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)(/[^?#]*)?", re.IGNORECASE)
 
 
 def refuse(reason):
@@ -53,6 +63,85 @@ def toplevel(path):
 def inside_repo(path):
     real = os.path.realpath(os.path.join(cwd, os.path.expanduser(path)))
     return real == root or real.startswith(root + os.sep)
+
+
+def gh_words(words):
+    """A gh command's words without -R/--repo and their values, and the repositories those name."""
+    rest, named, i = [], [], 0
+    while i < len(words):
+        w = words[i]
+        if w in ("-R", "--repo") and i + 1 < len(words):
+            named.append(words[i + 1])
+            i += 2
+            continue
+        if w.startswith("--repo="):
+            named.append(w.split("=", 1)[1])
+        elif w.startswith("-R") and len(w) > 2:
+            named.append(w[2:])
+        else:
+            rest.append(w)
+        i += 1
+    return rest, named
+
+
+def api_method(words):
+    """The HTTP method of a gh api call: -X / --method, else POST with fields or an input, else GET."""
+    method, fields = None, False
+    for i, w in enumerate(words):
+        if w in ("-X", "--method") and i + 1 < len(words):
+            method = words[i + 1]
+        elif w.startswith("--method="):
+            method = w.split("=", 1)[1]
+        elif w.startswith("-X") and len(w) > 2:
+            method = w[2:]
+        elif (w in ("-f", "-F", "--field", "--raw-field", "--input")
+              or w.startswith(("--field=", "--raw-field=", "--input=", "-f", "-F"))):
+            fields = True
+    return (method or ("POST" if fields else "GET")).upper()
+
+
+def elsewhere_refused(head, words, assigns):
+    """Why a command aimed at another repository is refused, or None when it is not aimed at one or may be run.
+
+    A tech lead may read another repository's issues and pull requests and write issues and comments there;
+    everything else stays refused, as for a spike.
+    """
+    named = [a.split("=", 1)[1] for a in assigns if a.startswith("GH_REPO=")]
+    rest = words[1:]
+    if head == "gh":
+        rest, flags = gh_words(rest)
+        named += flags
+    elif any(w in ("-R", "--repo") or w.startswith("--repo=") for w in rest):
+        named += gh_words(rest)[1]
+    text = assigns + words
+    pointed = [n for n in named if repo_of(n) not in (None, own)]
+    called = [m.group(1) for w in text for m in API_REF.finditer(w) if m.group(1).lower() != own]
+    linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
+    if not (pointed or called or linked):
+        return None
+    if role == "tech-lead" and head == "gh" and tuple(rest[:2]) in GH_ELSEWHERE:
+        return None
+    if role == "tech-lead" and head == "gh" and rest[:1] == ["api"] and not pointed:
+        # Its endpoint decides; the repositories named in its fields are data. Every word that starts as an
+        # endpoint of another repository counts as one, so an unknown option cannot hide the real endpoint.
+        method = api_method(rest)
+        for w in rest[1:]:
+            m = ENDPOINT.match(w)
+            if not m or m.group(1).lower() == own:
+                continue
+            path = m.group(2) or ""
+            if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
+                continue
+            if method in ("POST", "PATCH") and re.match(r"^/issues(/|$)", path):
+                continue
+            return (f"{method} {w} is not for this repository: on {m.group(1)} it reads issues and pull requests "
+                    "and writes issues and comments only")
+        return None
+    if pointed:
+        return f"it points gh at {pointed[0]}"
+    if called:
+        return f"it calls the API of {called[0]}"
+    return f"it links {linked[0]}"
 
 
 # Here-documents are data: their bodies go before anything is parsed.
@@ -89,18 +178,19 @@ if current:
 
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
-for match in re.finditer(r"repos/([\w.-]+/[\w.-]+)", script):
-    if match.group(1).lower() != own:
-        refuse(f"it calls the API of {match.group(1)}")
-for match in re.finditer(r"github\.com[:/]([\w.-]+/[\w.-]+)", script):
-    if repo_of(match.group(1)) not in (None, own):
-        refuse(f"it links {match.group(1)}")
 
 where = cwd
 for words in segments:
+    assigns = []
     while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec")):
+        if "=" in words[0]:
+            assigns.append(words[0])
         words = words[1:]
     if not words:
+        # Only assignments: what they hold may be used by the next command.
+        why = elsewhere_refused("", [""], assigns)
+        if why:
+            refuse(why)
         continue
     head = os.path.basename(words[0])
 
@@ -132,14 +222,9 @@ for words in segments:
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
         continue
 
-    for i, w in enumerate(words):
-        value = None
-        if w in ("-R", "--repo") and i + 1 < len(words):
-            value = words[i + 1]
-        elif w.startswith("--repo="):
-            value = w.split("=", 1)[1]
-        if value is not None and repo_of(value) not in (None, own):
-            refuse(f"it points gh at {value}")
+    why = elsewhere_refused(head, words, assigns)
+    if why:
+        refuse(why)
 
     top = toplevel(where)
     other = top if top and top != root and not top.startswith(root + os.sep) else None
@@ -178,9 +263,10 @@ for words in segments:
         continue
 
     if head == "gh" and len(words) > 2:
-        if words[1] == "pr" and words[2] in ("create", "merge", "edit", "close", "review", "checkout"):
-            refuse(f"gh pr {words[2]} is a developer's work")
-        if words[1:3] == ["issue", "develop"]:
+        sub = gh_words(words[1:])[0]
+        if sub[:1] == ["pr"] and sub[1:2] and sub[1] in ("create", "merge", "edit", "close", "review", "checkout"):
+            refuse(f"gh pr {sub[1]} is a developer's work")
+        if sub[:2] == ["issue", "develop"]:
             refuse("gh issue develop is a developer's work")
         continue
 

@@ -1,6 +1,7 @@
 #!/bin/sh
-# Leaves a message for the tech leads of ANOTHER repository, which this repository's sessions may not
-# touch on GitHub, or for this repository's own from outside the team (a Pulse check, with --from).
+# Leaves a message for the tech leads of ANOTHER repository, for what belongs on none of its issues (there a
+# tech lead writes with comment.sh --repo), or for this repository's own from outside the team (a Pulse
+# check, with --from).
 # Inside one repository the team talks on its issues (comment.sh), never here.
 # The message is a file, written atomically (Maildir: tmp/ then new/); the first tech lead of that
 # repository to read its inbox takes it.

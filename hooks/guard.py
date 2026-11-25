@@ -448,7 +448,9 @@ def scan(text):
                 strings.append((opened, i))
                 quote = None
             else:
-                quote = "$'" if c == "'" and i and text[i - 1] == "$" and i != after else c
+                # $'...' only after an odd run of $ (one $$ is a parameter), the last of them not escaped.
+                run = len(text[:i]) - len(text[:i].rstrip("$"))
+                quote = "$'" if c == "'" and run % 2 and i != after else c
                 opened = i + 1
             i += 1
         elif c == "\n" and quote is None:

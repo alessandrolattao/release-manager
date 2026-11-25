@@ -71,6 +71,12 @@ case "$*" in
 	# GitHub merges only the head it is told, and only when it is the pull request's.
 	[ "$6" = "$(cat "$G/head-50" 2>/dev/null || echo abc1234567)" ] || { echo "head moved" >&2; exit 1; }
 	case "$4" in --merge) echo merged >"$G/merged-50" ;; --rebase) echo rebased >"$G/merged-50" ;; esac ;;
+# A dependency bot's pull request, as the REST API gives it: the author is its login, dependabot[bot].
+"api repos/test/repo/pulls/60") cat "$G/pr-60.json" ;;
+"pr checks 60 --json state,name") cat "$G/checks-60" ;;
+"pr merge 60 --"*" --match-head-commit "*)
+	[ "$6" = "$(jq -r .head.sha "$G/pr-60.json")" ] || { echo "head moved" >&2; exit 1; }
+	echo "${4#--} $6" >"$G/merged-60" ;;
 "api repos/test/repo --jq "*) cat "$G/merge-methods" 2>/dev/null || echo "merge rebase squash" ;;
 "label list --limit 200 --json name --jq .[].name") echo question ;;
 "issue edit "*" --add-label question") echo "$3" >>"$G/question-labels" ;;
@@ -544,6 +550,54 @@ touch "$G/comments-broken"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "decisions that cannot be read refuse the merge" "$code $(printf '%s' "$out" | grep -c 'could not read the comments of #42') $(merged)" "1 1 not-merged"
 rm -f "$G/comments-broken" "$G/decided-42"
+
+echo "== merge-bot.sh: a dependency bot's pull request, merged by the tech lead"
+cd "$ROOT" || exit 1
+# bot_pr <author> [state] [draft] [mergeable]: pull request 60 as GitHub's REST API answers it.
+bot_pr() {
+	jq -n --arg u "$1" --arg s "${2:-open}" --argjson d "${3:-false}" --argjson m "${4:-true}" \
+		'{user: {login: $u}, state: $s, draft: $d, mergeable: $m, head: {sha: "b07b07b07b"}}' >"$G/pr-60.json"
+}
+bot_merged() { cat "$G/merged-60" 2>/dev/null || echo not-merged; }
+green='[{"name":"build","state":"SUCCESS"},{"name":"lint","state":"SKIPPED"}]'
+echo "$green" >"$G/checks-60"
+bot_pr octocat
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a person's pull request, green: refused" "$code $(printf '%s' "$out" | grep -c '^NOT MERGED: #60 is by octocat, not by a dependency bot') $(bot_merged)" "1 1 not-merged"
+bot_pr "dependabot[bot]"
+echo '[{"name":"build","state":"SUCCESS"},{"name":"test","state":"FAILURE"}]' >"$G/checks-60"
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a bot's pull request with a failing check: refused" "$code $(printf '%s' "$out" | grep -c '^NOT MERGED: checks not green: test: FAILURE$') $(bot_merged)" "1 1 not-merged"
+echo '[{"name":"build","state":"PENDING"}]' >"$G/checks-60"
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a bot's pull request with a pending check: refused" "$code $(printf '%s' "$out" | grep -c '^NOT MERGED: checks not green: build: PENDING$') $(bot_merged)" "1 1 not-merged"
+echo "$green" >"$G/checks-60"
+bot_pr "dependabot[bot]" open true
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a bot's draft: refused" "$code $(printf '%s' "$out" | grep -c '^NOT MERGED: #60 is a draft$') $(bot_merged)" "1 1 not-merged"
+bot_pr "dependabot[bot]" open false false
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a bot's pull request that conflicts: refused" "$code $(printf '%s' "$out" | grep -c '^NOT MERGED: #60 is not mergeable') $(bot_merged)" "1 1 not-merged"
+bot_pr "dependabot[bot]" open false null
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "mergeable not known yet: refused, try again" "$code $(printf '%s' "$out" | grep -c 'does not know yet whether #60 is mergeable: try again') $(bot_merged)" "1 1 not-merged"
+bot_pr "dependabot[bot]" closed
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a closed one: refused" "$code $(printf '%s' "$out" | grep -c '^NOT MERGED: #60 is not open$') $(bot_merged)" "1 1 not-merged"
+out=$(sh "$SC/merge-bot.sh" 60 --fast 2>&1); code=$?
+ok "an unknown option: its usage, nothing merged" "$code $(printf '%s' "$out" | grep -c '^usage: merge-bot.sh') $(bot_merged)" "2 1 not-merged"
+bot_pr "dependabot[bot]"
+out=$(sh "$SC/merge-bot.sh" 60 2>&1); code=$?
+ok "a bot's green pull request: merged, at the head it read" "$code $(bot_merged) $(printf '%s' "$out" | tail -1)" "0 merge b07b07b07b merged #60 (merge)"
+rm -f "$G/merged-60"
+bot_pr "renovate[bot]"
+sh "$SC/merge-bot.sh" 60 --squash >/dev/null 2>&1; code=$?
+ok "renovate too, with the method the repository asks for" "$code $(bot_merged)" "0 squash b07b07b07b"
+rm -f "$G/merged-60"
+echo "rebase" >"$G/merge-methods"
+sh "$SC/merge-bot.sh" 60 >/dev/null 2>&1
+ok "without one, the method merge.sh picks" "$(bot_merged)" "rebase b07b07b07b"
+rm -f "$G/merged-60" "$G/merge-methods"
 
 echo "== asks.sh and session-blocked.sh"
 payload() { jq -n --arg s "$1" --arg c "$2" --arg m "${3:-}" '{session_id:$s,cwd:$c,transcript_path:"",last_assistant_message:$m,tool_name:"Bash",tool_input:{command:"npm publish"}}'; }

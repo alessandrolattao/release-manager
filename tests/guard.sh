@@ -116,6 +116,12 @@ check deny spike 'git switch main'
 check deny spike "sh $P/scripts/start-dev.sh 12"
 check allow spike 'git show origin/main:README.md | head'
 check allow tech-lead "sh $P/scripts/start-dev.sh 12"
+# A dependency bot's pull request: the tech lead merges it through merge-bot.sh, never with gh pr merge by hand;
+# a spike does not merge.
+check allow tech-lead "sh $P/scripts/merge-bot.sh 12"
+check allow tech-lead "sh $P/scripts/merge-bot.sh 12 --squash"
+check deny tech-lead 'gh pr merge 12 --squash --match-head-commit abc1234'
+check deny spike "sh $P/scripts/merge-bot.sh 12"
 check deny tech-lead "sh -c 'git push origin HEAD'"
 check deny tech-lead 'eval git commit -m x'
 check allow tech-lead "bash -c 'git log --oneline -3'"

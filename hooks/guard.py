@@ -30,7 +30,7 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
             "rev-list", "cat-file", "describe", "shortlog", "remote", "config", "worktree", "tag", "merge-base"}
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
-SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
+SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "merge-bot.sh", "checkout.sh"}
 # What a tech lead may do on another repository: read its issues and pull requests, write issues and comments.
 GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("issue", "edit"), ("issue", "comment"),
                 ("pr", "view"), ("pr", "list"), ("pr", "diff"), ("pr", "comment")}

@@ -71,6 +71,8 @@ const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: 
 
 // The plugin's newest published version, when newer than the one running: the board's foot offers it.
 const latest = atom({ plugin: 'team', key: 'latest' } as const, '')
+// This session's model, as /model shows it: the tech lead's, which the user picks, in the board's summary.
+const model = atom({ plugin: 'team', key: 'model' } as const, '')
 let updateCheckedAt = 0
 let isStartingUpdate = false
 
@@ -490,6 +492,24 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
   await update($, board, () => ({ repo, rows, summary, dispatcher, updated: now }))
 }
 
+// "claude-fable-5-2" as "Fable 5.2"; anything else as it is.
+function modelName(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(id)
+  return m === null ? id : `${(m[1] ?? '').charAt(0).toUpperCase()}${(m[1] ?? '').slice(1)} ${m[2]}.${m[3]}`
+}
+
+// The tech lead's model for the summary, read at each refresh: the user may switch it with /model.
+async function noteModel($: EngineInterface): Promise<void> {
+  try {
+    const now = await $.session.model()
+    if (now !== (await read($, model))) {
+      await update($, model, () => now)
+    }
+  } catch (err) {
+    $.ui.log(`team: model: ${String(err)}`)
+  }
+}
+
 // a newer than b, both "x.y.z".
 function isNewer(a: string, b: string): boolean {
   const x = a.split('.').map(Number)
@@ -603,6 +623,7 @@ async function tick($: EngineInterface): Promise<void> {
         await refreshBoard($, status.repo)
         await keepDispatcher($, status.repo, nowMs)
         await checkLatest($, nowMs)
+        await noteModel($)
         if (!isPaneOpened) {
           isPaneOpened = true
           void openBoard($)
@@ -822,6 +843,8 @@ export const register: Register = on => {
             { label: 'developers', value: summary.developers },
             { label: 'queue', value: summary.queue },
             { label: 'main CI', value: summary.ci },
+            // The tech lead's own model, which the user picks with /model; the agents run on the default.
+            { label: 'model', value: modelName(await read($, model)) || '?' },
             { label: 'usage 5h', value: usageText(summary.usage5h), look: toneLook(summary.usage5h.tone) },
             { label: 'usage 7d', value: usageText(summary.usage7d), look: toneLook(summary.usage7d.tone) },
           ]

@@ -1,5 +1,7 @@
-# Sourced by the scripts that start an agent: launch <name> <prompt> starts a background session in the
-# current folder, on the same Claude Code account as the caller, and prints its full session id.
+# Sourced by the scripts that start an agent: launch <name> <prompt> [model] starts a background session in
+# the current folder, on the same Claude Code account as the caller, and prints its full session id. Its model
+# is the account's default (`default`: no model the settings or the caller picked), unless one is given; it is
+# saved with the session, so a resume keeps it.
 # shellcheck shell=sh
 
 launch() {
@@ -7,7 +9,7 @@ launch() {
 	# not inherit the caller's identity.
 	unset_args=$(env | grep -o -E '^CLAUDE[A-Z_]*' | grep -v '^CLAUDE_CONFIG_DIR$' | sed 's/^/-u /' | tr '\n' ' ')
 	# shellcheck disable=SC2086 # unset_args is a list of -u flags
-	out=$(env $unset_args claude --bg --name "$1" "$2" 2>&1) || {
+	out=$(env $unset_args claude --bg --model "${3:-default}" --name "$1" "$2" 2>&1) || {
 		echo "$out" >&2
 		return 1
 	}

@@ -6,8 +6,9 @@ ones a spike may not run.
 Refused:
   - a command that changes code, branches or pull requests (git commit, push, merge, rebase, ...; gh pr
     create, merge, ...; claude --bg or -p; sed -i or perl -i on a file of the repository);
-  - anything aimed at another repository but reading it with git (gh -R, gh api repos/<other>, gh search,
-    links to it, writing or building inside it);
+  - anything aimed at another repository but reading it with git (gh -R, gh search, links to it, writing or
+    building inside it, its API: repos/<other> in the words of gh api or in a curl or wget URL to api.github.com,
+    whatever the method; a local path that holds repos/... or github.com/... is no call and no link);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
@@ -28,6 +29,16 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
+# The API of a repository: a gh api endpoint (repos/..., /repos/..., https://api.github.com/repos/...) or a curl or
+# wget URL to api.github.com. GraphQL names no repository: it is not judged.
+GH_API_ENDPOINT = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)")
+API_URL = re.compile(r"(?<![\w.-])api\.github\.com/repos/([\w.-]+/[\w.-]+)")
+# A command substitution runs as a command of its own, also where it is quoted ("$(...)") and so one word;
+# an escaped one (\` or \$( in a string) is text.
+SUBSTITUTION = re.compile(r"(?<!\\)\$\(([^)]*)|(?<!\\)`([^`]*)`")
+# A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
+# word), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the API rule's.
+LINK = re.compile(r"(?:(?<=://)|(?<=@)|(?<![\w./-]))(?:www\.)?github\.com[:/]([\w.-]+/[\w.-]+)")
 
 
 def refuse(reason):
@@ -55,6 +66,45 @@ def inside_repo(path):
     return real == root or real.startswith(root + os.sep)
 
 
+def segments_of(text):
+    """The commands of a shell text, each as its words: the words of a quoted string stay one word."""
+    try:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        tokens = text.split()
+    segments, current = [], []
+    for token in tokens:
+        if token and set(token) <= set(";&|()"):
+            if current:
+                segments.append(current)
+            current = []
+        else:
+            current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def bare(words):
+    """The words of a command without the assignments and wrappers before it (X=1, sudo, time, env, ...)."""
+    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec")):
+        words = words[1:]
+    return words
+
+
+def api_repos(words):
+    """The repositories whose API a command calls, as written in it."""
+    words = bare(words)
+    head = os.path.basename(words[0]) if words else ""
+    if head == "gh" and words[1:2] == ["api"]:
+        return [m.group(1) for w in words[2:] if (m := GH_API_ENDPOINT.match(w))]
+    if head in ("curl", "wget"):
+        return [m.group(1) for w in words[1:] for m in API_URL.finditer(w)]
+    return []
+
+
 # Here-documents are data: their bodies go before anything is parsed.
 lines, skipping = [], None
 for line in command.split("\n"):
@@ -69,37 +119,22 @@ for line in command.split("\n"):
         skipping = match.group(1)
 script = ";\n".join(lines)
 
-try:
-    lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|()<>")
-    lexer.whitespace_split = True
-    tokens = list(lexer)
-except ValueError:
-    tokens = script.split()
-
-segments, current = [], []
-for token in tokens:
-    if token and set(token) <= set(";&|()"):
-        if current:
-            segments.append(current)
-        current = []
-    else:
-        current.append(token)
-if current:
-    segments.append(current)
+segments = segments_of(script)
 
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
-for match in re.finditer(r"repos/([\w.-]+/[\w.-]+)", script):
-    if match.group(1).lower() != own:
-        refuse(f"it calls the API of {match.group(1)}")
-for match in re.finditer(r"github\.com[:/]([\w.-]+/[\w.-]+)", script):
+substituted = [s for m in SUBSTITUTION.finditer(script) for s in segments_of(m.group(1) or m.group(2) or "")]
+for words in segments + substituted:
+    for repo in api_repos(words):
+        if repo.lower() != own:
+            refuse(f"it calls the API of {repo}")
+for match in LINK.finditer(script):
     if repo_of(match.group(1)) not in (None, own):
         refuse(f"it links {match.group(1)}")
 
 where = cwd
 for words in segments:
-    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec")):
-        words = words[1:]
+    words = bare(words)
     if not words:
         continue
     head = os.path.basename(words[0])

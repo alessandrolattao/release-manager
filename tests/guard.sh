@@ -64,5 +64,39 @@ check deny spike "cd $S && git symbolic-ref HEAD refs/heads/x"
 check deny spike "git -C $S symbolic-ref --delete refs/remotes/origin/HEAD"
 check deny spike "git -C $S symbolic-ref -d refs/remotes/origin/HEAD"
 check deny spike "git -C $S symbolic-ref -m why HEAD refs/heads/x"
+# The API rule: repos/<owner>/<name> counts only in the words of gh api and in a curl or wget URL to
+# api.github.com, whatever the method; a local path or a quoted string that holds it calls nothing.
+check allow tech-lead 'tail -1 ~/.local/state/team/repos/test_repo/dispatcher.log'
+check allow tech-lead 'tail -5 ~/.local/state/team/repos/someone_else/dispatcher.log'
+check allow spike 'cat ~/.local/state/team/repos/test_repo/review/42'
+check allow tech-lead 'gh issue comment 3 --body "see repos/a/b"'
+check allow tech-lead 'gh issue comment 3 --body "it ran gh api repos/a/b by hand"'
+check allow tech-lead 'gh issue comment 3 --body "it ran \`gh api repos/a/b\` by hand"'
+check allow tech-lead 'gh api repos/test/repo/issues/3 --jq .title'
+check allow tech-lead 'gh api -X POST repos/test/repo/issues -f title=x -f body="see repos/a/b"'
+check allow tech-lead "gh api graphql -f query='mutation { addComment(input: {subjectId: \"x\", body: \"y\"}) { clientMutationId } }'"
+check allow tech-lead 'gh api "repos/{owner}/{repo}/pulls?state=open"'
+check deny tech-lead 'gh api -X POST repos/someone/else/issues'
+check deny tech-lead 'gh api /repos/someone/else/issues'
+check deny tech-lead 'gh api --paginate "repos/someone/else/issues?per_page=100"'
+check deny tech-lead 'gh api https://api.github.com/repos/someone/else/issues'
+check deny tech-lead 'env GH_TOKEN=x gh api repos/Someone/Else/issues'
+check deny spike 'gh api repos/someone/else/contents/README.md'
+check deny tech-lead 'body=$(gh api repos/someone/else/issues/1 --jq .body)'
+check deny tech-lead 'echo "$(gh api repos/someone/else/issues/1 --jq ".labels[] | select(.name)")"'
+check deny tech-lead 'echo `gh api repos/someone/else/issues`'
+check deny tech-lead "sh -c 'gh api repos/someone/else/issues'"
+check allow tech-lead 'curl -s https://api.github.com/repos/test/repo/issues'
+check deny tech-lead 'curl -s -X POST https://api.github.com/repos/someone/else/issues -d "{}"'
+check deny tech-lead 'wget -qO- api.github.com/repos/someone/else/issues'
+check allow tech-lead 'curl -s https://example.com/repos/a/b'
+# The link check: a URL or an ssh remote to GitHub, never a folder of a local path.
+check allow tech-lead 'ls ~/go/pkg/mod/github.com/foo/bar@v1'
+check allow tech-lead 'cat /home/x/src/github.com/foo/bar/README.md'
+check allow tech-lead 'echo https://github.com/test/repo/pull/3'
+check deny tech-lead 'git clone https://github.com/someone/else'
+check deny tech-lead 'curl -sL https://www.github.com/someone/else/archive/main.zip'
+check deny tech-lead 'git remote add x git@github.com:someone/else.git'
+check deny tech-lead 'open github.com/someone/else'
 echo "passed=$pass failed=$fail"
 [ "$fail" = 0 ]

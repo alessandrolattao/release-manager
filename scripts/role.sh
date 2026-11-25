@@ -4,7 +4,7 @@
 #   role.sh <session-id> tech-lead                (from the main checkout; one per repository)
 #   role.sh <session-id> dev|qa <issue> [branch]  (from the session's folder)
 #   role.sh <session-id> spike <topic>            (from the main checkout)
-# From then on the hooks module keeps the session's heartbeat and color, the monitor wakes it when there
+# From then on the hooks module keeps the session's heartbeat and color, and wakes it between turns when there
 # is something for it, and hooks/revive.sh resumes a tech lead after the machine restarts.
 set -eu
 

@@ -1,7 +1,0 @@
-[
-  {
-    "name": "session-events",
-    "description": "team: something for this session",
-    "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/session-events.sh\""
-  }
-]

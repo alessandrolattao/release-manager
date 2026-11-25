@@ -18,12 +18,12 @@ for lock in "$team_state"/repos/*/checkout; do
 done
 # A QA agent ends only with its outcome recorded, or its developer would wait on it forever.
 if [ "$(jq -r '.role // ""' "$sessions_dir/$me/status" 2>/dev/null)" = qa ]; then
-	pr=$(jq -r '.pr // ""' "$sessions_dir/$me/status")
+	issue=$(jq -r '.issue // ""' "$sessions_dir/$me/status")
 	repo=$(jq -r '.repo // ""' "$sessions_dir/$me/status" | tr '/' '_')
-	case "$(cut -f1 "$team_state/repos/$repo/qa/$pr" 2>/dev/null)" in
+	case "$(cut -f1 "$team_state/repos/$repo/qa/$issue" 2>/dev/null)" in
 	pass | fail) ;;
 	*)
-		echo "record the outcome first: qa.sh pass $pr or qa.sh fail $pr" >&2
+		echo "record the outcome first: qa.sh pass $issue or qa.sh fail $issue" >&2
 		exit 1
 		;;
 	esac

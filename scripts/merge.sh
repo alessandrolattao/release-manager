@@ -3,6 +3,8 @@
 #   - the decision review passed (review.sh);
 #   - the QA passed, when the issue carries the label qa (qa.sh);
 #   - every check of the pull request is green.
+# The review and QA records are keyed by the pull request's issue, since they are taken on the branch before
+# the pull request exists; each counts only for the head it names.
 # A red default branch stops nobody: it is red for many reasons, most of them someone else's.
 # The method is the one the repository's own instructions ask for (--rebase, --squash); without one, a merge
 # commit when the repository allows it, else the method it allows.
@@ -43,13 +45,13 @@ issue=$(printf '%s' "$info" | jq -r '.closingIssuesReferences[0].number // empty
 [ -n "$issue" ] || issue=$(jq -r '.issue // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 [ -n "$issue" ] || refuse "#$pr closes no issue and this session has none: write Closes #<issue> in its description"
 
-[ "$(cut -f1 "$repo_dir/review/$pr" 2>/dev/null || true)" = "$head" ] ||
-	refuse "no decision review for the current head: run the reviewer (briefs/reviewer.md), then review.sh pass $pr \"...\""
+[ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] ||
+	refuse "no decision review for the current head: run the reviewer (briefs/reviewer.md), then review.sh pass $issue \"...\""
 needed=$(sh "$here/qa.sh" needed "$issue" 2>/dev/null || true)
 case "$needed" in
 yes)
-	[ "$(cut -f1,2 "$repo_dir/qa/$pr" 2>/dev/null || true)" = "pass	$head" ] ||
-		refuse "issue #$issue carries the label qa and the QA has not passed this head: qa.sh request $pr"
+	[ "$(cut -f1,2 "$repo_dir/qa/$issue" 2>/dev/null || true)" = "pass	$head" ] ||
+		refuse "issue #$issue carries the label qa and the QA has not passed this head: qa.sh request $issue"
 	;;
 no) ;;
 *) refuse "could not read the labels of #$issue: try again" ;;

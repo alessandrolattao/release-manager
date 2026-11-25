@@ -63,7 +63,7 @@ open_of() {
 	done
 }
 # issue_of <number> <link>: the issue a comment belongs to. A comment on a pull request carries the pull
-# request's number: the issue is the one it closes (remembered), else the one its QA record names.
+# request's number: the issue is the one it closes (remembered).
 issue_of() {
 	case "$2" in */pull/*) ;; *)
 		echo "$1"
@@ -74,7 +74,6 @@ issue_of() {
 	if [ ! -s "$known" ]; then
 		mkdir -p "$repo_dir/pr-issue"
 		n=$(gh pr view "$1" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty' 2>/dev/null || true)
-		[ -n "$n" ] || n=$(cut -f3 "$repo_dir/qa/$1" 2>/dev/null || true)
 		case "$n" in "" | *[!0-9]*) n="" ;; esac
 		[ -z "$n" ] || echo "$n" >"$known"
 	fi
@@ -219,14 +218,13 @@ for f in "$sessions_dir"/*/status; do
 	fi
 done
 
-# 4. Dead agents come back; QA agents asked for start.
+# 4. Dead agents come back; QA agents asked for start. A QA record is keyed by its issue.
 resumed=$(sh "$here/resume-agents.sh" 2>/dev/null | grep -c '^resumed dev ' || true)
 for record in "$repo_dir"/qa/*; do
 	[ -f "$record" ] || continue
 	[ "$(cut -f1 "$record")" = requested ] || continue
-	pr=$(basename "$record")
-	issue=$(cut -f3 "$record")
-	[ -n "$(live_of qa "$issue")" ] || sh "$here/start-qa.sh" "$issue" "$pr" >/dev/null 2>&1 || true
+	issue=$(basename "$record")
+	[ -n "$(live_of qa "$issue")" ] || sh "$here/start-qa.sh" "$issue" >/dev/null 2>&1 || true
 done
 
 # 5. The next workable issue gets a developer: no cap, the user decides what is ready.

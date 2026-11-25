@@ -161,7 +161,10 @@ for words in segments:
         if elsewhere:
             if sub in ("switch", "checkout", "restore", "pull"):
                 refuse(f"it moves another repository ({elsewhere}); read another branch with git -C <repo> show <branch>:<file>")
-            if sub not in READ_GIT:
+            # git symbolic-ref <ref> only prints where the ref points; with a target or --delete it changes it.
+            options = [a for a in rest if a.startswith("-")]
+            reads_ref = sub == "symbolic-ref" and set(options) <= {"--short", "-q"} and len(rest) - len(options) == 1
+            if sub not in READ_GIT and not reads_ref:
                 refuse(f"git {sub} changes another repository ({elsewhere}); there you may only read")
             continue
         creates_branch = sub == "branch" and any(not a.startswith("-") for a in rest) and not any(

@@ -9,6 +9,10 @@
 # A red default branch stops nobody: it is red for many reasons, most of them someone else's.
 # The method is the one the repository's own instructions ask for (--rebase, --squash); without one, a merge
 # commit when the repository allows it, else the method it allows.
+# When gh pr merge fails, the merge may have landed all the same (GitHub failing to answer during an incident):
+# with a merge commit, the head already in the default branch says so, and it goes on as after a merge, while
+# GitHub has not marked the pull request merged yet. A squash or a rebase leaves no such trace: it fails, with
+# gh's error.
 # Then run main-ci.sh <pr> --wait in the background: it follows the CI and deploy of the merge.
 #   merge.sh <pr> [--merge|--rebase|--squash]
 set -eu
@@ -73,7 +77,13 @@ bad=$(checks_not_green "$pr") || refuse "could not read the checks of #$pr: ${ba
 [ -z "$bad" ] || refuse "checks not green: $bad"
 
 # Only the head that was reviewed and checked: a push in between makes GitHub refuse the merge.
-gh pr merge "$pr" "--$method" --match-head-commit "$head"
-echo "merged #$pr ($method)"
+failed=0
+gh pr merge "$pr" "--$method" --match-head-commit "$head" || failed=$?
+if [ "$failed" -eq 0 ]; then
+	echo "merged #$pr ($method)"
+else
+	[ "$method" = merge ] && in_base "$head" || exit "$failed"
+	echo "merged #$pr ($method): gh pr merge failed, but its head ${head%"${head#???????}"} is in $(base_branch): the merge landed, GitHub has not marked the pull request merged yet"
+fi
 [ -z "$me" ] || state_set "$me" working "merged #$pr, waits for its CI and deploy"
 echo "next: sh \"$here/main-ci.sh\" $pr --wait, in the background"

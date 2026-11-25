@@ -230,6 +230,21 @@ check deny spike 'gh repo edit --description x'
 check deny spike 'gh repo create x --public'
 check deny spike 'gh repo fork someone/else'
 check deny tech-lead "gh repo view \"\$(gh api -X PUT repos/someone/else/pulls/5/merge)\""
+# In another repository's checkout gh takes the repository from the folder: judged as if it came with -R.
+check allow tech-lead "cd $S && gh issue view 3"
+check allow tech-lead "cd $S && gh pr diff 5"
+check allow tech-lead "cd $S && gh repo view"
+check allow tech-lead "cd $S && gh api repos/someone/else/issues/3"
+check allow tech-lead "cd $S && git log --oneline -3"
+check deny tech-lead "cd $S && gh issue close 3"
+check deny tech-lead "cd $S && gh release create v1"
+check deny tech-lead "cd $S && gh pr merge 5"
+check deny tech-lead "cd $S && gh api -X PUT 'repos/{owner}/{repo}/pulls/5/merge'"
+check deny tech-lead "cd $S && gh api 'repos/{owner}/{repo}/issues/3'"
+check deny tech-lead "cd $S && sh $P/scripts/ready.sh 5"
+check deny spike "cd $S && gh issue view 3"
+check allow spike "cd $S && gh repo view"
+check allow tech-lead "gh api 'repos/{owner}/{repo}/issues/3'"
 # A spike only reads, and still not another repository through GitHub.
 check deny spike 'gh issue view 3 -R someone/else'
 check deny spike 'gh api repos/someone/else/issues'

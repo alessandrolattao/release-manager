@@ -12,6 +12,8 @@ Refused:
     comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
     POST on repos/<other>/issues (a new one), issues/<n>/comments, labels or assignees and issues/comments/<id>,
     PATCH on repos/<other>/issues/comments/<id>;
+  - in another repository's checkout, where gh takes the repository from the folder, gh as if that repository
+    came with -R ({owner}/{repo} placeholders refused there), and the plugin's scripts;
   - a repository reached by its id (repositories/<id>), whose it is the guard cannot tell;
   - a GraphQL mutation typed by hand (gh api graphql, curl), or a query the guard cannot read (a file, stdin, a
     variable); the plugin's scripts run theirs;
@@ -164,11 +166,12 @@ def elsewhere_reason(pointed, called, linked, by_id):
     return f"it links {linked[0]}"
 
 
-def elsewhere_refused(head, words, assigns):
+def elsewhere_refused(head, words, assigns, checkout=None):
     """Why a command aimed at another repository is refused, or None when it is not aimed at one or may be run.
 
     A tech lead may read another repository's issues and pull requests and write issues and comments there;
-    everything else stays refused, as for a spike.
+    everything else stays refused, as for a spike. `checkout` is another repository's checkout the command runs
+    in: gh takes the repository from the folder, so gh there is judged as if that repository came with -R.
     """
     pointed, called, linked, by_id = elsewhere_named(words, assigns)
     if by_id:
@@ -179,6 +182,12 @@ def elsewhere_refused(head, words, assigns):
     elif any(w in ("-R", "--repo") or w.startswith("--repo=") for w in rest):
         named = gh_words(rest)[1]
     pointed += [n for n in named if repo_of(n) not in (None, own)]
+    if head == "gh" and checkout:
+        # gh api fills {owner} and {repo} with the folder's repository: there it names its endpoint plainly.
+        if any(re.search(r"\{(owner|repo|branch)\}", w) for w in words):
+            return f"in another repository's checkout ({checkout}) gh fills {{owner}}/{{repo}} with that repository"
+        if rest[:1] != ["api"]:
+            pointed.append(f"the repository of {checkout}")
     text = assigns + words
     if not (pointed or called or linked):
         return None
@@ -291,6 +300,8 @@ for words in segments:
             refuse(why)
         continue
     head = os.path.basename(words[0])
+    top = toplevel(where)
+    other = top if top and top != root and not top.startswith(root + os.sep) else None
 
     # The plugin's own scripts: they hold their own rules.
     target = words[1] if head in ("sh", "bash") and len(words) > 1 else words[0]
@@ -303,6 +314,9 @@ for words in segments:
         named = elsewhere_named(words, assigns)
         if any(named):
             refuse(elsewhere_reason(*named))
+        # They act on the repository of the folder they run in.
+        if other:
+            refuse(f"the plugin's scripts act on the repository they run in: not from another one's checkout ({other})")
         continue
 
     # A command inside a command (sh -c '...', eval ...) is checked as one of its own.
@@ -325,12 +339,9 @@ for words in segments:
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
         continue
 
-    why = elsewhere_refused(head, words, assigns) or graphql_refused(head, words)
+    why = elsewhere_refused(head, words, assigns, other) or graphql_refused(head, words)
     if why:
         refuse(why)
-
-    top = toplevel(where)
-    other = top if top and top != root and not top.startswith(root + os.sep) else None
 
     if head == "git":
         j, gitdir = 1, where

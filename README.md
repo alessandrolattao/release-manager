@@ -8,7 +8,7 @@ claude --bg --name "tech lead" "/team:tech-lead"   # the one you talk to, one pe
 
 ## Who is in the team
 
-- **The tech lead**, the session you talk to, one per repository: every question about the repository's issues reaches it. It designs with you, prepares its issues, smooths its developers' work, and starts **spikes** (`<repo> · spike · <topic>`), read-only background sessions, for the technical analyses you ask for. It never develops, and a hook makes sure of it. New issues and the first technical decision of an issue are always taken with you; on an issue that already has decisions it takes the next ones when they follow from those and it has no doubt.
+- **The tech lead**, the session you talk to, one per repository: every question about the repository's issues reaches it. It designs with you, prepares its issues, smooths its developers' work, and starts **spikes** (`<repo> · spike · <topic>`), read-only background sessions, for the technical analyses you ask for. It never develops, and a hook makes sure of it. New issues and the first technical decision of an issue are always taken with you; on an issue that already has decisions it takes the next ones when they follow from those and it has no doubt. A change that fits in one commit never gets an issue of its own: it goes as one more commit into an open pull request on the same topic or files, or as a line of the repository's single `Small fixes` issue, which becomes work of its own when you say so.
 - **Developers** (`<repo> · dev #<n> · <title>`), one per issue, in their own worktree. A developer reads the issue and its `## Technical decisions`, builds and tests the change, opens the pull request, follows its reviews, merges it and watches the default branch's CI. Whatever needs the running stack (sst dev, a server) runs in the main checkout, one agent at a time, through a lock with a queue. Before merging, a reviewer with a clean context checks the change against the decisions.
 - **QA agents** (`<repo> · qa #<n> · <title>`) for the delicate issues, the ones with the label `qa`: a second agent tests the pull request before its merge.
 
@@ -37,7 +37,7 @@ A color changes between turns: during a long turn the list shows the state of th
 
 ## Rules
 
-A rule holds for everyone, on every machine. A general one lives in this plugin, in what each role is told; one about a project lives in that repository's own instructions (its `CLAUDE.md` and skills), which the developers read before they work. When you give the tech lead a rule that holds from now on, it opens an issue for it in the right place.
+A rule holds for everyone, on every machine. A general one lives in this plugin, in what each role is told; one about a project lives in that repository's own instructions (its `CLAUDE.md` and skills), which the developers read before they work. When you give the tech lead a rule that holds from now on, it takes it to the right place: a general one as an issue on this plugin's repository; one about a project, when it fits in one commit, as one more commit in an open pull request on the same files or a line of that repository's `Small fixes` issue, and as an issue of its own only when it does not fit.
 
 ## Several machines
 

@@ -6,23 +6,8 @@ ones a spike may not run.
 Refused:
   - a command that changes code, branches or pull requests (git commit, push, merge, rebase, ...; gh pr
     create, merge, ...; claude --bg or -p; sed -i or perl -i on a file of the repository);
-  - anything aimed at another repository but reading it with git (gh -R, GH_REPO, gh api repos/<other>,
-    gh search, links to it, writing or building inside it), except, for a tech lead, its issues and comments:
-    gh issue view, list, create, edit, comment and gh pr view, list, diff, comment, whether the repository
-    comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
-    POST on repos/<other>/issues (a new one), issues/<n>/comments, labels or assignees and issues/comments/<id>,
-    PATCH on repos/<other>/issues/comments/<id>;
-  - in another repository's checkout (reached by cd, pushd, env -C, or GIT_DIR / GIT_WORK_TREE), where gh takes
-    the repository from the folder, gh as if that repository came with -R ({owner}/{repo} and :owner/:repo
-    placeholders refused there), and the plugin's scripts;
-  - a repository named through a shell variable (-R "$R", GH_REPO=$R, repos/$R/...) counts as another one,
-    since the guard cannot tell which: only what passes there passes;
-  - a repository reached by its id (repositories/<id>), whose it is the guard cannot tell;
-  - gh alias set and import, since an alias hides the command the guard would judge;
-  - a GraphQL mutation typed by hand (gh api graphql, curl), or a query the guard cannot read (a file, stdin, a
-    variable); the plugin's scripts run theirs;
-  - any gh repo subcommand but view, clone, gitignore and license, on any repository (view and clone pass
-    with a link to another one too);
+  - anything aimed at another repository but reading it with git (gh -R, gh api repos/<other>, gh search,
+    links to it, writing or building inside it);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
@@ -33,7 +18,6 @@ import re
 import shlex
 import subprocess
 import sys
-from collections import Counter
 
 role, own, root, cwd, plugin = sys.argv[1], sys.argv[2].lower(), os.path.realpath(sys.argv[3]), sys.argv[4], os.path.realpath(sys.argv[5])
 command = sys.stdin.read()
@@ -44,33 +28,6 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "merge-bot.sh", "checkout.sh"}
-# What a tech lead may do on another repository: read its issues and pull requests, write issues and comments.
-GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("issue", "edit"), ("issue", "comment"),
-                ("pr", "view"), ("pr", "list"), ("pr", "diff"), ("pr", "comment")}
-# gh api's options that take a value: the rest of their word (after = for a long one), or the next word.
-GH_API_SHORT_VALUES = set("FHXfpqt")
-GH_API_LONG_VALUES = {"--cache", "--field", "--header", "--hostname", "--input", "--jq", "--method", "--preview",
-                      "--raw-field", "--template"}
-# The gh repo subcommands a tech lead or a spike may run, on any repository: they only read, or copy one to read it.
-GH_REPO_READS = {"view", "clone", "gitignore", "license"}
-API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
-# A repos/ path holding a shell variable: which repository, or which path, the guard cannot tell.
-VAR_REF = re.compile(r"repos/[^\s?#]*\$")
-LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
-# A repository reached by its numeric id: whose it is the guard cannot tell.
-BY_ID = re.compile(r"(?:^|/)repositories/(?:\d+|[^/\s]*[$`])", re.IGNORECASE)
-# What a tech lead may POST or PATCH on another repository, past repos/<owner>/<name>: a new issue, an issue's
-# comments, labels and assignees, and a comment. GitHub takes a POST on what it patches as that PATCH, so a POST
-# on an issue itself (which can close it, or a pull request) is no more allowed than a PATCH there.
-POST_ELSEWHERE = re.compile(r"^/issues(/\d+/(comments|labels|assignees))?/?$|^/issues/comments/\d+/?$")
-PATCH_ELSEWHERE = re.compile(r"^/issues/comments/\d+/?$")
-# GitHub's GraphQL endpoint as gh api names it, and a mutation in what is sent there.
-GRAPHQL = re.compile(r"(?:^|/)graphql(?:/|$|[?#])", re.IGNORECASE)
-MUTATION = re.compile(r"\bmutation\b")
-# A gh api endpoint: a path or a URL of the API, the repository, then the rest of the path.
-ENDPOINT = re.compile(r"^(?:https://api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)(/[^?#]*)?(?:[?#].*)?$", re.IGNORECASE)
-# A gh api field (key=value): data, not an endpoint.
-FIELD = re.compile(r"^[\w\[\]]+=")
 
 
 def refuse(reason):
@@ -96,229 +53,6 @@ def toplevel(path):
 def inside_repo(path):
     real = os.path.realpath(os.path.join(cwd, os.path.expanduser(path)))
     return real == root or real.startswith(root + os.sep)
-
-
-def gh_words(words):
-    """A gh command's words without -R/--repo and their values, and the repositories those name."""
-    rest, named, i = [], [], 0
-    while i < len(words):
-        w = words[i]
-        if w in ("-R", "--repo") and i + 1 < len(words):
-            named.append(words[i + 1])
-            i += 2
-            continue
-        if w.startswith("--repo="):
-            named.append(w.split("=", 1)[1])
-        elif w.startswith("-R") and len(w) > 2:
-            named.append(w[2:])
-        else:
-            rest.append(w)
-        i += 1
-    return rest, named
-
-
-def api_method(words):
-    """The HTTP method of a gh api call: -X / --method, else POST with fields or an input, else GET.
-
-    Short options stack as gh reads them: in `-iXPUT` or `-if title=x`, -i takes no value and the next letter
-    takes the rest of the word, or the next word. A value in the next word is that option's, whatever it looks
-    like: in `-q -XGET` it is a jq filter, not a method.
-    """
-    method, fields, value_of = None, False, None
-    for i, w in enumerate(words):
-        nxt = words[i + 1] if i + 1 < len(words) else ""
-        if value_of == i:
-            continue
-        if w.startswith("--"):
-            name, eq, value = w.partition("=")
-            if name in GH_API_LONG_VALUES and not eq:
-                value, value_of = nxt, i + 1
-            if name == "--method":
-                method = value
-            elif name in ("--field", "--raw-field", "--input"):
-                fields = True
-        elif w.startswith("-") and len(w) > 1:
-            for k, letter in enumerate(w[1:], 2):
-                if letter in GH_API_SHORT_VALUES:
-                    value = w[k:]
-                    if not value:
-                        value, value_of = nxt, i + 1
-                    if letter == "X":
-                        method = value
-                    elif letter in "fF":
-                        fields = True
-                    break
-    return (method or ("POST" if fields else "GET")).upper()
-
-
-def mentioned(texts):
-    """Another repository's API paths and links in these texts, counted: what the whole command must account for."""
-    found = Counter()
-    for text in texts:
-        found.update(("calls the API of", m.group(1).lower()) for m in API_REF.finditer(text) if m.group(1).lower() != own)
-        found.update(("links", m.group(1).lower()) for m in LINK_REF.finditer(text) if repo_of(m.group(1)) not in (None, own))
-    return found
-
-
-def elsewhere_name(name):
-    """A repository named for gh is another one: not this one, or one the shell fills in (a variable, backticks)."""
-    return "$" in name or "`" in name or repo_of(name) not in (None, own)
-
-
-def elsewhere_named(words, assigns):
-    """The other repositories a command reaches by its words: GH_REPO, which points gh at one before the
-    command or for the next ones (export, declare -x, env); its API paths; its links; any repository by id."""
-    text = assigns + words
-    pointed = [w.split("=", 1)[1] for w in text if w.startswith("GH_REPO=")]
-    pointed = [n for n in pointed if elsewhere_name(n)]
-    called = [m.group(1) for w in text for m in API_REF.finditer(w) if m.group(1).lower() != own]
-    called += [m.group(0) for w in text for m in VAR_REF.finditer(w)]
-    linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
-    by_id = [m.group(0).lstrip("/") for w in text for m in BY_ID.finditer(w)]
-    return pointed, called, linked, by_id
-
-
-def elsewhere_reason(pointed, called, linked, by_id):
-    if by_id:
-        return f"it calls the API of a repository by its id ({by_id[0]}): whose it is the guard cannot tell"
-    if pointed:
-        return f"it points gh at {pointed[0]}"
-    if called:
-        return f"it calls the API of {called[0]}"
-    return f"it links {linked[0]}"
-
-
-def elsewhere_refused(head, words, assigns, checkout=None):
-    """Why a command aimed at another repository is refused, or None when it is not aimed at one or may be run.
-
-    A tech lead may read another repository's issues and pull requests and write issues and comments there;
-    everything else stays refused, as for a spike. `checkout` is another repository's checkout the command runs
-    in: gh takes the repository from the folder, so gh there is judged as if that repository came with -R.
-    """
-    pointed, called, linked, by_id = elsewhere_named(words, assigns)
-    if by_id:
-        return elsewhere_reason(pointed, called, linked, by_id)
-    rest, named = words[1:], []
-    if head == "gh":
-        rest, named = gh_words(rest)
-    elif any(w in ("-R", "--repo") or w.startswith("--repo=") for w in rest):
-        named = gh_words(rest)[1]
-    pointed += [n for n in named if elsewhere_name(n)]
-    if head == "gh" and checkout:
-        # gh api fills {owner} and {repo} with the folder's repository: there it names its endpoint plainly.
-        if any(re.search(r"\{(owner|repo|branch)\}|:(owner|repo)\b", w) for w in words):
-            return f"in another repository's checkout ({checkout}) gh fills {{owner}}/{{repo}} with that repository"
-        if rest[:1] != ["api"]:
-            pointed.append(f"the repository of {checkout}")
-    text = assigns + words
-    if not (pointed or called or linked):
-        return None
-    # A substitution inside a quoted word, or in backticks, stays in that word: what it runs would ride on the
-    # allowed command unseen, so a command carrying one gets no exception.
-    plain = head == "gh" and not any(re.search(r"\$\(|`|<\(|>\(", w) for w in text)
-    if plain and rest[:1] == ["repo"] and rest[1:2] in (["view"], ["clone"]):
-        return None
-    allowed = role == "tech-lead" and plain
-    if allowed and tuple(rest[:2]) in GH_ELSEWHERE:
-        return None
-    if allowed and rest[:1] == ["api"] and not pointed:
-        # Its endpoint decides; the repositories named in its fields (key=value) are data. Any other word that
-        # names another repository's API counts as an endpoint, so an unknown option cannot hide the real one,
-        # and has to be one the guard reads plainly: no port, no ./ before it, no . or .. in its path.
-        method = api_method(rest)
-        for w in rest[1:]:
-            # A path holding a variable counts as another repository's, this one's too.
-            varied = VAR_REF.search(w)
-            if FIELD.match(w) or not (varied or any(r.lower() != own for r in API_REF.findall(w))):
-                continue
-            m = ENDPOINT.match(w)
-            path = (m.group(2) or "") if m else ""
-            if not m or re.search(r"(^|/)\.\.?(/|$)", path) or (m.group(1).lower() == own and not varied):
-                return f"{w} reaches another repository's API in a form the guard does not read: write repos/<owner>/<name>/..."
-
-            if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
-                continue
-            if method == "POST" and POST_ELSEWHERE.match(path):
-                continue
-            if method == "PATCH" and PATCH_ELSEWHERE.match(path):
-                continue
-            return (f"{method} {w} is not for this repository: on {m.group(1)} it reads issues and pull requests "
-                    "and writes issues and comments only")
-        return None
-    return elsewhere_reason(pointed, called, linked, by_id)
-
-
-def unreadable_query(query):
-    """A GraphQL query the guard cannot read: from a file or stdin (@), or holding what the shell fills in.
-
-    A query's own variables are `$name` too, but the query declares each one (`$name:`): any other `$` is the
-    shell's, as are a substitution and backticks.
-    """
-    if query[:1] == "@" or "`" in query or re.search(r"\$(?![A-Za-z_])", query):
-        return True
-    return bool(set(re.findall(r"\$(\w+)", query)) - set(re.findall(r"\$(\w+)\s*:", query)))
-
-
-def shell_fills_query(text):
-    """A query=... word of the raw command where the shell fills something in: a $ or a backtick outside single
-    quotes. Inside single quotes a $name is the query's own variable; the tokenizer drops the quotes, so only the
-    raw text tells the two apart."""
-    for match in re.finditer(r"query=", text):
-        quote, escaped = None, False
-        for char in text[match.end():]:
-            if escaped:
-                escaped = False
-                continue
-            if quote is None and (char.isspace() or char in ";&|<>()"):
-                break
-            if char == "\\" and quote != "'":
-                escaped = True
-            elif char in "'\"" and quote in (None, char):
-                quote = None if quote == char else char
-            elif char in "$`" and quote != "'":
-                return True
-    return False
-
-
-def api_positionals(rest):
-    """The words of a gh api call that are no option nor an option's value: its endpoint, as gh reads them."""
-    found, value_of = [], None
-    for i, w in enumerate(rest[1:], 1):
-        if value_of == i:
-            continue
-        if w.startswith("--"):
-            if w.partition("=")[0] in GH_API_LONG_VALUES and "=" not in w:
-                value_of = i + 1
-        elif w.startswith("-") and len(w) > 1:
-            for k, letter in enumerate(w[1:], 2):
-                if letter in GH_API_SHORT_VALUES:
-                    if not w[k:]:
-                        value_of = i + 1
-                    break
-        else:
-            found.append(w)
-    return found
-
-
-def graphql_refused(head, words):
-    """Why a command sends GitHub's GraphQL API a mutation typed by hand, or a query the guard cannot read."""
-    rest = gh_words(words[1:])[0] if head == "gh" else []
-    # An endpoint that starts with what the shell fills in: which API it calls the guard cannot tell (one that
-    # starts as repos/<owner>/<name>/ is judged by the rules on another repository).
-    if rest[:1] == ["api"] and any(re.match(r"[$`]", w) for w in api_positionals(rest)):
-        return "the gh api endpoint is held in a variable: which API it calls the guard cannot tell"
-    if rest[:1] == ["api"] and any(GRAPHQL.search(w) for w in rest[1:] if not FIELD.match(w)):
-        if any(MUTATION.search(w) for w in rest):
-            return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
-        unread = [w for w in rest if w == "--input" or w.startswith("--input=")]
-        unread += [w for w in rest if "query=" in w and unreadable_query(w.split("query=", 1)[1])]
-        unread += [w for w in rest if "query=" in w and shell_fills_query(script)]
-        if unread:
-            return f"the GraphQL query comes from where the guard cannot read it ({unread[0]}): type it in the command"
-        return None
-    if any("graphql" in w.lower() for w in words) and any(MUTATION.search(w) for w in words):
-        return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
-    return None
 
 
 # Here-documents are data: their bodies go before anything is parsed.
@@ -355,69 +89,27 @@ if current:
 
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
+for match in re.finditer(r"repos/([\w.-]+/[\w.-]+)", script):
+    if match.group(1).lower() != own:
+        refuse(f"it calls the API of {match.group(1)}")
+for match in re.finditer(r"github\.com[:/]([\w.-]+/[\w.-]+)", script):
+    if repo_of(match.group(1)) not in (None, own):
+        refuse(f"it links {match.group(1)}")
 
-# Another repository named in the text must be in a command the guard judged and let through: a word the
-# tokenizer drops (a # inside a word), an option it skips (env -S) or an argument after a sh -c string is not.
-judged = Counter()
-where, previous, pushed = cwd, cwd, []
+where = cwd
 for words in segments:
-    assigns, chdir = [], None
-    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec", "command")):
-        if "=" in words[0]:
-            assigns.append(words[0])
-        elif words[0] == "env":
-            # env's options, among them -C / --chdir, the folder the command runs in.
-            rest = words[1:]
-            while rest and rest[0].startswith("-"):
-                option = rest.pop(0)
-                if option in ("--chdir", "--unset") and rest:
-                    value = rest.pop(0)
-                    chdir = value if option == "--chdir" else chdir
-                elif option.startswith("--chdir="):
-                    chdir = option.split("=", 1)[1]
-                elif not option.startswith("--"):
-                    # Short options stack (-iC <dir>, -iC<dir>): C and u take the rest of the word, or the next one.
-                    for k, letter in enumerate(option[1:], 2):
-                        if letter in "Cu":
-                            value = option[k:] or (rest.pop(0) if rest else "")
-                            chdir = value if letter == "C" else chdir
-                            break
-            words = [words[0]] + rest
+    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec")):
         words = words[1:]
     if not words:
-        # Only assignments: what they hold may be used by the next command.
-        why = elsewhere_refused("", [""], assigns)
-        if why:
-            refuse(why)
-        judged += mentioned(assigns)
         continue
     head = os.path.basename(words[0])
-    here = os.path.realpath(os.path.join(where, os.path.expanduser(chdir))) if chdir else where
-    top = toplevel(here)
-    other = top if top and top != root and not top.startswith(root + os.sep) else None
-    # GIT_DIR or GIT_WORK_TREE outside the repository: git and gh act on that one, here or in the next commands.
-    for value in [w.split("=", 1)[1] for w in assigns + words if w.startswith(("GIT_DIR=", "GIT_WORK_TREE="))]:
-        real = os.path.realpath(os.path.join(here, os.path.expanduser(value)))
-        if real != root and not real.startswith(root + os.sep):
-            other = real
-            if head not in ("gh", "git"):
-                refuse(f"GIT_DIR or GIT_WORK_TREE points git and gh at another repository ({real})")
 
     # The plugin's own scripts: they hold their own rules.
     target = words[1] if head in ("sh", "bash") and len(words) > 1 else words[0]
-    real = os.path.realpath(os.path.join(here, os.path.expanduser(target)))
+    real = os.path.realpath(os.path.join(where, os.path.expanduser(target)))
     if real.startswith(plugin + os.sep) and real.endswith(".sh"):
         if role == "spike" and os.path.basename(real) in SPIKE_FORBIDDEN_SCRIPTS:
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
-        # Never another repository through them, by a link, an API path or GH_REPO: they would write there as
-        # this repository's session. Their own --repo signs what they write there.
-        named = elsewhere_named(words, assigns)
-        if any(named):
-            refuse(elsewhere_reason(*named))
-        # They act on the repository of the folder they run in.
-        if other:
-            refuse(f"the plugin's scripts act on the repository they run in: not from another one's checkout ({other})")
-        judged += mentioned(assigns + words)
         continue
 
     # A command inside a command (sh -c '...', eval ...) is checked as one of its own.
@@ -429,41 +121,34 @@ for words in segments:
         inner = " ".join(words[1:])
     if inner is not None:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
-                                input=f"cd {shlex.quote(here)}\n{inner}", capture_output=True, text=True)
+                                input=f"cd {shlex.quote(where)}\n{inner}", capture_output=True, text=True)
         if nested.returncode != 0:
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
-        judged += mentioned([inner])
         continue
 
-    if head == "cd" and words[1:2] == ["-"]:
-        where, previous = previous, where
-        continue
-    if head == "pushd" and len(words) == 1:
-        # pushd alone swaps the folder with the last one pushed.
-        if pushed:
-            where, pushed[-1] = pushed[-1], where
-        continue
-    if head in ("cd", "pushd") and len(words) > 1:
-        if head == "pushd":
-            pushed.append(where)
-        where, previous = os.path.realpath(os.path.join(where, os.path.expanduser(words[1]))), where
-        continue
-    if head == "popd":
-        where, previous = (pushed.pop() if pushed else where), where
+    if head == "cd" and len(words) > 1:
+        where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
         continue
 
-    why = elsewhere_refused(head, words, assigns, other) or graphql_refused(head, words)
-    if why:
-        refuse(why)
-    judged += mentioned(assigns + words)
+    for i, w in enumerate(words):
+        value = None
+        if w in ("-R", "--repo") and i + 1 < len(words):
+            value = words[i + 1]
+        elif w.startswith("--repo="):
+            value = w.split("=", 1)[1]
+        if value is not None and repo_of(value) not in (None, own):
+            refuse(f"it points gh at {value}")
+
+    top = toplevel(where)
+    other = top if top and top != root and not top.startswith(root + os.sep) else None
 
     if head == "git":
-        j, gitdir = 1, here
+        j, gitdir = 1, where
         while j < len(words) and words[j].startswith("-"):
             if words[j] == "-C" and j + 1 < len(words):
-                gitdir = os.path.realpath(os.path.join(here, os.path.expanduser(words[j + 1])))
+                gitdir = os.path.realpath(os.path.join(where, os.path.expanduser(words[j + 1])))
                 j += 2
             elif words[j] == "-c":
                 j += 2
@@ -473,7 +158,6 @@ for words in segments:
         rest = words[j + 1:]
         gtop = toplevel(gitdir)
         elsewhere = gtop if gtop and gtop != root and not gtop.startswith(root + os.sep) else None
-        elsewhere = elsewhere or (other if other and gitdir == here else None)
         if elsewhere:
             if sub in ("switch", "checkout", "restore", "pull"):
                 refuse(f"it moves another repository ({elsewhere}); read another branch with git -C <repo> show <branch>:<file>")
@@ -494,15 +178,10 @@ for words in segments:
         continue
 
     if head == "gh" and len(words) > 2:
-        sub = gh_words(words[1:])[0]
-        if sub[:1] == ["pr"] and sub[1:2] and sub[1] in ("create", "merge", "edit", "close", "review", "checkout"):
-            refuse(f"gh pr {sub[1]} is a developer's work")
-        if sub[:2] == ["issue", "develop"]:
+        if words[1] == "pr" and words[2] in ("create", "merge", "edit", "close", "review", "checkout"):
+            refuse(f"gh pr {words[2]} is a developer's work")
+        if words[1:3] == ["issue", "develop"]:
             refuse("gh issue develop is a developer's work")
-        if sub[:1] == ["alias"] and sub[1:2] in (["set"], ["import"]):
-            refuse(f"gh alias {sub[1]} hides the command the guard would judge: type the command itself")
-        if sub[:1] == ["repo"] and sub[1:2] and sub[1] not in GH_REPO_READS:
-            refuse(f"gh repo {sub[1]} changes a repository; here a repository is only viewed or cloned")
         continue
 
     if head == "claude" and any(w in ("--bg", "--background", "-p", "--print") for w in words[1:]):
@@ -521,9 +200,4 @@ for words in segments:
             refuse(f"{head} could change another repository ({other}); there you may only read")
         if any(re.match(r"^\d*>>?$", w) for w in words):
             refuse(f"it writes a file while in another repository ({other})")
-# The words judged come without the shell's quotes and backslashes: the text is read the same way.
-unjudged = mentioned([re.sub(r"[\"'\\\\]", "", script)]) - judged
-if unjudged:
-    (kind, name), _ = next(iter(unjudged.items()))
-    refuse(f"it {kind} {name} where the guard cannot judge it")
 sys.exit(0)

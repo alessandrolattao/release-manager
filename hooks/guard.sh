@@ -1,8 +1,7 @@
 #!/bin/sh
 # Keeps a tech lead and its spikes what they are, without relying on the model: PreToolUse refuses what
 # develops (files of the repository, commands that change code, branches or pull requests) and what reaches
-# another repository but reading it, or, for a tech lead, its issues and comments. Developing is the developers'
-# work; the tech lead prepares it.
+# another repository but reading it. Developing is the developers' work; the tech lead prepares it.
 set -eu
 
 # shellcheck source=hooks/common.sh

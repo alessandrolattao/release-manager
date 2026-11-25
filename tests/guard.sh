@@ -13,6 +13,9 @@ mkdir -p "$T/home/.config"
 export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" GIT_CONFIG_NOSYSTEM=1
 R="$T/repo"
 git init -q -b main "$R" || exit 1
+# A sibling repository, outside the fake one: there a spike may only read.
+S="$T/sibling"
+git init -q -b main "$S" || exit 1
 pass=0 fail=0
 check() {
 	want=$1 role=$2 cmd=$3
@@ -49,5 +52,16 @@ check deny tech-lead 'eval git commit -m x'
 check allow tech-lead "bash -c 'git log --oneline -3'"
 check deny tech-lead 'cat <<< hello
 git push'
+# git symbolic-ref only reads with one argument; with two, or --delete, it changes the repository.
+check allow spike "git -C $S symbolic-ref refs/remotes/origin/HEAD"
+check allow spike "git -C $S symbolic-ref --short refs/remotes/origin/HEAD"
+check allow spike "git -C $S symbolic-ref -q HEAD"
+check allow spike "git -C $S symbolic-ref -q --short HEAD"
+check allow spike "cd $S && git symbolic-ref HEAD"
+check deny spike "git -C $S symbolic-ref HEAD refs/heads/x"
+check deny spike "cd $S && git symbolic-ref HEAD refs/heads/x"
+check deny spike "git -C $S symbolic-ref --delete refs/remotes/origin/HEAD"
+check deny spike "git -C $S symbolic-ref -d refs/remotes/origin/HEAD"
+check deny spike "git -C $S symbolic-ref -m why HEAD refs/heads/x"
 echo "passed=$pass failed=$fail"
 [ "$fail" = 0 ]

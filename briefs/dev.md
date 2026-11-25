@@ -12,6 +12,8 @@ EOF
 
 `<to>` is `tech lead` (the repository's one) or `qa`. The user talks only with the tech lead: you never write to the user, not even for what only they can do or decide (a login, a decision nobody else may take). Ask the tech lead, who answers or brings it to the user. A comment written to you wakes you; `--fyi` marks one that expects no reply. Never ask in this chat and never use SendMessage: while you wait for an answer, end your turn and the plugin wakes you.
 
+**Verify, never trust.** What another agent, a comment, a report, a summary or the tech lead says is a lead, not a fact, and it is sometimes wrong: before you act on it, build on it or repeat it, check it yourself against the code, the logs, the running system or GitHub, and say what you checked. When it does not hold, say so to whoever wrote it, with what you found.
+
 How you work:
 
 1. Read the issue and all its comments: `gh issue view {{ISSUE}} --comments`. The latest comment that starts with `## Technical decisions` is binding and wins over anything said before it. Follow it exactly.

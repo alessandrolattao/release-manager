@@ -73,6 +73,9 @@ const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: 
 const latest = atom({ plugin: 'team', key: 'latest' } as const, '')
 // This session's model, as /model shows it: the tech lead's, which the user picks, in the board's summary.
 const model = atom({ plugin: 'team', key: 'model' } as const, '')
+// The effort its last request to the model carried ('' before the first, or on a model without effort).
+const effort = atom({ plugin: 'team', key: 'effort' } as const, '')
+let lastEffort: string | undefined
 let updateCheckedAt = 0
 let isStartingUpdate = false
 
@@ -498,6 +501,25 @@ function modelName(id: string): string {
   return m === null ? id : `${(m[1] ?? '').charAt(0).toUpperCase()}${(m[1] ?? '').slice(1)} ${m[2]}.${m[3]}`
 }
 
+// "Opus 5.5" and "xhigh" as "Opus 5.5 (xhigh)"; with no effort known, the model alone.
+function withEffort(name: string, level: string): string {
+  return level === '' ? name : `${name} (${level})`
+}
+
+// The effort of the main loop's requests to the model, as the engine sends it: written when it changes.
+async function noteEffort($: EngineInterface, level: string | number | undefined): Promise<void> {
+  const now = level === undefined ? '' : String(level)
+  if (now === lastEffort) {
+    return
+  }
+  lastEffort = now
+  try {
+    await update($, effort, () => now)
+  } catch (err) {
+    $.ui.log(`team: effort: ${String(err)}`)
+  }
+}
+
 // The tech lead's model for the summary, read at each refresh: the user may switch it with /model.
 async function noteModel($: EngineInterface): Promise<void> {
   try {
@@ -779,6 +801,14 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Each request of the main loop to the model carries its effort: the summary shows it after the model.
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined) {
+      void noteEffort($, e.effort)
+    }
+    return yield* next(e)
+  })
+
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       isBusy = true
@@ -844,7 +874,7 @@ export const register: Register = on => {
             { label: 'queue', value: summary.queue },
             { label: 'main CI', value: summary.ci },
             // The tech lead's own model, which the user picks with /model; the agents run on the default.
-            { label: 'model', value: modelName(await read($, model)) || '?' },
+            { label: 'model', value: withEffort(modelName(await read($, model)) || '?', await read($, effort)) },
             { label: 'usage 5h', value: usageText(summary.usage5h), look: toneLook(summary.usage5h.tone) },
             { label: 'usage 7d', value: usageText(summary.usage7d), look: toneLook(summary.usage7d.tone) },
           ]

@@ -222,3 +222,22 @@ test('a tech lead finds a newer version of the plugin and says so, once', async 
   await clock.advance(20000)
   expect(toasts.length).toBe(1)
 })
+
+test("the effort of the session's requests to the model is kept for the summary", async ($, on) => {
+  mock.clock(on, { now: NOW })
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  const written: string[] = []
+  on('state.set', (_$, e, next) => {
+    if (e.key === 'effort') {
+      written.push(String(e.value))
+    }
+    return next(e)
+  })
+
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 1 })) {
+    // The response's pieces: none here.
+  }
+  expect(written).toEqual(['xhigh'])
+})

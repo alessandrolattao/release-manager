@@ -16,7 +16,7 @@ Developers start by themselves. Every minute a dispatcher (a process of its own,
 
 There is one dispatcher per repository on each machine that works on it. The tech lead keeps its machine's running: when it finds it stopped (a restart of the machine, a crash) it starts it again. `/team:dispatcher stop` in a Claude Code session in the repository's checkout stops it until you start it again yourself: click its red `stopped` row in the board's summary, or run `/team:dispatcher` (`status` tells). It goes on after that session ends. After a plugin update, `/team:update` restarts it on the new version; the summary shows the version it runs.
 
-Developers, QA agents and spikes start on the account's default model (`--model default`), whatever model the settings pick. A spike runs on Fable only when you choose it with the tech lead for that analysis. The tech lead's own model is yours to pick with `/model`, and the board's summary shows it.
+Developers, QA agents and spikes start on the account's default model (`--model default`), whatever model the settings pick. A spike runs on Fable only when you choose it with the tech lead for that analysis. The tech lead's own model is yours to pick with `/model`, and the board's summary shows it with its effort (`Opus 5.5 (xhigh)`).
 
 ## GitHub is where the team talks
 

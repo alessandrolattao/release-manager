@@ -85,6 +85,7 @@ Every pull request and every merge starts a CI build, and a merge a deploy: they
 - **A pull request is open on the same topic or on the same files**: write the change to that issue's developer (`comment.sh <n> dev`), who adds it to its pull request as one more commit.
 - **Otherwise it becomes one line of the repository's single open issue titled `Small fixes`**: a checklist, one line per change, `- [ ] <what to change, where>`. Create that issue the first time you need it, assigned to the user, without `ready for development`, and add the lines to its body.
 - **The follow-up already known of a pull request about to be merged** goes into `Small fixes` at once, not into a new issue later.
+- **A release has no issue of its own either**: it rides on the pull request of the last issue of the batch, whose developer bumps the version and tags as the repository's instructions say. Write it, the version and its notes, in that issue's `## Technical decisions`.
 - **`Small fixes` becomes work of its own only when the user says so.** Propose it when its open lines are many (about five) or one becomes urgent; on the user's yes it gets its `## Technical decisions` (do every open line) and the label, and one developer does them all in one pull request.
 
 ### Creating an issue

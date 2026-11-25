@@ -42,7 +42,7 @@ function seeded(on: On, extra: Record<string, string> = {}): Map<string, string>
         title: 'Checkout page with saved cards, and the old one removed for good',
         branch: '42-checkout-page',
         state: 'others',
-        detail: 'waits for QA on PR #50',
+        detail: 'waits for QA on #42',
         since: NOW / 1000 - 540,
       }),
       'sessions/other-1/status': JSON.stringify({ role: 'dev', repo: 'acme/shop', issue: 7, state: 'working' }),
@@ -120,8 +120,8 @@ test("a developer's pane shows its issue, status, branch, pull request, work and
   // GitHub read a minute ago: not asked again.
   seeded(on, {
     'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000 - 60, status: 'In review', qa: true, pr: PR }),
-    'repos/acme_shop/review/50': 'abc123def\tthe decisions hold',
-    'repos/acme_shop/qa/50': 'requested\tabc123def\t42\tabc-123',
+    'repos/acme_shop/review/42': 'abc123def\tthe decisions hold',
+    'repos/acme_shop/qa/42': 'requested\tabc123def\t42\tabc-123\t42-checkout-page',
   })
   const logs: string[] = []
   const { asked, opened } = engine(on, () => '', logs)
@@ -156,7 +156,7 @@ test("a developer's pane shows its issue, status, branch, pull request, work and
   // STATE: the board's verb and age, on the color of the state, then what it waits on.
   const state = await ui.find({ type: 'Text', text: /^ waiting 9m $/ })
   expect(state?.props.backgroundColor).toBe('#827dbd')
-  expect((await ui.find({ type: 'Text', text: /waits for QA/ }))?.text).toBe('        waits for QA on PR #50')
+  expect((await ui.find({ type: 'Text', text: /waits for QA/ }))?.text).toBe('        waits for QA on #42')
   // The summary.
   expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^  ╔═+ SUMMARY ═+╗$/)
   expect((await ui.find({ type: 'Text', text: /║ checkout/ }))?.text).toMatch(/║ checkout +held by dev #7 · you are 2 of 2 in the queue +║▓$/)
@@ -223,8 +223,8 @@ test('a review or a QA outcome counts for the worktree HEAD only', async ($, on)
   seeded(on, {
     'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In review', qa: true, pr: PR }),
     // Both for the head before the last commit.
-    'repos/acme_shop/review/50': 'old456\tthe decisions hold',
-    'repos/acme_shop/qa/50': 'pass\told456',
+    'repos/acme_shop/review/42': 'old456\tthe decisions hold',
+    'repos/acme_shop/qa/42': 'pass\told456',
   })
   engine(on)
 
@@ -232,6 +232,25 @@ test('a review or a QA outcome counts for the worktree HEAD only', async ($, on)
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +decision review not passed · QA needed +║▓$/)
+  await ui.unmount()
+})
+
+test('the review and the QA, taken on the branch, show before the pull request exists', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  seeded(on, {
+    'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In progress', qa: true, pr: null }),
+    // Keyed by the issue, for the worktree's HEAD.
+    'repos/acme_shop/review/42': 'abc123def\tthe decisions hold',
+    'repos/acme_shop/qa/42': 'pass\tabc123def',
+  })
+  engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^PR / }))?.text).toBe('PR      none yet')
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +decision review passed · QA passed +║▓$/)
   await ui.unmount()
 })
 

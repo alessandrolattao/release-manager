@@ -4,9 +4,11 @@
 # the head they are about.
 #   qa.sh request <issue>     the developer, once its branch is pushed: you wait (purple) and the plugin starts
 #                             a QA agent on your branch, which writes its outcome on the issue
-#   qa.sh pass <issue> | fail <issue>   the QA agent: records the outcome for the head it tested
+#   qa.sh pass <issue> | fail <issue>   the QA agent: records the outcome for the head it tested, with its time
+#                             (UTC)
 #   qa.sh needed <issue>      prints yes when the issue carries the label qa
-# merge.sh refuses a pull request of a `qa` issue that has no pass for its head.
+# merge.sh refuses a pull request of a `qa` issue that has no pass for its head, or a pass recorded before the
+# issue's latest `## Technical decisions`.
 set -eu
 
 action=${1:?request, pass, fail or needed}
@@ -51,7 +53,7 @@ pass | fail)
 		echo "no head to record: take the checkout (checkout.sh take) and test there" >&2
 		exit 1
 	}
-	printf '%s\t%s\n' "$action" "$head" >"$record"
+	printf '%s\t%s\t%s\n' "$action" "$head" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$record"
 	echo "QA $action recorded for issue #$issue at ${head%"${head#???????}"}"
 	;;
 *)

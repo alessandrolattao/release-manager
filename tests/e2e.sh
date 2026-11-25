@@ -78,6 +78,12 @@ case "$*" in
 	case "$*" in
 	*planningStatuses*) echo '[{"id":"S_TODO","name":"Todo"},{"id":"S_PROG","name":"In progress"},{"id":"S_REV","name":"In review"}]' ;;
 	*setIssueStatus*) printf '%s\n' "$*" | grep -o 'S_[A-Z]*' | head -1 >"$G/status-last"; echo '{}' ;;
+	# The boards: what is sent to add a Status option is kept, and the field comes back with the ids sent.
+	*"--input -"*) cat >"$G/add-status-sent"; jq -c '[.variables.o[] | {id: (.id // "OPT_NEW"), name}]' "$G/add-status-sent" ;;
+	*projectItems*) cat "$G/items.json" 2>/dev/null || echo '{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}' ;;
+	*updateProjectV2ItemFieldValue*) printf '%s\n' "$*" | grep -o 'OPT_[A-Z]*' | head -1 >>"$G/card-moves"; echo '{}' ;;
+	*projectsV2*) cat "$G/boards.json" 2>/dev/null || echo '{"data":{"repository":{"projectsV2":{"nodes":[]}}}}' ;;
+	*"projectV2(number"*) cat "$G/board.json" 2>/dev/null || echo null ;;
 	*"issue(number"*) echo I_1 ;;
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
@@ -495,6 +501,76 @@ rm -f "$G/race-49"
 CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/claim.sh" release 46 "takeover: the machine is off" >/dev/null
 ok "a takeover: released by the tech lead, Todo again" "$(head -1 "$(grep -l 'releases #46' "$G/comments/"*)") $(cat "$G/status-last")" "**tech lead** releases #46 S_TODO"
 ok "who has it now: nobody" "$(sh "$SC/claim.sh" who 46)" ""
+
+echo "== issue-status.sh and project.sh: boards"
+cd "$ROOT" || exit 1
+# Issue 42 on the board "Roadmap", whose Status has no In Review, its card in In Progress.
+cat >"$G/items.json" <<'EOF'
+{"data":{"repository":{"issue":{"projectItems":{"nodes":[{"id":"ITEM_1","fieldValueByName":{"name":"In Progress"},
+ "project":{"id":"P_1","title":"Roadmap","field":{"id":"F_1","options":[{"id":"OPT_TODO","name":"Todo"},{"id":"OPT_PROG","name":"In Progress"},{"id":"OPT_DONE","name":"Done"}]}}}]}}}}}
+EOF
+rm -f "$G/card-moves"
+out=$(sh "$SC/issue-status.sh" 42 in_review 2>&1); code=$?
+ok "a board without the status: one clear line, exit 0" "$code $out" '0 issue 42: In review (board "Roadmap" has no "In Review" status: its card stays in "In Progress")'
+ok "the issue's own status is set" "$(cat "$G/status-last")" "S_REV"
+ok "and the card is left where it is" "$(cat "$G/card-moves" 2>/dev/null)" ""
+out=$(sh "$SC/issue-status.sh" 42 in_progress 2>&1)
+ok "a board with the status: the card moves" "$(printf '%s' "$out" | tr '\n' '|') $(cat "$G/card-moves")" "issue 42: In progress|issue 42: In Progress on Roadmap OPT_PROG"
+sed -e 's/"fieldValueByName":{"name":"In Progress"}/"fieldValueByName":null/' "$G/items.json" >"$G/items.t" && mv "$G/items.t" "$G/items.json"
+ok "a card with no status" "$(sh "$SC/issue-status.sh" 42 in_review 2>&1)" 'issue 42: In review (board "Roadmap" has no "In Review" status: its card has no status)'
+sed -e 's/"name":"Done"/"name":"in review"/' "$G/items.json" >"$G/items.t" && mv "$G/items.t" "$G/items.json"
+rm -f "$G/card-moves"
+out=$(sh "$SC/issue-status.sh" 42 in_review 2>&1)
+ok "option names compared without case" "$(printf '%s' "$out" | tr '\n' '|') $(cat "$G/card-moves")" "issue 42: In review|issue 42: In Review on Roadmap OPT_DONE"
+cat >"$G/items.json" <<'EOF'
+{"data":{"repository":{"issue":{"projectItems":{"nodes":[
+ {"id":"ITEM_1","fieldValueByName":{"name":"Todo"},"project":{"id":"P_1","title":"Roadmap","field":{"id":"F_1","options":[{"id":"OPT_TODO","name":"Todo"}]}}},
+ {"id":"ITEM_2","fieldValueByName":{"name":"Doing"},"project":{"id":"P_2","title":"Ops","field":{"id":"F_2","options":[{"id":"OPT_DOING","name":"Doing"},{"id":"OPT_REV","name":"In Review"}]}}},
+ {"id":"ITEM_3","fieldValueByName":null,"project":{"id":"P_3","title":"Notes","field":null}}]}}}}}
+EOF
+rm -f "$G/card-moves"
+out=$(sh "$SC/issue-status.sh" 42 in_review 2>&1)
+ok "several boards: one part per board lacking it, then the boards that move" "$(printf '%s' "$out" | tr '\n' '|') $(cat "$G/card-moves")" 'issue 42: In review (board "Roadmap" has no "In Review" status: its card stays in "Todo"; board "Notes" has no "In Review" status: its card has no status)|issue 42: In Review on Ops OPT_REV'
+rm -f "$G/items.json"
+ok "an issue on no board: its status alone" "$(sh "$SC/issue-status.sh" 42 in_review 2>&1)" "issue 42: In review"
+ok "check, with no board: nothing" "$(sh "$SC/project.sh" check 2>&1)" ""
+cat >"$G/boards.json" <<'EOF'
+{"data":{"repository":{"projectsV2":{"nodes":[
+ {"number":3,"title":"Roadmap","field":{"options":[{"name":"Todo"},{"name":"In Progress"},{"name":"Done"}]}},
+ {"number":4,"title":"Ops","field":{"options":[{"name":"todo"},{"name":"In progress"},{"name":"in review"},{"name":"DONE"}]}},
+ {"number":5,"title":"Ideas","field":{"options":[{"name":"Backlog"}]}},
+ {"number":6,"title":"Notes","field":null}]}}}}
+EOF
+ok "check lists the boards that lack a status, with what they lack" "$(sh "$SC/project.sh" check 2>&1 | tr '\n' '|')" 'board 3 "Roadmap" lacks: In Review|board 5 "Ideas" lacks: Todo, In Progress, In Review, Done|board 6 "Notes" has no Status field|'
+ok "asked records the user's answer" "$(sh "$SC/project.sh" asked 3 no 2>&1) $(cat "$R/board-asked.3")" "board 3: the user's answer is recorded (no) no"
+ok "check marks the boards already asked with the answer" "$(sh "$SC/project.sh" check 2>&1 | head -2 | tr '\n' '|')" 'board 3 "Roadmap" lacks: In Review (asked: no)|board 5 "Ideas" lacks: Todo, In Progress, In Review, Done|'
+sh "$SC/project.sh" asked 5 maybe >/dev/null 2>&1; code=$?
+ok "asked takes only yes or no" "$code $([ -f "$R/board-asked.5" ] && echo recorded || echo none)" "2 none"
+cat >"$G/board.json" <<'EOF'
+{"title":"Roadmap","field":{"id":"F_1","options":[{"id":"OPT_TODO","name":"Todo","color":"GREEN","description":"to do"},
+ {"id":"OPT_PROG","name":"In Progress","color":"YELLOW","description":""},{"id":"OPT_DONE","name":"Done","color":"PURPLE","description":"shipped"}]}}
+EOF
+rm -f "$G/add-status-sent"
+out=$(sh "$SC/project.sh" add-status 3 "In Review" 2>&1); code=$?
+ok "add-status adds the option" "$code $out" '0 board 3 "Roadmap": "In Review" added to its Status'
+ok "to the board's Status field" "$(jq -r .variables.f "$G/add-status-sent" 2>/dev/null)" "F_1"
+ok "sending the existing options with their ids, the new one at its place" "$(jq -c .variables.o "$G/add-status-sent" 2>/dev/null)" '[{"id":"OPT_TODO","name":"Todo","color":"GREEN","description":"to do"},{"id":"OPT_PROG","name":"In Progress","color":"YELLOW","description":""},{"name":"In Review","color":"GRAY","description":""},{"id":"OPT_DONE","name":"Done","color":"PURPLE","description":"shipped"}]'
+cat >"$G/board.json" <<'EOF'
+{"title":"Ideas","field":{"id":"F_5","options":[{"id":"OPT_BACK","name":"Backlog","color":"GRAY","description":""},
+ {"id":"OPT_PROG","name":"in progress","color":"YELLOW","description":""},{"id":"OPT_DONE","name":"Done","color":"PURPLE","description":""}]}}
+EOF
+sh "$SC/project.sh" add-status 5 "Todo" >/dev/null 2>&1
+ok "before the first one that comes after it; an option the plugin does not know keeps its place" "$(jq -r '[.variables.o[].name] | join(", ")' "$G/add-status-sent" 2>/dev/null)" "Backlog, Todo, in progress, Done"
+sh "$SC/project.sh" add-status 5 "Blocked" >/dev/null 2>&1
+ok "a status the plugin does not know goes at the end" "$(jq -r '[.variables.o[].name] | join(", ")' "$G/add-status-sent" 2>/dev/null)" "Backlog, in progress, Done, Blocked"
+cat >"$G/board.json" <<'EOF'
+{"title":"Roadmap","field":{"id":"F_1","options":[{"id":"OPT_TODO","name":"Todo","color":"GREEN","description":"to do"},
+ {"id":"OPT_PROG","name":"In Progress","color":"YELLOW","description":""},{"id":"OPT_DONE","name":"Done","color":"PURPLE","description":"shipped"}]}}
+EOF
+rm -f "$G/add-status-sent"
+out=$(sh "$SC/project.sh" add-status 3 "in progress" 2>&1); code=$?
+ok "a status the board has already: said, nothing sent" "$code $out $([ -f "$G/add-status-sent" ] && echo sent || echo none)" '0 board 3 "Roadmap" already has "in progress" none'
+rm -f "$G/boards.json" "$G/board.json" "$R/board-asked.3"
 
 echo "== dispatch.sh: takes are no messages; other machines' agents on the board"
 date +%s >"$S/$TL1/alive"

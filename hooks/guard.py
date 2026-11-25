@@ -11,6 +11,7 @@ Refused:
     gh issue view, list, create, edit, comment and gh pr view, list, diff, comment, whether the repository
     comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
     POST and PATCH on repos/<other>/issues...;
+  - for a tech lead, any gh repo subcommand but view, clone, gitignore and license, on any repository;
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
@@ -34,6 +35,8 @@ SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh"
 # What a tech lead may do on another repository: read its issues and pull requests, write issues and comments.
 GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("issue", "edit"), ("issue", "comment"),
                 ("pr", "view"), ("pr", "list"), ("pr", "diff"), ("pr", "comment")}
+# The gh repo subcommands a tech lead may run, on any repository: they only read, or copy one to read it.
+GH_REPO_READS = {"view", "clone", "gitignore", "license"}
 API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
 # A gh api endpoint: a path or a URL of the API, the repository, then the rest of the path.
@@ -122,7 +125,7 @@ def elsewhere_refused(head, words, assigns):
     # A substitution inside a quoted word, or in backticks, stays in that word: what it runs would ride on the
     # allowed command unseen, so a command carrying one gets no exception.
     allowed = role == "tech-lead" and head == "gh" and not any(re.search(r"\$\(|`|<\(|>\(", w) for w in text)
-    if allowed and tuple(rest[:2]) in GH_ELSEWHERE:
+    if allowed and (tuple(rest[:2]) in GH_ELSEWHERE or (rest[:1] == ["repo"] and rest[1:2] in (["view"], ["clone"]))):
         return None
     if allowed and rest[:1] == ["api"] and not pointed:
         # Its endpoint decides; the repositories named in its fields are data. Every word that starts as an
@@ -271,6 +274,8 @@ for words in segments:
             refuse(f"gh pr {sub[1]} is a developer's work")
         if sub[:2] == ["issue", "develop"]:
             refuse("gh issue develop is a developer's work")
+        if role == "tech-lead" and sub[:1] == ["repo"] and sub[1:2] and sub[1] not in GH_REPO_READS:
+            refuse(f"gh repo {sub[1]} changes a repository; a tech lead only views or clones one")
         continue
 
     if head == "claude" and any(w in ("--bg", "--background", "-p", "--print") for w in words[1:]):

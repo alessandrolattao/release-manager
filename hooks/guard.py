@@ -11,8 +11,9 @@ Refused:
     folder (a local path), inside a quoted string after other text, or in a comment; a local path that holds
     github.com/... is no link);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
-A command inside a command (sh -c, bash -lc, eval, a string echo or printf pipes into a shell or <<< gives it)
-is judged as one of its own; a here-document is data, also into a shell.
+A string that becomes code is judged as a command of its own: sh -c and bash -lc, eval, ssh's remote command,
+what echo, printf or cat <<< prints into a shell (a pipe, a <(...)), a shell's <<< string, what source or .
+reads from a <(...). A here-document is data, also into a shell.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
 """
@@ -41,6 +42,9 @@ ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?/*")
 # The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
 SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
+# The commands that run a string as code, and ssh's options that take a value.
+CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
+SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
 # API rule's.
@@ -123,17 +127,37 @@ def printed(words):
     return " ".join(rest[1:] if rest[:1] == ["--"] else rest).replace("\\n", "\n")
 
 
-def handed_to_shell(words, piped_from=None):
-    """The command text the first shell in a command runs: its -c string (bash -lc too), its <<< string, or
-    what echo, printf or cat <<< pipes into it; None when it runs none of these."""
+def code_of(words, piped_from=None):
+    """The text the first command in these words that runs a string as code runs: a shell's -c string (bash -lc
+    too) or <<< string; what echo, printf or cat <<< prints into a shell, or into source or ., through a pipe or
+    a <(...); eval's words; ssh's remote command. None when none of them runs one."""
     for i, word in enumerate(words):
-        if os.path.basename(word) in SHELLS:
-            rest = words[i + 1:]
-            k = next((k for k, w in enumerate(rest) if SHELL_COMMAND.fullmatch(w) or w == "<<<"), None)
-            if k is not None:
-                return rest[k + 1] if k + 1 < len(rest) else ""
-            return printed(piped_from) if piped_from else None
+        head, rest, code = os.path.basename(word), words[i + 1:], None
+        if head == "eval":
+            code = " ".join(rest)
+        elif head == "ssh":
+            code = remote_command(rest)
+        elif head in CODE_RUNNERS:
+            k = next((k for k, w in enumerate(rest)
+                      if w in ("<<<", "<(") or (head in SHELLS and SHELL_COMMAND.fullmatch(w))), None)
+            if k is None:
+                code = printed(piped_from) if piped_from else None
+            elif rest[k] == "<(":
+                code = printed(rest[k + 1:])
+            else:
+                code = rest[k + 1] if k + 1 < len(rest) else ""
+        if code is not None:
+            return code
     return None
+
+
+def remote_command(args):
+    """ssh's remote command: the words after its options and its host, joined as ssh joins them; None when there
+    is none."""
+    j = 0
+    while j < len(args) and args[j].startswith("-"):
+        j += 2 if len(args[j]) == 2 and args[j][1] in SSH_VALUE_FLAGS else 1
+    return " ".join(args[j + 1:]) if j + 1 < len(args) else None
 
 
 def bare(words):
@@ -146,16 +170,13 @@ def bare(words):
 def api_calls(text):
     """The repositories whose API a shell text may call: every repos/<owner>/<name> in what the shell runs (its
     commands, its substitutions, the strings it hands a shell), but after a folder, inside a quoted string after
-    other text, or in a comment."""
+    other text, or in a comment; a string that becomes code is read as code."""
     _, inners, plain, strings = scan(text)
     found = [repo for inner in inners for repo in api_calls(inner)]
     previous = None
     for words, separator in commands_of(text):
-        for i, word in enumerate(words):
-            if os.path.basename(word) in SHELLS:
-                inner = handed_to_shell(words[i:], previous if piped(separator) else None)
-                found += api_calls(inner) if inner is not None else []
-                break
+        inner = code_of(words, previous if piped(separator) else None)
+        found += api_calls(inner) if inner is not None else []
         previous = words
     return found + [m.group(1) for m in REPOS.finditer(plain) if is_call(plain, m.start(), strings)]
 
@@ -293,13 +314,9 @@ for n, (words, separator) in enumerate(commands):
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
         continue
 
-    # A command inside a command (sh -c '...', bash -lc '...', echo '...' | sh, sh <<< '...', eval ...) is
-    # checked as one of its own.
-    inner = None
-    if head in SHELLS:
-        inner = handed_to_shell(words, commands[n - 1][0] if n and piped(separator) else None)
-    elif head == "eval":
-        inner = " ".join(words[1:])
+    # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...') is
+    # checked as a command of its own.
+    inner = code_of(words, commands[n - 1][0] if n and piped(separator) else None) if head in CODE_RUNNERS else None
     if inner is not None:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
                                 input=f"cd {shlex.quote(where)}\n{inner}", capture_output=True, text=True)

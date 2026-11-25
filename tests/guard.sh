@@ -70,6 +70,17 @@ check allow tech-lead "grep -c push <<< 'git push'"
 check allow tech-lead "bash <<'EOF'
 git log -1
 EOF"
+# Strings that become code are read like sh -c: eval, source or . or a shell on <(...), ssh's remote command.
+check deny tech-lead "eval 'git push origin HEAD'"
+check deny tech-lead "source <(echo 'git push origin HEAD')"
+check deny tech-lead ". <(printf 'git commit -m x\\n')"
+check deny tech-lead "bash <(echo 'git push')"
+check deny spike "bash < <(echo 'git switch main')"
+check deny tech-lead "ssh host 'git push origin HEAD'"
+check deny tech-lead "ssh -p 2222 -o StrictHostKeyChecking=no -l me host 'git commit -m x'"
+check allow tech-lead "ssh host 'git log -1'"
+check allow tech-lead "source <(echo 'export X=1')"
+check allow tech-lead "eval 'git status'"
 check deny tech-lead 'cat <<< hello
 git push'
 # git symbolic-ref only reads with one argument; with two, or --delete, it changes the repository.
@@ -122,6 +133,13 @@ check deny tech-lead "echo 1 | xargs sh -c 'gh api repos/someone/else/issues'"
 check deny tech-lead "echo 'gh api repos/someone/else/issues' | sh"
 check deny tech-lead "echo 'gh api repos/someone/else/issues' | timeout 5 sh"
 check deny tech-lead "sh <<< 'gh api repos/someone/else/issues'"
+check deny tech-lead "eval 'gh api repos/someone/else/issues'"
+check deny tech-lead "command eval 'gh api repos/someone/else/issues'"
+check deny tech-lead "source <(echo 'gh api repos/someone/else/issues')"
+check deny tech-lead "bash <(echo 'gh api repos/someone/else/issues')"
+check deny tech-lead "ssh host 'gh api repos/someone/else/issues'"
+check deny tech-lead "timeout 5 ssh -i key host 'gh api repos/someone/else/issues'"
+check allow tech-lead "ssh host 'gh api repos/test/repo/issues'"
 check allow tech-lead "echo 'gh api repos/test/repo/issues' | sh"
 # gh takes api's own flags before api too.
 check deny tech-lead 'gh -X POST api repos/someone/else/issues -f title=x'

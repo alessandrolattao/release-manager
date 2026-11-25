@@ -72,6 +72,26 @@ check allow tech-lead 'gh api repos/test/repo/issues/3/comments -f body="moved t
 check allow tech-lead "sh $P/scripts/comment.sh 3 'tech lead' --repo someone/else <<'EOF'
 a question
 EOF"
+check allow tech-lead "sh $P/scripts/note.sh 3 --repo someone/else <<'EOF'
+found
+EOF"
+check allow tech-lead "sh $P/scripts/open-issue.sh 'x' @me --repo someone/else <<'EOF'
+what must become true
+EOF"
+check allow tech-lead "sh $P/scripts/tell.sh someone/else info <<'EOF'
+news
+EOF"
+# The plugin's scripts never reach another repository by a link, an API path or GH_REPO: only by their --repo.
+check deny tech-lead "sh $P/scripts/note.sh https://github.com/someone/else/issues/5 <<'EOF'
+## Technical decisions
+EOF"
+check deny tech-lead "sh $P/scripts/comment.sh https://github.com/someone/else/issues/5 'tech lead' <<'EOF'
+x
+EOF"
+check deny tech-lead "sh $P/scripts/ready.sh https://github.com/someone/else/issues/5"
+check deny tech-lead "GH_REPO=someone/else sh $P/scripts/note.sh 5"
+check deny tech-lead "sh $P/scripts/note.sh 5 repos/someone/else/issues/5"
+check deny spike "sh $P/scripts/note.sh https://github.com/someone/else/issues/5"
 check deny tech-lead 'gh pr create -R someone/else --title x --body y'
 check deny tech-lead 'gh pr merge 5 -R someone/else --merge'
 check deny tech-lead 'gh pr -R someone/else merge 5'

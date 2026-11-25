@@ -126,24 +126,39 @@ def api_method(words):
     return (method or ("POST" if fields else "GET")).upper()
 
 
+def elsewhere_named(words, assigns):
+    """The other repositories a command reaches by its words: GH_REPO, which points gh at one before the
+    command or for the next ones (export, declare -x, env); its API paths; its links."""
+    text = assigns + words
+    pointed = [w.split("=", 1)[1] for w in text if w.startswith("GH_REPO=")]
+    pointed = [n for n in pointed if repo_of(n) not in (None, own)]
+    called = [m.group(1) for w in text for m in API_REF.finditer(w) if m.group(1).lower() != own]
+    linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
+    return pointed, called, linked
+
+
+def elsewhere_reason(pointed, called, linked):
+    if pointed:
+        return f"it points gh at {pointed[0]}"
+    if called:
+        return f"it calls the API of {called[0]}"
+    return f"it links {linked[0]}"
+
+
 def elsewhere_refused(head, words, assigns):
     """Why a command aimed at another repository is refused, or None when it is not aimed at one or may be run.
 
     A tech lead may read another repository's issues and pull requests and write issues and comments there;
     everything else stays refused, as for a spike.
     """
-    # GH_REPO points gh at a repository, before the command or set for the next ones (export, declare -x, env).
-    named = [w.split("=", 1)[1] for w in assigns + words if w.startswith("GH_REPO=")]
-    rest = words[1:]
+    pointed, called, linked = elsewhere_named(words, assigns)
+    rest, named = words[1:], []
     if head == "gh":
-        rest, flags = gh_words(rest)
-        named += flags
+        rest, named = gh_words(rest)
     elif any(w in ("-R", "--repo") or w.startswith("--repo=") for w in rest):
-        named += gh_words(rest)[1]
+        named = gh_words(rest)[1]
+    pointed += [n for n in named if repo_of(n) not in (None, own)]
     text = assigns + words
-    pointed = [n for n in named if repo_of(n) not in (None, own)]
-    called = [m.group(1) for w in text for m in API_REF.finditer(w) if m.group(1).lower() != own]
-    linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
     if not (pointed or called or linked):
         return None
     # A substitution inside a quoted word, or in backticks, stays in that word: what it runs would ride on the
@@ -173,11 +188,7 @@ def elsewhere_refused(head, words, assigns):
             return (f"{method} {w} is not for this repository: on {m.group(1)} it reads issues and pull requests "
                     "and writes issues and comments only")
         return None
-    if pointed:
-        return f"it points gh at {pointed[0]}"
-    if called:
-        return f"it calls the API of {called[0]}"
-    return f"it links {linked[0]}"
+    return elsewhere_reason(pointed, called, linked)
 
 
 # Here-documents are data: their bodies go before anything is parsed.
@@ -236,6 +247,11 @@ for words in segments:
     if real.startswith(plugin + os.sep) and real.endswith(".sh"):
         if role == "spike" and os.path.basename(real) in SPIKE_FORBIDDEN_SCRIPTS:
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
+        # Never another repository through them, by a link, an API path or GH_REPO: they would write there as
+        # this repository's session. Their own --repo signs what they write there.
+        named = elsewhere_named(words, assigns)
+        if any(named):
+            refuse(elsewhere_reason(*named))
         continue
 
     # A command inside a command (sh -c '...', eval ...) is checked as one of its own.

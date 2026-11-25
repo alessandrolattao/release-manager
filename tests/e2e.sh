@@ -791,6 +791,7 @@ ok "nobody is left busy" "$(grep -c 'still busy' "$T/update.out")" "0"
 ok "the plugin is updated on the team's account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"
 ok "a live session resumes on the new version" "$(grep -c -- "--bg --resume $TL1 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts: use this path from now on. Your role.s rules may have changed: read [^ ]*/skills/tech-lead/SKILL.md again" "$T/claude.log")" "1"
 ok "it is told its background commands keep running" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -cF 'Then go on from where you were. Commands you started in the background before the restart (a `main-ci.sh --wait`, a spike'"'"'s wait) keep running and their end still reaches you: do not start them again.')" "1"
+ok "and that its subagents may have been stopped, to start again when their hand-back does not come" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -cF 'do not start them again. Subagents you started with the Agent tool before the restart may have been stopped: if a hand-back you wait for does not come, start that subagent again.')" "1"
 ok "with no flags, which would start a copy" "$(grep -- '--resume' "$T/claude.log" | grep -c -- '--name')" "0"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"

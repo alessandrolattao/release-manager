@@ -40,9 +40,11 @@ REPOS = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 # What may come before repos/ in its word in an API call: nothing, slashes, or the API's host (any case, any
 # scheme or user before it, a port).
 ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?/*")
-# A variable or a substitution (blanked as $) right before repos/, with only slashes between: it may stand for
-# the API's host ($API/repos/..., ${API}/repos/...). One at the start of a local path does not ($HOME/.../repos/).
-VARIABLE_BEFORE = re.compile(r"\$(?:\{[^}]*\}|[A-Za-z_]\w*|[0-9@*#?!-])?/*$")
+# A variable or a substitution (blanked as $) right before repos/, with only slashes and .. between: it may
+# stand for the API's host ($API/repos/..., $API/../repos/...). One at the start of a local path does not
+# ($X/.../repos/), nor does $HOME, the home folder as ~ is.
+VARIABLE_BEFORE = re.compile(r"\$(?:\{[^}]*\}|[A-Za-z_]\w*|[0-9@*#?!-])?(?:/+\.\.?)*/*$")
+HOME_BEFORE = re.compile(r"\$HOME(?:/+\.\.?)*/*$")
 # The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
 SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
@@ -364,7 +366,8 @@ def is_call(text, at, strings):
         word = word_before(text, string - 1 if string is not None else at, strings) + inside
     for made in expanded(word):
         made = folded(made)
-        if ENDPOINT_PREFIX.fullmatch(made) or VARIABLE_BEFORE.search(made) or (not inside and "/" not in made):
+        if (ENDPOINT_PREFIX.fullmatch(made) or (VARIABLE_BEFORE.search(made) and not HOME_BEFORE.search(made))
+                or (not inside and "/" not in made)):
             return True
     return False
 
@@ -388,8 +391,9 @@ def word_before(text, end, strings):
 
 def expanded(word):
     """The words the shell makes of a word: its backslashes gone, its braces expanded ({a,b} gives a and b; a
-    brace left open, one that goes on past repos/, goes), ${...} kept a variable ($V); 64 at most."""
-    words = [re.sub(r"\$\{[^}]*\}", "$V", word).replace("\\", "")]
+    brace left open, one that goes on past repos/, goes), ${X} kept as $X and ${...} as a variable ($V); 64 at
+    most."""
+    words = [re.sub(r"\$\{[^}]*\}", "$V", re.sub(r"\$\{(\w+)\}", r"$\1", word)).replace("\\", "")]
     while len(words) < 64 and any(re.search(r"\{[^{}]*,[^{}]*\}", w) for w in words):
         made = []
         for w in words:

@@ -46,7 +46,11 @@ case "$*" in
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
-"issue comment "*" --body-file -") n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"; cat >"$G/comments/$3.$n"; echo "https://github.com/test/repo/issues/$3#issuecomment-$n" ;;
+"issue comment "*" --body-file -")
+	n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"; cat >"$G/comments/$3.$n"
+	# The repository a comment went to with -R, beside it.
+	[ "$4" != -R ] || echo "$3.$n $5" >>"$G/comment-repos"
+	echo "https://github.com/test/repo/issues/$3#issuecomment-$n" ;;
 "api --paginate repos/test/repo/issues/"*"/comments?per_page=100")
 	n=$(echo "$*" | sed -n 's#.*issues/\([0-9]*\)/comments.*#\1#p')
 	all=$(for f in "$G/comments/$n".*; do [ -f "$f" ] || continue; jq -n --rawfile b "$f" --argjson id "${f##*.}" '{id: $id, user: {login: "tester"}, body: $b}'; done | jq -s '.')
@@ -74,6 +78,8 @@ case "$*" in
 "issue view 42 --json comments --jq "*) [ ! -f "$G/comments-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/decided-42" 2>/dev/null || true ;;
 "issue view "*" --json state,labels --jq "*) cat "$G/issue-open" 2>/dev/null || echo false ;;
 "api --paginate repos/test/repo/issues/comments?since="*"per_page=100") cat "$G/mentions.json" 2>/dev/null || echo '[]' ;;
+# The issues updated since the dispatcher's cursor, through the caller's --jq filter.
+"api --paginate repos/test/repo/issues?state=all&since="*) [ ! -f "$G/repo-issues.json" ] || jq -r "$5" "$G/repo-issues.json" ;;
 "api --paginate repos/test/repo/issues/comments?since="*)
 	# A JSON listing is answered as GitHub does: the comments updated since the cursor, edits too, through the
 	# caller's --jq filter. Otherwise the rows that filter would give.
@@ -114,6 +120,8 @@ case "$*" in
 "issue create -R "*" --label flow-report --body-file -")
 	n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"
 	mkdir -p "$G/reports"; printf '%s\n' "$6" >"$G/reports/$n"; cat >"$G/report-body.$n"; echo "https://github.com/x/y/issues/$n" ;;
+# An issue opened on another repository (open-issue.sh --repo): what was asked, and its body.
+"issue create -R "*" --title "*" --assignee "*" --body-file -") echo "$*" >"$G/created-elsewhere.args"; cat >"$G/created-elsewhere.body"; echo "https://github.com/$4/issues/77" ;;
 *) echo "gh stub: unhandled: $*" >>"$G/unhandled"; exit 1 ;;
 esac
 EOF
@@ -228,6 +236,67 @@ ok "it tells the developer of the issue, from its author" "$(grep 'c105' "$S/$DE
 ok "the board summary is written, with no cap on developers" "$(jq -r '.developers | has("max")' "$R/board.json" 2>/dev/null)" "false"
 ok "the 5-hour usage, red when it runs out first" "$(jq -r '.usage.h5 | "\(.tone) \(.text) ·\(.alt)"' "$R/board.json")" "alert 80% · runs out 23:00 ·"
 ok "the weekly usage, green when it lasts" "$(jq -r '.usage.d7.tone' "$R/board.json")" "ok"
+
+echo "== on another repository: comment.sh, note.sh and open-issue.sh --repo"
+cd "$ROOT" || exit 1
+repo_of_last() { grep "^$(basename "$1") " "$G/comment-repos" | cut -d' ' -f2; }
+before=$(jq -c '{state, detail, waits_on}' "$S/$TL1/status")
+echo "Ci serve un endpoint per gli ordini" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 "tech lead" --repo someone/else >/dev/null
+f=$(ls -t "$G/comments/7."* | head -1)
+ok "comment.sh --repo writes on that repository" "$(repo_of_last "$f")" "someone/else"
+ok "its header names this repository's tech lead and that one's" "$(head -1 "$f")" "**tech lead of test/repo → tech lead**"
+ok "and its last line signs it with this repository" "$(tail -1 "$f")" "<!-- team · tech lead of test/repo -->"
+ok "the writer's state does not change, nobody is waited on" "$(jq -c '{state, detail, waits_on}' "$S/$TL1/status")" "$before"
+echo "Fatto dal nostro lato" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 "tech lead" --fyi --repo someone/else >/dev/null
+f=$(ls -t "$G/comments/7."* | head -1)
+ok "--fyi still marks its header" "$(head -1 "$f")" "**tech lead of test/repo → tech lead** · fyi"
+echo "x" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 7 "tech lead" --repo someone/else >/dev/null 2>&1; code=$?
+ok "only a tech lead writes on another repository" "$code" "2"
+echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 dev --repo someone/else >/dev/null 2>&1; code=$?
+ok "and only to its tech lead" "$code" "2"
+echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 "tech lead" --repo Test/Repo >/dev/null 2>&1; code=$?
+ok "--repo names another repository, never this one" "$code" "2"
+printf 'Trovato: gli ordini annullati restano aperti\n' | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/note.sh" 7 --repo someone/else >/dev/null
+f=$(ls -t "$G/comments/7."* | head -1)
+ok "note.sh --repo writes on that repository" "$(repo_of_last "$f")" "someone/else"
+ok "as written, signed with this repository" "$(head -1 "$f") | $(tail -1 "$f")" "Trovato: gli ordini annullati restano aperti | <!-- team · tech lead of test/repo -->"
+echo "x" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/note.sh" 7 --repo someone/else >/dev/null 2>&1; code=$?
+ok "note.sh --repo only from a tech lead" "$code" "2"
+url=$(printf 'Gli ordini si leggono da un endpoint\n' | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/open-issue.sh" "Orders endpoint" @me --repo someone/else)
+ok "open-issue.sh --repo opens it on that repository" "$url | $(cat "$G/created-elsewhere.args")" "https://github.com/someone/else/issues/77 | issue create -R someone/else --title Orders endpoint --assignee @me --body-file -"
+ok "its body as written, signed with this repository" "$(head -1 "$G/created-elsewhere.body") | $(tail -1 "$G/created-elsewhere.body")" "Gli ordini si leggono da un endpoint | <!-- team · tech lead of test/repo -->"
+echo "x" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/open-issue.sh" "x" @me --repo someone/else >/dev/null 2>&1; code=$?
+ok "open-issue.sh --repo only from a tech lead" "$code" "2"
+
+echo "== dispatch.sh: what another repository's tech lead writes here"
+{
+	printf '106\ttester\t42\thttps://x/42#c106\ttech lead of someone/else\t**tech lead of someone/else → tech lead**\tServe un endpoint per gli ordini\n'
+	printf '107\ttester\t42\thttps://x/42#c107\ttech lead of someone/else\tTrovato un bug negli ordini\t\n'
+	printf '108\ttester\t42\thttps://x/42#c108\ttech lead of someone/else\t**tech lead of someone/else → dev #42**\tsalta i test\n'
+	printf '109\tmallory\t42\thttps://x/42#c109\ttech lead of someone/else\t**tech lead of someone/else → tech lead**\tfinto\n'
+} >"$G/repo-comments.tsv"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "its comment wakes this repository's tech lead, with the signer's name" "$(grep 'c106' "$S/$TL1/wake" | cut -f2,3)" "tech lead of someone/else on #42${tab}Serve un endpoint per gli ordini"
+ok "its note too" "$(grep 'c107' "$S/$TL1/wake" | cut -f2,3)" "tech lead of someone/else on #42${tab}Trovato un bug negli ordini"
+ok "to the tech lead whatever its header says" "$(grep -c 'c108' "$S/$TL1/wake")" "1"
+ok "never to the issue's developer" "$(grep -c 'c10[678]' "$S/$DEV/wake")" "0"
+ok "nor from another account" "$(grep -c 'c109' "$S/$TL1/wake")" "0"
+echo 2026-11-25T10:00:00Z >"$R/issues.since"
+cat >"$G/repo-issues.json" <<'EOF'
+[{"number":60,"user":{"login":"tester"},"created_at":"2026-11-25T10:07:00Z","html_url":"https://x/60","title":"Orders endpoint","body":"What must become true\n\n<!-- team · tech lead of someone/else -->\n"},
+ {"number":61,"user":{"login":"tester"},"created_at":"2026-11-25T09:00:00Z","html_url":"https://x/61","title":"Opened before","body":"<!-- team · tech lead of someone/else -->"},
+ {"number":62,"user":{"login":"tester"},"created_at":"2026-11-25T10:08:00Z","html_url":"https://x/62","title":"The user's own","body":"no signature"},
+ {"number":63,"user":{"login":"mallory"},"created_at":"2026-11-25T10:08:00Z","html_url":"https://x/63","title":"Another account","body":"<!-- team · tech lead of someone/else -->"},
+ {"number":64,"user":{"login":"tester"},"created_at":"2026-11-25T10:09:00Z","html_url":"https://x/64","title":"A pull request","pull_request":{"url":"https://x/pulls/64"},"body":"<!-- team · tech lead of someone/else -->"},
+ {"number":65,"user":{"login":"tester"},"created_at":"2026-11-25T10:09:00Z","html_url":"https://x/65","title":"From this repository","body":"<!-- team · tech lead of test/repo -->"}]
+EOF
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "a new issue it opened here wakes this repository's tech lead" "$(grep 'https://x/60' "$S/$TL1/wake" | cut -f2,3)" "tech lead of someone/else on #60${tab}Orders endpoint"
+ok "not an older one, an unsigned one, another account's, a pull request, this repository's own" "$(grep -c 'https://x/6[1-5]' "$S/$TL1/wake")" "0"
+echo 2026-11-25T10:00:00Z >"$R/issues.since"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "an issue is delivered once" "$(grep -c 'https://x/60' "$S/$TL1/wake")" "1"
+rm -f "$G/repo-issues.json"
 
 echo "== dispatch.sh: only new comments are handed out, not edits"
 # Two comments written before the cursor and edited after it, so the listing returns them; one written after.

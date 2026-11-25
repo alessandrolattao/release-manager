@@ -79,8 +79,28 @@ alive() {
 	[ $(($(date +%s) - at)) -le 180 ]
 }
 
-# inbox_dir <owner/name>: the inbox of another repository's tech leads, for what cannot go on an issue.
+# inbox_dir <owner/name>: the inbox of another repository's tech leads, for what belongs on none of its issues.
 inbox_dir() { printf '%s/inbox/%s' "$team_data" "$(printf '%s' "${1:-$repo_full}" | tr '/' '_')"; }
+
+# lower <text>: the text in lower case (owner/name compares without case, as on GitHub).
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# On another repository a tech lead reads and writes issues and comments, never its code (hooks/guard.py).
+# What it writes there is signed with this repository, `<!-- team · tech lead of <this repository> -->`, so
+# that repository's dispatcher wakes its own tech lead with it.
+signer_elsewhere="tech lead of $repo_full"
+# may_write_elsewhere <session-id> <owner/name>: exits 2, saying why, unless the session is a tech lead and
+# the repository is another one. Called as a command, never in $(...): it ends the script.
+may_write_elsewhere() {
+	[ "$(jq -r '.role // ""' "$sessions_dir/$1/status" 2>/dev/null || true)" = tech-lead ] || {
+		echo "only a tech lead writes on another repository: write to your tech lead on the issue (comment.sh <n> \"tech lead\")" >&2
+		exit 2
+	}
+	[ "$(lower "$2")" != "$(lower "$repo_full")" ] || {
+		echo "--repo names another repository: inside $repo_full write without it" >&2
+		exit 2
+	}
+}
 
 # backlog_open: open issues assigned to the user without "ready for development".
 backlog_open() {

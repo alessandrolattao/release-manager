@@ -2,7 +2,8 @@
 # One cycle of the team's dispatcher. dispatcher.sh, a process of its own, runs it every minute; one
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
 #   1. hands each new GitHub comment of the repository (not an edit of an older one) to the session it is
-#      written to;
+#      written to, and what another repository's tech lead writes here (a comment or a new issue, signed
+#      `<!-- team · tech lead of <owner/name> -->`) to this repository's tech lead;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      repository's tech lead;
 #   3. marks dead sessions stuck (red, in the agent list too) and removes finished ones with their worktree;
@@ -63,6 +64,17 @@ open_of() {
 		[ "$(jq -r .state "$sessions_dir/$id/status")" != done ] && echo "$id"
 	done
 }
+# tech_lead_here: the repository's tech lead, the live one, else the last known.
+tech_lead_here() {
+	t=$(live_of tech-lead | head -1)
+	[ -n "$t" ] || t=$(open_of tech-lead | head -1)
+	printf '%s' "$t"
+}
+# from_elsewhere <signer>: true when a signature is another repository's tech lead's ("tech lead of
+# <owner/name>", scripts/repo.sh), not this repository's own.
+from_elsewhere() {
+	case "$1" in "tech lead of "*) [ "$(lower "${1#tech lead of }")" != "$(lower "$repo_full")" ] ;; *) return 1 ;; esac
+}
 
 # 1. GitHub comments to sessions.
 cursor="$repo_dir/comments.since"
@@ -103,7 +115,13 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 			continue
 			;;
 		esac
-		if [ -n "$header" ]; then
+		if from_elsewhere "$signed"; then
+			# Another repository's tech lead (comment.sh or note.sh --repo there): to this repository's tech lead,
+			# whatever its header says.
+			from=$signed
+			to="tech lead"
+			[ -z "$header" ] || text=$second
+		elif [ -n "$header" ]; then
 			from=${header%%"$tab"*}
 			to=${header#*"$tab"}
 			text=$second
@@ -119,11 +137,7 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 		targets=""
 		case "$to" in
 		"@$login") ;;
-		"tech lead"*)
-			# The repository's tech lead: the live one, else the last known.
-			targets=$(live_of tech-lead | head -1)
-			[ -n "$targets" ] || targets=$(open_of tech-lead | head -1)
-			;;
+		"tech lead"*) targets=$(tech_lead_here) ;;
 		"dev #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
 		"(record)") targets="$(open_of dev "$issue") $(open_of qa "$issue")" ;;
 		"")
@@ -145,6 +159,35 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 	tail -n 2000 "$seen" >"$seen.tmp" && mv "$seen.tmp" "$seen"
 else
 	rm -f "$cursor.next"
+fi
+
+# A new issue another repository's tech lead opened here (open-issue.sh --repo there) wakes the tech lead.
+# Its own cursor, so a failed listing of comments or of issues loses neither.
+icursor="$repo_dir/issues.since"
+iseen="$repo_dir/issues.seen"
+touch "$iseen"
+isince=$(cat "$icursor" 2>/dev/null || date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
+date -u +%Y-%m-%dT%H:%M:%SZ >"$icursor.next"
+# Each issue opened since the cursor (pull requests left out): number, author, link, who signed it, title.
+if issues=$(isince=$isince gh api --paginate "repos/$repo_full/issues?state=all&since=$isince&per_page=100" --jq '.[]
+	| select(.pull_request == null and .created_at >= env.isince) | [
+		(.number | tostring), .user.login, .html_url, ([(.body // "") | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"), .title
+	] | map(gsub("[\t\n]"; " ")) | @tsv' 2>/dev/null); then
+	mv "$icursor.next" "$icursor"
+	printf '%s\n' "$issues" | while IFS="$tab" read -r number author link signed title; do
+		[ -n "$number" ] || continue
+		grep -qx "$number" "$iseen" && continue
+		echo "$number" >>"$iseen"
+		# Only the team's own account, as for comments.
+		[ "$author" = "$login" ] || continue
+		from_elsewhere "$signed" || continue
+		for id in $(tech_lead_here); do
+			wake "$id" "$signed on #$number" "$title" "$link"
+		done
+	done
+	tail -n 2000 "$iseen" >"$iseen.tmp" && mv "$iseen.tmp" "$iseen"
+else
+	rm -f "$icursor.next"
 fi
 
 # 2. Questions an agent left in its own chat, which nobody reads, go to the tech lead on the issue.

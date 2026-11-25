@@ -119,9 +119,12 @@ def elsewhere_refused(head, words, assigns):
     linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
     if not (pointed or called or linked):
         return None
-    if role == "tech-lead" and head == "gh" and tuple(rest[:2]) in GH_ELSEWHERE:
+    # A substitution inside a quoted word, or in backticks, stays in that word: what it runs would ride on the
+    # allowed command unseen, so a command carrying one gets no exception.
+    allowed = role == "tech-lead" and head == "gh" and not any(re.search(r"\$\(|`|<\(|>\(", w) for w in text)
+    if allowed and tuple(rest[:2]) in GH_ELSEWHERE:
         return None
-    if role == "tech-lead" and head == "gh" and rest[:1] == ["api"] and not pointed:
+    if allowed and rest[:1] == ["api"] and not pointed:
         # Its endpoint decides; the repositories named in its fields are data. Every word that starts as an
         # endpoint of another repository counts as one, so an unknown option cannot hide the real endpoint.
         method = api_method(rest)

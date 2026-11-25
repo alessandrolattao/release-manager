@@ -101,6 +101,13 @@ check deny tech-lead 'git clone https://github.com/someone/else'
 check deny tech-lead 'git push https://github.com/someone/else HEAD:main'
 check deny tech-lead "cd $S && git push origin HEAD"
 check deny tech-lead "git -C $S commit -am x"
+# What a substitution inside an allowed command runs gets no exception.
+check deny tech-lead 'gh issue comment 3 -R someone/else --body "$(gh api -X PUT repos/someone/else/pulls/5/merge)"'
+check deny tech-lead 'gh issue comment 3 --body "$(gh api -X PUT repos/someone/else/pulls/5/merge)"'
+check deny tech-lead 'gh issue view 3 -R someone/else `gh pr merge 5 -R someone/else`'
+check deny tech-lead 'gh issue create -R someone/else --title x --body-file <(gh api -X PUT repos/someone/else/pulls/5/merge)'
+check deny tech-lead 'gh api repos/someone/else/issues -f body="$(gh api -X PUT repos/someone/else/pulls/5/merge)"'
+check allow tech-lead 'echo $(gh api repos/someone/else/issues/3 --jq .title)'
 # A spike only reads, and still not another repository through GitHub.
 check deny spike 'gh issue view 3 -R someone/else'
 check deny spike 'gh api repos/someone/else/issues'

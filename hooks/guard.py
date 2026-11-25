@@ -35,6 +35,8 @@ SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh"
 # What a tech lead may do on another repository: read its issues and pull requests, write issues and comments.
 GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("issue", "edit"), ("issue", "comment"),
                 ("pr", "view"), ("pr", "list"), ("pr", "diff"), ("pr", "comment")}
+# gh api's short options that take a value: the rest of their word, or the next word.
+GH_API_SHORT_VALUES = set("FHXfpqt")
 # The gh repo subcommands a tech lead may run, on any repository: they only read, or copy one to read it.
 GH_REPO_READS = {"view", "clone", "gitignore", "license"}
 API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
@@ -88,18 +90,27 @@ def gh_words(words):
 
 
 def api_method(words):
-    """The HTTP method of a gh api call: -X / --method, else POST with fields or an input, else GET."""
+    """The HTTP method of a gh api call: -X / --method, else POST with fields or an input, else GET.
+
+    Short options stack as gh reads them: in `-iXPUT` or `-if title=x`, -i takes no value and the next letter
+    takes the rest of the word, or the next word.
+    """
     method, fields = None, False
     for i, w in enumerate(words):
-        if w in ("-X", "--method") and i + 1 < len(words):
-            method = words[i + 1]
-        elif w.startswith("--method="):
-            method = w.split("=", 1)[1]
-        elif w.startswith("-X") and len(w) > 2:
-            method = w[2:]
-        elif (w in ("-f", "-F", "--field", "--raw-field", "--input")
-              or w.startswith(("--field=", "--raw-field=", "--input=", "-f", "-F"))):
-            fields = True
+        if w.startswith("--"):
+            name, _, value = w.partition("=")
+            if name == "--method":
+                method = value or (words[i + 1] if i + 1 < len(words) else "")
+            elif name in ("--field", "--raw-field", "--input"):
+                fields = True
+        elif w.startswith("-") and len(w) > 1:
+            for k, letter in enumerate(w[1:], 2):
+                if letter in GH_API_SHORT_VALUES:
+                    if letter == "X":
+                        method = w[k:] or (words[i + 1] if i + 1 < len(words) else "")
+                    elif letter in "fF":
+                        fields = True
+                    break
     return (method or ("POST" if fields else "GET")).upper()
 
 
@@ -109,7 +120,8 @@ def elsewhere_refused(head, words, assigns):
     A tech lead may read another repository's issues and pull requests and write issues and comments there;
     everything else stays refused, as for a spike.
     """
-    named = [a.split("=", 1)[1] for a in assigns if a.startswith("GH_REPO=")]
+    # GH_REPO points gh at a repository, before the command or set for the next ones (export, declare -x, env).
+    named = [w.split("=", 1)[1] for w in assigns + words if w.startswith("GH_REPO=")]
     rest = words[1:]
     if head == "gh":
         rest, flags = gh_words(rest)

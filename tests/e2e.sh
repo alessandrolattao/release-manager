@@ -73,6 +73,9 @@ case "$*" in
 "issue view 42 --json labels --jq "*) cat "$G/qa-42" 2>/dev/null || echo no ;;
 "issue view 42 --json comments --jq "*) [ ! -f "$G/comments-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/decided-42" 2>/dev/null || true ;;
 "issue view "*" --json state,labels --jq "*) cat "$G/issue-open" 2>/dev/null || echo false ;;
+"issue view "*" --json state --jq .state")
+	[ ! -f "$G/state-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+	if [ -f "$G/closed-$3" ]; then echo CLOSED; else echo OPEN; fi ;;
 "api --paginate repos/test/repo/issues/comments?since="*"per_page=100") cat "$G/mentions.json" 2>/dev/null || echo '[]' ;;
 "api --paginate repos/test/repo/issues/comments?since="*)
 	# A JSON listing is answered as GitHub does: the comments updated since the cursor, edits too, through the
@@ -274,6 +277,57 @@ ok "a finished session is stopped and removed" "$(grep -c 'rm spkjob01' "$T/clau
 ok "its folder goes" "$([ -d "$S/$SPK" ] && echo yes || echo no)" "no"
 ok "a dead session is stuck" "$(st "$DEV2" state)" "stuck"
 ok "and red in the agent list" "$(jq -r .color "$T/config/jobs/deadjob1/state.json")" "red"
+
+echo "== dispatch.sh: a dead agent whose issue is closed goes, a live one stays"
+git -C "$ROOT" branch -q 45-closed
+git -C "$ROOT" push -q origin 45-closed
+git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/45-closed" 45-closed
+DEV45=22222222-0000-0000-0000-000000000045
+QA45=55555555-0000-0000-0000-000000000045
+(cd "$ROOT/.claude/worktrees/45-closed" && sh "$SC/role.sh" "$DEV45" dev 45 45-closed >/dev/null)
+(cd "$ROOT" && sh "$SC/role.sh" "$QA45" qa 45 45-closed >/dev/null)
+# The developer died while working, before done.sh; the QA agent died earlier and is red already.
+echo 1 >"$S/$DEV45/alive"
+echo 1 >"$S/$QA45/alive"
+jq '.state = "stuck" | .detail = "session stopped"' "$S/$QA45/status" >"$S/$QA45/status.t" && mv "$S/$QA45/status.t" "$S/$QA45/status"
+date +%s >"$S/$DEV/alive"
+dev_state=$(st "$DEV" state)
+touch "$G/closed-45" "$G/closed-42"
+: >"$T/claude.log"
+cat >"$T/agents.json" <<EOF
+[{"id":"closjob1","sessionId":"$DEV45","status":null,"state":"failed"},{"id":"closjob2","sessionId":"$QA45","status":null,"state":"failed"},
+ {"id":"livejob1","sessionId":"$DEV","status":null,"state":"working"},{"id":"deadjob1","sessionId":"$DEV2","status":null,"state":"blocked"}]
+EOF
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "a dead developer whose issue is closed is stopped and removed in one cycle" "$(grep -c -x -e 'stop closjob1' -e 'rm closjob1' "$T/claude.log")" "2"
+ok "its folder goes" "$([ -d "$S/$DEV45" ] && echo yes || echo no)" "no"
+ok "with its clean worktree and its merged branch" "$([ -d "$ROOT/.claude/worktrees/45-closed" ] && echo yes || echo no) $(git -C "$ROOT" branch --list 45-closed | wc -l | tr -d ' ')" "no 0"
+ok "a dead QA agent, red already, whose issue is closed goes too" "$(grep -c -x 'rm closjob2' "$T/claude.log") $([ -d "$S/$QA45" ] && echo yes || echo no)" "1 no"
+ok "a live developer whose issue is closed is left as it was" "$(grep -c 'livejob1' "$T/claude.log") $(st "$DEV" state)" "0 $dev_state"
+ok "a dead developer whose issue is open stays red" "$(grep -c 'deadjob1' "$T/claude.log") $(st "$DEV2" state) $(jq -r .color "$T/config/jobs/deadjob1/state.json")" "0 stuck red"
+touch "$G/closed-43" "$G/state-broken"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "a dead developer whose issue cannot be read stays red" "$(grep -c 'deadjob1' "$T/claude.log") $(st "$DEV2" state)" "0 stuck"
+rm -f "$G/closed-42" "$G/closed-43" "$G/closed-45" "$G/state-broken"
+
+echo "== dispatch.sh: a developer that ran done.sh goes after 2 minutes, with its worktree and branch"
+git -C "$ROOT" branch -q 60-done
+git -C "$ROOT" push -q origin 60-done
+git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/60-done" 60-done
+DEV60=22222222-0000-0000-0000-000000000060
+(cd "$ROOT/.claude/worktrees/60-done" && sh "$SC/role.sh" "$DEV60" dev 60 60-done >/dev/null)
+CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null
+date +%s >"$S/$DEV60/alive"
+: >"$T/claude.log"
+cat >"$T/agents.json" <<EOF
+[{"id":"donejob1","sessionId":"$DEV60","status":"idle","state":"done"},{"id":"deadjob1","sessionId":"$DEV2","status":null,"state":"blocked"}]
+EOF
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "within 2 minutes of done.sh it stays, to end its turn" "$(grep -c 'donejob1' "$T/claude.log") $([ -d "$S/$DEV60" ] && echo yes || echo no)" "0 yes"
+jq ".since = $(($(date +%s) - 121))" "$S/$DEV60/status" >"$S/$DEV60/status.t" && mv "$S/$DEV60/status.t" "$S/$DEV60/status"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "after 2 minutes it is stopped and removed" "$(grep -c -x -e 'stop donejob1' -e 'rm donejob1' "$T/claude.log") $([ -d "$S/$DEV60" ] && echo yes || echo no)" "2 no"
+ok "with its clean worktree and its merged branch" "$([ -d "$ROOT/.claude/worktrees/60-done" ] && echo yes || echo no) $(git -C "$ROOT" branch --list 60-done | wc -l | tr -d ' ')" "no 0"
 
 echo "== resume-agents.sh: dead agents come back, stopped ones stay"
 echo true >"$G/issue-open"

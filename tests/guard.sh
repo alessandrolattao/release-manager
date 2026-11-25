@@ -54,6 +54,11 @@ check allow tech-lead "sh $P/scripts/start-dev.sh 12"
 check deny tech-lead "sh -c 'git push origin HEAD'"
 check deny tech-lead 'eval git commit -m x'
 check allow tech-lead "bash -c 'git log --oneline -3'"
+# A cluster holding c (bash -lc, sh -ec) is sh -c too.
+check deny tech-lead "bash -lc 'git push origin HEAD'"
+check deny spike "sh -ec 'git commit -m x'"
+check deny tech-lead "bash -lc 'gh api repos/someone/else/issues'"
+check allow tech-lead "bash -lc 'git log --oneline -3'"
 check deny tech-lead 'cat <<< hello
 git push'
 # git symbolic-ref only reads with one argument; with two, or --delete, it changes the repository.

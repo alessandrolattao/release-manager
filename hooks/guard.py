@@ -11,6 +11,7 @@ Refused:
     building inside it, its API: repos/<other> in the words of gh api or in a curl or wget URL to api.github.com,
     whatever the method; a local path that holds repos/... or github.com/... is no call and no link);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
+A command inside a command (sh -c, bash -lc, eval) is judged as one of its own.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
 """
@@ -230,11 +231,13 @@ for words in segments:
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
         continue
 
-    # A command inside a command (sh -c '...', eval ...) is checked as one of its own.
+    # A command inside a command (sh -c '...', bash -lc '...', eval ...) is checked as one of its own.
     inner = None
-    if head in ("sh", "bash", "zsh", "dash") and "-c" in words[1:]:
-        k = words.index("-c")
-        inner = words[k + 1] if k + 1 < len(words) else ""
+    if head in ("sh", "bash", "zsh", "dash"):
+        # -c alone or in a cluster: bash -lc, sh -ec.
+        k = next((k for k, w in enumerate(words) if k and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w)), None)
+        if k is not None:
+            inner = words[k + 1] if k + 1 < len(words) else ""
     elif head == "eval":
         inner = " ".join(words[1:])
     if inner is not None:

@@ -27,9 +27,13 @@ function folder(on: On, seed: Record<string, string>, inbox: string[] = []): Map
   return files
 }
 
+// How a process the module runs ends: its exit status and what it wrote to standard error.
+type Ran = { exitCode: number; stderr: string }
+
 // What the engine answers beneath the plugins at the start of a session. The processes the module runs (a
-// tech lead starting its dispatcher) are recorded, their command lines joined by spaces, and succeed.
-function engine(on: On, logs: string[] = [], published = '9.9.9', toasts: string[] = []): string[] {
+// tech lead starting its dispatcher, a lookup of a comment on GitHub) are recorded, their command lines
+// joined by spaces, and succeed unless `ran` says otherwise for that command line.
+function engine(on: On, logs: string[] = [], published = '9.9.9', toasts: string[] = [], ran: (run: string) => Ran | undefined = () => undefined): string[] {
   const runs: string[] = []
   on('session.start', () => ({ cwd: '/repo' }))
   on('ui.log', (_$, e) => {
@@ -48,11 +52,31 @@ function engine(on: On, logs: string[] = [], published = '9.9.9', toasts: string
   // The version published on the plugin's repository: the one running.
   on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: 'team', version: published }) } }))
   on('process.run', (_$, e) => {
-    runs.push(e.argv.join(' '))
-    return { value: { exitCode: 0, stdout: 'the dispatcher runs', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const run = e.argv.join(' ')
+    runs.push(run)
+    const { exitCode, stderr } = ran(run) ?? { exitCode: 0, stderr: '' }
+    return { value: { exitCode, stdout: exitCode === 0 ? 'the dispatcher runs' : '', stderr, isStdoutTruncated: false, isStderrTruncated: false } }
   })
   return runs
 }
+
+// GitHub as gh answers a lookup of a comment (`gh api repos/acme/shop/issues/comments/<id> --silent`): 404 for
+// the ids deleted, the error given for the ids failing otherwise, nothing for the rest, which exist.
+function github(deleted: string[], failing: Record<string, string> = {}): (run: string) => Ran | undefined {
+  return run => {
+    const id = /^gh api repos\/acme\/shop\/issues\/comments\/(\d+) --silent$/.exec(run)?.[1]
+    if (id === undefined) {
+      return undefined
+    }
+    if (deleted.includes(id)) {
+      return { exitCode: 1, stderr: 'gh: Not Found (HTTP 404)\n' }
+    }
+    return failing[id] === undefined ? undefined : { exitCode: 1, stderr: failing[id] }
+  }
+}
+
+// A comment's link as dispatch.sh writes it, on an issue or on a pull request of acme/shop.
+const link = (id: number, on = 'issues/42') => `https://github.com/acme/shop/${on}#issuecomment-${id}`
 
 function prompts(on: On): string[] {
   const seen: string[] = []
@@ -340,6 +364,125 @@ test('a tech lead waiting in its chat is left alone for the user\'s comment it a
   await clock.advance(10000)
   expect(seen).toEqual([])
   expect(statusOf(files).state).toBe('you')
+})
+
+// The lookups of comments on GitHub among the processes the module ran, in order.
+const lookups = (runs: string[]) => runs.filter(run => run.startsWith('gh api repos/acme/shop/issues/comments/'))
+
+test('a queued wake whose comment was deleted is not delivered', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ role: 'dev', issue: 42, state: 'others', detail: 'waits for tech lead: which table?', waits_on: 'tech lead' }),
+    wake: `${at}\ttech lead on #42\tUsa la tabella users\t${link(101)}\n`,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  const runs = engine(on, logs, '9.9.9', [], github(['101']))
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([])
+  expect(files.get('wake-read')).toBe('1\n')
+  expect(lookups(runs)).toEqual(['gh api repos/acme/shop/issues/comments/101 --silent'])
+  // Nothing reached it: it still waits.
+  expect(statusOf(files).waits_on).toBe('tech lead')
+})
+
+test('a queued wake a developer already answered on its thread is not delivered, and GitHub is not asked', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ role: 'dev', issue: 42, state: 'working', detail: 'at work' }),
+    wake: [
+      `${at}\ttech lead on #42\tUsa la tabella users\t${link(101)}`,
+      `${at + 40}\tqa #42 on #42\tLa pagina non carica\t${link(102, 'pull/50')}`,
+      '',
+    ].join('\n'),
+    commented: [
+      // A note on the thread answers the tech lead's comment before it.
+      `${at + 30}\t42\t`,
+      // A comment to the tech lead answers the QA agent's too: a developer's answer is anything it wrote after.
+      `${at + 50}\t42\ttech lead`,
+      '',
+    ].join('\n'),
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  const runs = engine(on, logs, '9.9.9', [], github([]))
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([])
+  expect(files.get('wake-read')).toBe('2\n')
+  expect(lookups(runs)).toEqual([])
+})
+
+test('a queued wake with another comment left is delivered with that one only', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ role: 'dev', issue: 42, state: 'working', detail: 'at work' }),
+    wake: [
+      `${at + 20}\ttech lead on #42\tcopia cancellata\t${link(101)}`,
+      `${at}\ttech lead on #42\tgià risposto\t${link(102)}`,
+      `${at + 20}\ttech lead on #42\tUsa la tabella users\t${link(103)}`,
+      // GitHub failing otherwise tells nothing: the comment stays.
+      `${at + 20}\tqa #42 on #42\tLa pagina non carica\t${link(104, 'pull/50')}`,
+      `${at + 30}\tcheckout\tthe main checkout is free: take it now with checkout.sh take\t`,
+      '',
+    ].join('\n'),
+    commented: `${at + 10}\t42\t\n`,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  const runs = engine(on, logs, '9.9.9', [], github(['101'], { '104': 'gh: Bad Gateway (HTTP 502)\n' }))
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([
+    `for you on GitHub: tech lead on #42: Usa la tabella users (${link(103)}); qa #42 on #42: La pagina non carica (${link(104, 'pull/50')}); checkout: the main checkout is free: take it now with checkout.sh take`,
+  ])
+  expect(files.get('wake-read')).toBe('5\n')
+  // The answered comment is never looked up; each other comment once.
+  expect([...lookups(runs)].sort()).toEqual([101, 103, 104].map(id => `gh api repos/acme/shop/issues/comments/${id} --silent`))
+})
+
+test('a tech lead waiting in its chat is left alone for the user\'s deleted comment, asked about once', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'you', detail: 'Come lo chiamiamo?' }),
+    wake: [`${at}\tdev #42 on #42\tQuale tabella?\t${link(201)}`, `${at + 30}\tthe user on #44\tchiamalo pippo\t${link(202, 'issues/44')}`, ''].join('\n'),
+    'dispatcher.alive': String(NOW / 1000),
+    'plugin.json': MANIFEST,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  const runs = engine(on, logs, '9.9.9', [], github(['202']))
+
+  await $.session.start(START)
+  await clock.advance(20000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([])
+  expect(statusOf(files).state).toBe('you')
+  expect(files.has('wake-read')).toBe(false)
+  expect([...lookups(runs)].sort()).toEqual([201, 202].map(id => `gh api repos/acme/shop/issues/comments/${id} --silent`))
 })
 
 test('the user writing to a team session ends its wait; the plugin\'s own prompts do not', async ($, on) => {

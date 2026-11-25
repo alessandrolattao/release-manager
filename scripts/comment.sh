@@ -22,7 +22,7 @@
 #                state does not change, as with --fyi: the answer comes on a repository this one's dispatcher
 #                does not read.
 # The session's `commented` records it (session-dir.sh commented_on): a wake for a comment written to it
-# before, by the one it writes to or by the user, is not delivered.
+# before on that thread is not delivered; in a tech lead, only one by the one it writes to or by the user.
 # Prints the comment's link.
 set -eu
 
@@ -95,7 +95,8 @@ marker=""
 link=$(printf '**%s → %s**%s\n\n%s\n' "$from" "$address" "$marker" "$body" |
 	rest_body "repos/$repo_full/issues/$target/comments" --jq .html_url)
 echo "$link"
-# Written on the thread, to them: a wake for what they wrote before it is not delivered.
+# Written on the thread, to them: a wake for what was written to the session there before it is not delivered
+# (in a tech lead, for what they or the user wrote).
 commented_on "$me" "$issue" "$address"
 
 first=$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1)

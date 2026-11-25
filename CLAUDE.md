@@ -21,7 +21,17 @@ Run these from the checkout's root, and report their results in the pull request
 
 ## Versioning
 
-Every pull request bumps `version` in `.claude-plugin/plugin.json` to the next patch version over the default branch's, and is titled `<version>: <what it changes>`. When the default branch moved, merge it into the branch (this repository merges: no rebase, no force push) and take the next free number; check the default branch's version again right before `merge.sh`.
+Except a release's pull request (see Releases), a pull request never changes `version` in `.claude-plugin/plugin.json`, nor `.claude-plugin/marketplace.json`, and its title carries no version. When the default branch moved, merge it into the branch (this repository merges: no rebase, no force push).
+
+## Releases
+
+For the tech lead and the developers of this repository.
+
+- The user decides when to release, with the tech lead. The tech lead proposes the number (patch for fixes only, minor when something new is in) with the list of pull requests merged since the last `v*` tag; on the user's yes, it prepares a ready issue `Release v<version>` with that list as its decisions.
+- Its developer opens one pull request, titled `Release v<version>` like its issue, that sets `version` in `.claude-plugin/plugin.json` to `<version>`, and the marketplace's plugin entry in `.claude-plugin/marketplace.json` to `"source": { "source": "github", "repo": "alessandrolattao/team", "ref": "v<version>" }`.
+- After the decision review passes, and before `merge.sh`, the developer tags the pull request's head `v<version>` and pushes the tag, so the tag exists before the marketplace on the default branch names it. Then it merges, and creates the GitHub release (`gh release create v<version>`) with the list of merged pull requests as its notes.
+- Until the first release the marketplace keeps `"source": "./"`; the first release switches it to the tag.
+- The board's update check reads `version` on the default branch, which changes only with a release.
 
 ## The repository is public
 

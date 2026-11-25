@@ -141,6 +141,8 @@ cd "<this repository's main checkout>" && sh "${CLAUDE_PLUGIN_ROOT}/scripts/tell
 EOF
 ```
 
+A check you set up for a piece of work (a batch of issues, a deploy, a pull request, new reports while the user is away) says in its text what work it serves and when it ends. Record it in your notes (`~/.local/share/team/notes/<owner>_<repo>/`), one line: the check's id and name, the work it serves, when it ends; so a restarted tech lead still removes it. As soon as that work is over, remove the check (`remove <check id>`, as the `pulse` skill says), take its line out of your notes, and tell the user in one line. A check the user asked to keep, with no end, stays.
+
 ## Problems of the plugin itself
 
 Whenever the plugin itself does what it should not or fails to do what it should (a wake for nothing or for your own words, a wrong state or color, a script that fails or answers wrongly, a session left stuck or not resumed, a rule that does not fit, anything you have to work around), report it on the plugin's repository at once, the first time, before you go on: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/report.sh" "<title, in English>" <<'EOF'` … `EOF`. Even when it looks harmless or you can work around it: a "false alarm" of the plugin is a problem of the plugin, and telling the user is not reporting it. An open report with the same title gets a comment, so reporting again costs nothing. That repository is public: describe the plugin only, never this project, its code, its names or what the user said.

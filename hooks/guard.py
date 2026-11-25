@@ -45,6 +45,9 @@ ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?/*")
 # ($X/.../repos/), nor does $HOME, the home folder as ~ is.
 VARIABLE_BEFORE = re.compile(r"\$(?:\{[^}]*\}|[A-Za-z_]\w*|[0-9@*#?!-])?(?:/+\.\.?)*/*$")
 HOME_BEFORE = re.compile(r"\$HOME(?:/+\.\.?)*/*$")
+# A command that sets HOME (HOME=..., export HOME, read HOME, printf -v HOME): then ~ and $HOME are no home folder.
+HOME_SET = re.compile(r"(?<![\w$])HOME\+?=|\b(?:export|declare|typeset|readonly|local|read|mapfile|readarray)\b[^;&|\n]*\bHOME\b"
+                      r"|-v\s*HOME\b")
 # The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
 SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
@@ -364,10 +367,11 @@ def is_call(text, at, strings):
         word = inside.lstrip()
     else:
         word = word_before(text, string - 1 if string is not None else at, strings) + inside
+    home_set = bool(HOME_SET.search(command))
     for made in expanded(word):
-        made = folded(made)
-        if (ENDPOINT_PREFIX.fullmatch(made) or (VARIABLE_BEFORE.search(made) and not HOME_BEFORE.search(made))
-                or (not inside and "/" not in made)):
+        made = folded(re.sub(r"^~(?=/|$)", "$HOME", made) if home_set else made)
+        home = HOME_BEFORE.search(made) and not home_set
+        if ENDPOINT_PREFIX.fullmatch(made) or (VARIABLE_BEFORE.search(made) and not home) or (not inside and "/" not in made):
             return True
     return False
 

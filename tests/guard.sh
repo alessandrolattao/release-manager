@@ -345,6 +345,13 @@ check allow tech-lead 'cat $HOME/repos/a/b'
 check deny tech-lead 'curl -s "$API/../repos/someone/else/issues"'
 check deny tech-lead 'curl -s $API/../../repos/someone/else/issues'
 check deny tech-lead 'curl -s ${API}/../repos/someone/else/issues'
+# ~ and $HOME are the home folder only while the command sets no HOME of its own.
+check deny tech-lead 'HOME=https://api.github.com; curl -s $HOME/repos/someone/else/issues'
+check deny tech-lead 'export HOME=https://api.github.com; curl -s ~/repos/someone/else/issues'
+check deny tech-lead 'HOME=https://api.github.com/x; curl -s "$HOME/../repos/someone/else/issues"'
+check deny tech-lead "HOME=https://api.github.com bash -c 'curl -s ~/repos/someone/else/issues'"
+check deny tech-lead 'read -r HOME <<< https://api.github.com; curl -s ~/repos/someone/else/issues'
+check allow tech-lead 'HOME=/tmp/x; tail -1 ~/.local/state/team/repos/someone_else/dispatcher.log'
 # Only spaces before repos/ in a quoted string are no other text: it still starts with the endpoint.
 check deny tech-lead "echo ' repos/someone/else/issues' | xargs gh api"
 check deny tech-lead "R=' repos/someone/else/issues'; gh api \$R"

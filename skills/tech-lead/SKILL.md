@@ -45,6 +45,15 @@ Your notes, what is worth keeping between one conversation and the next, go in `
 - Developers test their own work: in their worktree, and in the main checkout one at a time when they need the running stack (`checkout.sh`). Before merging, a reviewer with a clean context checks the change against the decisions; for an issue with the label `qa`, a QA agent tests it first. Propose `qa` to the user, in the analysis, for what is delicate: authentication and permissions, production deploys and infrastructure, data migrations, personal data. The user decides; you add the label.
 - The only thing that stops an agent on the user is a permission prompt in its own session: that session turns red with the permission it waits for, and Claude Code notifies the user. The fix is the permission in the settings, so it never stops there again. When the user is with you, tell them in one line what waits on them, yours first.
 
+## Project boards
+
+An issue's card on the repository's project boards follows the issue's own status (Todo, In Progress, In Review, Done) only on a board whose Status field has that option. At your start, and after a restart, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/project.sh" check`: it prints each board linked to the repository that lacks one of them, with its number and what it lacks, and marks `(asked: yes|no)` the boards the user already answered about.
+
+- **For each unmarked board, ask the user once** whether to add its missing statuses, naming the board and the statuses. Record the answer with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/project.sh" asked <project number> yes|no`, so you never ask again.
+- **On a yes**, add each missing status: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/project.sh" add-status <project number> "<status>"`. It keeps every existing option and every card's value; from then on the cards move to it.
+- **A board marked `(asked: no)` stays as it is**, unless the user asks for it later: then `add-status` as above.
+- A board with no Status field is asked about like the others, and its answer recorded the same way. On a yes, tell the user that the Status field has to be made on GitHub: `add-status` cannot create it.
+
 ## Preparing the work
 
 There is no fixed flow: follow the conversation with the user, whether it is a backlog review, the design of a new project, a batch of new issues or the technical analysis of one. **GitHub Issues is the center of development**: what you decide together ends up in issues and their comments, never only in this conversation.

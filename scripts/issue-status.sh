@@ -3,6 +3,8 @@
 # issue is on in line with it, when the board has the matching option.
 #   issue-status.sh <issue> todo|in_progress|in_review
 # todo: Todo (Todo on boards); in_progress: In progress (In Progress); in_review: In review (In Review).
+# A board that lacks the option is named on the same line, with the status its card stays in:
+#   issue 42: In review (board "Roadmap" has no "In Review" status: its card stays in "In Progress")
 set -eu
 
 issue=${1:?issue number}
@@ -41,8 +43,11 @@ issue_id=$(gh api graphql -f query='query($o: String!, $n: String!, $i: Int!) { 
 # shellcheck disable=SC2016
 gh api graphql -f query='mutation($i: ID!, $s: ID!) { setIssueStatus(input: {issueId: $i, statusId: $s}) {
 	issue { number } } }' -F i="$issue_id" -F s="$status_id" >/dev/null
-echo "issue $issue: $name"
-sh "$here/project.sh" "$issue" "$board" 2>/dev/null || true
+moves=$(sh "$here/project.sh" "$issue" "$board" 2>/dev/null) || true
+# The boards that lack the option, one part each, inside the parentheses of the same line.
+lacks=$(printf '%s\n' "$moves" | grep '^board "' | awk 'NR > 1 { printf "; " } { printf "%s", $0 }') || true
+echo "issue $issue: $name${lacks:+ ($lacks)}"
+printf '%s\n' "$moves" | grep -v -e '^board "' -e '^$' || true
 # The developer and QA agent of the issue on this machine say the new stage in their names.
 for id in $(sessions_of dev "$issue") $(sessions_of qa "$issue"); do
 	f="$sessions_dir/$id/status"

@@ -17,6 +17,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 # It runs from any folder, so the session comes from session-dir.sh, not repo.sh (which needs a repository).
 # shellcheck source=scripts/session-dir.sh
 . "$here/session-dir.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "the report comes on stdin" >&2
@@ -42,9 +44,9 @@ same=$(gh api "repos/$plugin/issues?labels=flow-report&state=open&per_page=100" 
 	jq -r --arg t "$title" '.[] | select(.pull_request | not) | select((.title | ascii_downcase) == ($t | ascii_downcase)) | .number' 2>/dev/null | head -1 || true)
 note=$(printf '%s\n\n_Reported by a %s session, plugin %s._\n\n<!-- team · %s -->\n' "$body" "$role" "$version" "$from")
 if [ -n "$same" ]; then
-	printf '%s\n' "$note" | gh issue comment "$same" -R "$plugin" --body-file -
+	printf '%s\n' "$note" | rest_body "repos/$plugin/issues/$same/comments" --jq .html_url
 	exit 0
 fi
 gh label list -R "$plugin" --limit 200 --json name --jq '.[].name' | grep -qx flow-report ||
-	gh label create flow-report -R "$plugin" --description "A problem a session met in the plugin's flow" >/dev/null
-printf '%s\n' "$note" | gh issue create -R "$plugin" --title "$title" --label flow-report --body-file -
+	rest "repos/$plugin/labels" -f name=flow-report -f color=d73a4a -f description="A problem a session met in the plugin's flow" >/dev/null
+printf '%s\n' "$note" | rest_body "repos/$plugin/issues" -f title="$title" -f "labels[]=flow-report" --jq .html_url

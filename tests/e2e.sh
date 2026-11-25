@@ -32,21 +32,56 @@ mkdir -p "$T/state" "$T/data" "$T/tmp" "$T/bin" "$T/gh/comments" "$T/config/jobs
 for v in $(env | grep -o -E '^CLAUDE[A-Z_]*'); do unset "$v"; done
 # Nothing of the machine's own: its home, git configuration and time zone stay out.
 export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" GIT_CONFIG_NOSYSTEM=1 TZ=UTC
-export XDG_STATE_HOME="$T/state" XDG_DATA_HOME="$T/data" TMPDIR="$T/tmp" CLAUDE_PLUGIN_ROOT="$W" PATH="$T/bin:$PATH" G="$T/gh" CLAUDE_CONFIG_DIR="$T/config" TT="$T" CLAIM_WAIT=0
+export XDG_STATE_HOME="$T/state" XDG_DATA_HOME="$T/data" TMPDIR="$T/tmp" CLAUDE_PLUGIN_ROOT="$W" PATH="$T/bin:$PATH" G="$T/gh" CLAUDE_CONFIG_DIR="$T/config" TT="$T" CLAIM_WAIT=0 REST_WAITS="0 0"
 SC="$W/scripts"
 pass=0 fail=0
 ok() { if [ "$2" = "$3" ]; then pass=$((pass + 1)); echo "ok   $1"; else fail=$((fail + 1)); echo "FAIL $1: wanted [$3] got [$2]"; fi; }
 st() { jq -r ".$2 // \"\"" "$S/$1/status" 2>/dev/null; }
 
-# A fake GitHub.
+# A fake GitHub. The scripts write through its REST API (gh api with fields, or -X DELETE): each write is
+# logged in rest.log, and fails while fail-next has lines, its first line being the error gh prints for
+# GitHub's answer.
 cat >"$T/bin/gh" <<'EOF'
 #!/bin/sh
+if [ "$1" = api ] && [ "$2" != graphql ] && case " $* " in *" -f "* | *" -F "* | *" -X DELETE "*) true ;; *) false ;; esac; then
+	echo "$*" >>"$G/rest.log"
+	if [ -s "$G/fail-next" ]; then
+		head -1 "$G/fail-next" >&2
+		tail -n +2 "$G/fail-next" >"$G/fail-next.t"
+		mv "$G/fail-next.t" "$G/fail-next"
+		exit 1
+	fi
+fi
+# F=<name> field "$@": the value of the -f or -F field <name>; for -F body=@<file>, "@<file>".
+field() { for a in "$@"; do case "$a" in "$F="*) printf '%s\n' "${a#"$F="}" ;; esac; done; }
+# answer <json>: GitHub's answer, through the caller's --jq filter when it gives one.
+answer() {
+	q=$(prev=""; for a in "$@"; do [ "$prev" != --jq ] || printf '%s' "$a"; prev=$a; done)
+	if [ -n "$q" ]; then printf '%s' "$J" | jq -r "$q"; else printf '%s\n' "$J"; fi
+}
+next_id() { n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"; echo "$n"; }
 case "$*" in
 "repo view --json nameWithOwner --jq .nameWithOwner") echo test/repo ;;
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
-"issue comment "*" --body-file -") n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"; cat >"$G/comments/$3.$n"; echo "https://github.com/test/repo/issues/$3#issuecomment-$n" ;;
+"api repos/"*"/issues/"*"/comments "*)
+	n=$(echo "$2" | sed -n 's#.*/issues/\([0-9]*\)/comments$#\1#p') id=$(next_id)
+	cat "$(F=body field "$@" | sed 's/^@//')" >"$G/comments/$n.$id"
+	J=$(jq -n --arg u "https://github.com/test/repo/issues/$n#issuecomment-$id" '{html_url: $u}') answer "$@" ;;
+"api repos/"*"/issues/"*"/labels "*) echo "$(echo "$2" | sed -n 's#.*/issues/\([0-9]*\)/labels$#\1#p') $(F='labels[]' field "$@")" >>"$G/labels-added" ;;
+"api repos/"*"/labels "*) echo "$(F=name field "$@") $(F=color field "$@")" >>"$G/labels-created" ;;
+# Removing a label the issue does not carry: GitHub answers 404.
+"api -X DELETE repos/"*"/issues/"*"/labels/"*)
+	l="$(echo "$4" | sed -n 's#.*/issues/\([0-9]*\)/labels/.*#\1#p') $(printf '%s' "${4##*/}" | sed 's/%20/ /g')"
+	grep -qxF "$l" "$G/labels-added" 2>/dev/null || { echo "gh: Label does not exist (HTTP 404)" >&2; exit 1; }
+	grep -vxF "$l" "$G/labels-added" >"$G/labels-added.t"; mv "$G/labels-added.t" "$G/labels-added"; echo '[]' ;;
+# A new issue: its title and body in issues/<n>, its labels and assignees in issues/<n>.meta.
+"api repos/"*"/issues "*)
+	n=$(next_id) r=$(echo "$2" | cut -d/ -f2,3); mkdir -p "$G/issues"
+	F=title field "$@" >"$G/issues/$n.title"; cat "$(F=body field "$@" | sed 's/^@//')" >"$G/issues/$n.body"
+	echo "repo=$r labels=$(F='labels[]' field "$@") assignees=$(F='assignees[]' field "$@")" >"$G/issues/$n.meta"
+	J=$(jq -n --arg u "https://github.com/$r/issues/$n" '{html_url: $u}') answer "$@" ;;
 "api --paginate repos/test/repo/issues/"*"/comments?per_page=100")
 	n=$(echo "$*" | sed -n 's#.*issues/\([0-9]*\)/comments.*#\1#p')
 	all=$(for f in "$G/comments/$n".*; do [ -f "$f" ] || continue; jq -n --rawfile b "$f" --argjson id "${f##*.}" '{id: $id, user: {login: "tester"}, body: $b}'; done | jq -s '.')
@@ -75,7 +110,6 @@ case "$*" in
 	echo "${4#--} $6" >"$G/merged-60" ;;
 "api repos/test/repo --jq "*) cat "$G/merge-methods" 2>/dev/null || echo "merge rebase squash" ;;
 "label list --limit 200 --json name --jq .[].name") echo question ;;
-"issue edit "*" --add-label question") echo "$3" >>"$G/question-labels" ;;
 "issue view 42 --json labels --jq "*) cat "$G/qa-42" 2>/dev/null || echo no ;;
 "issue view 42 --json comments --jq "*) [ ! -f "$G/comments-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/decided-42" 2>/dev/null || true ;;
 "issue view "*" --json state,labels --jq "*) cat "$G/issue-open" 2>/dev/null || echo false ;;
@@ -115,14 +149,15 @@ case "$*" in
 # pull request among the issues it lists; the search index behind `gh issue list --label` has not seen it yet.
 "api repos/"*"/issues?labels=flow-report&state=open&per_page=100")
 	{
-		for f in "$G/reports/"*; do [ -f "$f" ] || continue; jq -n --rawfile t "$f" --argjson n "${f##*/}" '{number: $n, title: ($t | rtrimstr("\n"))}'; done
+		for f in "$G/issues/"*.meta; do
+			grep -q 'labels=flow-report' "$f" 2>/dev/null || continue
+			n=$(basename "$f" .meta)
+			jq -n --rawfile t "$G/issues/$n.title" --argjson n "$n" '{number: $n, title: ($t | rtrimstr("\n"))}'
+		done
 		[ ! -f "$G/report-pr" ] || jq -n --rawfile t "$G/report-pr" '{number: 900, title: ($t | rtrimstr("\n")), pull_request: {url: "https://x/pulls/900"}}'
 	} | jq -s '.' ;;
 "issue list -R "*" --state open --label flow-report "*) echo '[]' ;;
-"label list -R "*" --limit 200 --json name --jq .[].name") echo flow-report ;;
-"issue create -R "*" --label flow-report --body-file -")
-	n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"
-	mkdir -p "$G/reports"; printf '%s\n' "$6" >"$G/reports/$n"; cat >"$G/report-body.$n"; echo "https://github.com/x/y/issues/$n" ;;
+"label list -R "*" --limit 200 --json name --jq .[].name") cat "$G/plugin-labels" 2>/dev/null || echo flow-report ;;
 *) echo "gh stub: unhandled: $*" >>"$G/unhandled"; exit 1 ;;
 esac
 EOF
@@ -208,9 +243,12 @@ sh "$SC/role.sh" "$SPK" spike "flaky ci" >/dev/null
 
 echo "== comment.sh"
 tab=$(printf '\t')
-echo "Quale tabella legge il nuovo endpoint?" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 "tech lead" >/dev/null
+: >"$G/rest.log"
+out=$(echo "Quale tabella legge il nuovo endpoint?" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 "tech lead")
 last=$(ls -t "$G/comments" | head -1)
 ok "header names writer and reader" "$(head -1 "$G/comments/$last")" "**dev #42 → tech lead**"
+ok "posted through the REST API, the body from a file" "$(sed 's/body=@.*/body=@/' "$G/rest.log")" "api repos/test/repo/issues/42/comments --jq .html_url -F body=@"
+ok "and its link printed" "$out" "https://github.com/test/repo/issues/42#issuecomment-${last#42.}"
 ok "the writer waits on another agent" "$(st "$DEV" state)" "others"
 ok "and records whom it waits on" "$(st "$DEV" waits_on)" "tech lead"
 echo "Serve il login AWS" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 you >/dev/null 2>&1; code=$?
@@ -218,7 +256,7 @@ ok "a developer never writes to the user" "$code" "2"
 echo "Mi serve il login AWS" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 you >/dev/null
 last=$(ls -t "$G/comments" | head -1)
 ok "a tech lead to the user: a real mention" "$(head -1 "$G/comments/$last")" "**tech lead → @tester**"
-ok "to the user: label question" "$(cat "$G/question-labels")" "42"
+ok "to the user: label question, through the REST API" "$(cat "$G/labels-added")" "42 question"
 ok "to the user: yellow" "$(st "$TL1" state)" "you"
 ok "to the user: waits on the user" "$(st "$TL1" waits_on)" "the user"
 # The user's answer reached it: the hooks module ended the wait.
@@ -255,6 +293,7 @@ cd "$ROOT" || exit 1
 printf '## Technical decisions\n- usa la tabella users\n' | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/note.sh" 42 >/dev/null
 f=$(ls -t "$G/comments/42."* | head -1)
 ok "it starts as written" "$(head -1 "$f")" "## Technical decisions"
+ok "posted through the REST API" "$(tail -1 "$G/rest.log" | sed 's/body=@.*/body=@/')" "api repos/test/repo/issues/42/comments --jq .html_url -F body=@"
 ok "and its last line signs it" "$(tail -1 "$f")" "<!-- team · tech lead -->"
 ok "a note is recorded on its thread, to nobody" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}"
 printf 'senza sessione\n' | sh "$SC/note.sh" 99 >/dev/null
@@ -285,9 +324,11 @@ echo "== dispatch.sh: a question left in a chat goes to the tech lead after 5 mi
 date +%s >"$S/$DEV2/idle"
 printf '%s\n%s\n%s\n%s\n' "$(($(date +%s) - 400))" "Quale porta uso?" 43 "Quale porta uso?" >"$S/$DEV2/asked"
 rm -f "$G/repo-comments.tsv"
+: >"$G/rest.log"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 last=$(ls -t "$G/comments" | head -1)
 ok "posted to the tech lead" "$(head -1 "$G/comments/$last")" "**dev #43 → tech lead**"
+ok "through the REST API" "$(sed 's/body=@.*/body=@/' "$G/rest.log")" "api repos/test/repo/issues/43/comments -F body=@"
 ok "and the agent waits on it" "$(st "$DEV2" state)" "others"
 ok "and records whom it waits on" "$(st "$DEV2" waits_on)" "tech lead"
 
@@ -773,6 +814,7 @@ me_host=$(sh "$SC/claim.sh" host)
 out=$(sh "$SC/claim.sh" take 46); code=$?
 ok "a free issue: this machine takes it" "$code $(cat "$G/status-last")" "0 S_PROG"
 ok "with a take comment naming the machine" "$(head -1 "$(grep -l 'takes #46' "$G/comments/"*)")" "**dispatcher · $me_host** takes #46"
+ok "posted through the REST API" "$(grep -c '^api repos/test/repo/issues/46/comments --jq .html_url -F body=@' "$G/rest.log")" "1"
 printf '**dispatcher · other-1234** takes #47\n' >"$G/comments/47.1"
 out=$(sh "$SC/claim.sh" take 47); code=$?
 ok "an issue another machine took: left to it" "$code $(printf '%s' "$out" | grep -c 'taken by other-1234') $(ls "$G/comments" | grep -c '^47\.')" "1 1 1"
@@ -784,9 +826,11 @@ touch "$G/race-49"
 out=$(sh "$SC/claim.sh" take 49); code=$?
 ok "a race lost to an older take: given up" "$code $(printf '%s' "$out" | grep -c 'taken by other-9999')" "1 1"
 ok "and its own take deleted" "$(ls "$G/comments" | grep -c '^49\.')" "0"
+ok "through the REST API" "$(grep -c '^api -X DELETE repos/test/repo/issues/comments/[0-9]*$' "$G/rest.log")" "1"
 rm -f "$G/race-49"
 CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/claim.sh" release 46 "takeover: the machine is off" >/dev/null
 ok "a takeover: released by the tech lead, Todo again" "$(head -1 "$(grep -l 'releases #46' "$G/comments/"*)") $(cat "$G/status-last")" "**tech lead** releases #46 S_TODO"
+ok "the release posted through the REST API" "$(tail -1 "$G/rest.log" | sed 's/body=@.*/body=@/')" "api repos/test/repo/issues/46/comments -F body=@"
 ok "who has it now: nobody" "$(sh "$SC/claim.sh" who 46)" ""
 
 echo "== issue-status.sh and project.sh: boards"
@@ -976,16 +1020,74 @@ ok "an alias: it cannot tell, so push" "$(pt 'on: *triggers\n')" "push"
 
 echo "== report.sh: the same title again, right after, comments on the open report"
 cd "$T" || exit 1
+# reports: the issues opened with the label flow-report, one number per line.
+reports() { grep -l 'labels=flow-report' "$G/issues/"*.meta 2>/dev/null | sed 's#.*/##; s#\.meta$##'; }
+plugin=$(jq -r .repository "$W/.claude-plugin/plugin.json" | sed -E 's#^https?://github\.com/##; s#\.git$##')
 echo "first" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "A wake for nothing" >/dev/null
 echo "second" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "A wake for nothing" >/dev/null
-rep=$(ls "$G/reports" 2>/dev/null | head -1)
-ok "one issue" "$(ls "$G/reports" 2>/dev/null | wc -l)" "1"
+rep=$(reports | head -1)
+ok "one issue" "$(reports | wc -l)" "1"
+ok "opened through the REST API on the plugin's repository, with its title" "$(grep -c "^api repos/$plugin/issues -f title=A wake for nothing -f labels\\[\\]=flow-report " "$G/rest.log") $(cat "$G/issues/$rep.title")" "1 A wake for nothing"
+ok "its body signed" "$(head -1 "$G/issues/$rep.body") $(tail -1 "$G/issues/$rep.body")" "first <!-- team · tech lead -->"
 ok "and one comment on it, with the second report" "$(ls "$G/comments" | grep -c "^$rep\.") $(cat "$G/comments/$rep".* 2>/dev/null | head -1)" "1 second"
+ok "through the REST API" "$(grep -c "^api repos/$plugin/issues/$rep/comments " "$G/rest.log")" "1"
 echo "third" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "a WAKE for nothing" >/dev/null
-ok "the title compared without case" "$(ls "$G/reports" | wc -l) $(ls "$G/comments" | grep -c "^$rep\.")" "1 2"
+ok "the title compared without case" "$(reports | wc -l) $(ls "$G/comments" | grep -c "^$rep\.")" "1 2"
 echo "Board shows a wrong color" >"$G/report-pr"
 echo "fourth" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "Board shows a wrong color" >/dev/null
-ok "a pull request with the title is no report: a new issue" "$(ls "$G/reports" | wc -l) $(ls "$G/comments" | grep -c '^900\.')" "2 0"
+ok "a pull request with the title is no report: a new issue" "$(reports | wc -l) $(ls "$G/comments" | grep -c '^900\.')" "2 0"
+echo other >"$G/plugin-labels"
+out=$(echo "fifth" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "A missing label")
+ok "a missing label is created first, through the REST API; the new issue's link printed" "$(tail -1 "$G/labels-created") $(printf '%s' "$out" | grep -c "^https://github.com/$plugin/issues/[0-9]*$")" "flow-report d73a4a 1"
+rm -f "$G/plugin-labels"
+
+echo "== rest.sh: a write GitHub fails for a moment is tried again"
+cd "$ROOT" || exit 1
+: >"$G/rest.log"
+echo "gh: Server Error (HTTP 502)" >"$G/fail-next"
+out=$(printf 'una nota lunga\n' | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/note.sh" 42 2>"$T/rest.err"); code=$?
+last=$(ls -t "$G/comments" | head -1)
+ok "a first 5xx answer is tried again, and the second try posts it" "$code $(wc -l <"$G/rest.log") $(head -1 "$G/comments/$last")" "0 2 una nota lunga"
+ok "the same body both times, and only the link printed" "$(cut -d' ' -f2 "$G/rest.log" | sort -u) $out $(cat "$T/rest.err")" "repos/test/repo/issues/42/comments https://github.com/test/repo/issues/42#issuecomment-${last#42.} "
+: >"$G/rest.log"
+printf '%s\n' "error connecting to api.github.com" 'Post "https://api.github.com/repos/test/repo/issues/42/comments": dial tcp: connect: connection refused' >"$G/fail-next"
+echo "Ci sei?" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 "tech lead" --fyi >/dev/null 2>&1; code=$?
+ok "a connection that fails is tried again too, 3 tries in all" "$code $(wc -l <"$G/rest.log") $(head -1 "$G/comments/$(ls -t "$G/comments" | head -1)")" "0 3 **dev #42 → tech lead** · fyi"
+: >"$G/rest.log"
+echo "gh: Validation Failed (HTTP 422)" >"$G/fail-next"
+out=$(printf 'x\n' | sh "$SC/note.sh" 42 2>"$T/rest.err"); code=$?
+ok "a 4xx answer is not tried again: it fails with the error" "$code $(wc -l <"$G/rest.log") [$out] $(cat "$T/rest.err")" "1 1 [] gh: Validation Failed (HTTP 422)"
+# The waits as they are outside the tests, with a sleep that only writes down how long it was asked to wait.
+mkdir -p "$T/sleepy"
+printf '#!/bin/sh\necho "$1" >>"$TT/slept"\n' >"$T/sleepy/sleep"
+chmod +x "$T/sleepy/sleep"
+: >"$G/rest.log"
+printf '%s\n' "gh: Server Error (HTTP 500)" "gh: HTTP 502" "gh: Service Unavailable (HTTP 503)" >"$G/fail-next"
+out=$(printf 'x\n' | REST_WAITS="" PATH="$T/sleepy:$PATH" sh "$SC/note.sh" 42 2>"$T/rest.err"); code=$?
+ok "three 5xx answers: 3 tries, 5 and 15 seconds apart, then it fails with the last error" "$code $(wc -l <"$G/rest.log") $(tr '\n' ' ' <"$T/slept")[$out] $(cat "$T/rest.err")" "1 3 5 15 [] gh: Service Unavailable (HTTP 503)"
+rm -f "$G/fail-next"
+
+echo "== ready.sh: the label through the REST API"
+echo 1 >"$G/decided-42"
+: >"$G/rest.log"
+sh "$SC/ready.sh" 42 >/dev/null; code=$?
+ok "the missing label is created with its color, then added" "$code $(grep '^ready for development ' "$G/labels-created") $(grep -c '^42 ready for development$' "$G/labels-added")" "0 ready for development 0E8A16 1"
+out=$(sh "$SC/ready.sh" --remove 42 2>&1); code=$?
+ok "taken back: removed by its name, encoded" "$code $(grep -c '^42 ready for development$' "$G/labels-added") $(tail -1 "$G/rest.log")" "0 0 api -X DELETE repos/test/repo/issues/42/labels/ready%20for%20development"
+out=$(sh "$SC/ready.sh" --remove 42 2>&1); code=$?
+ok "an issue without the label is already in the backlog" "$code $out" "0 issue 42: back to the backlog"
+echo "gh: Not Found (HTTP 404)" >"$G/fail-next"
+out=$(sh "$SC/ready.sh" --remove 42 2>&1); code=$?
+ok "any other refusal fails with its error" "$code $out" "1 gh: Not Found (HTTP 404)"
+rm -f "$G/decided-42" "$G/fail-next"
+
+echo "== open-issue.sh: a new issue through the REST API"
+url=$(printf 'Il corpo\n' | sh "$SC/open-issue.sh" "Un nuovo tema" @me); code=$?
+n=${url##*/}
+ok "opened in this repository, assigned to the team's account, its link printed" "$code $url $(cat "$G/issues/$n.meta")" "0 https://github.com/test/repo/issues/$n repo=test/repo labels= assignees=tester"
+ok "with its title and body" "$(cat "$G/issues/$n.title") / $(cat "$G/issues/$n.body")" "Un nuovo tema / Il corpo"
+url=$(printf 'Altro\n' | sh "$SC/open-issue.sh" "Per un altro" someone)
+ok "or to the login given" "$(sed 's/.*assignees=//' "$G/issues/${url##*/}.meta")" "someone"
 
 echo "== update.sh"
 cd "$ROOT" || exit 1
@@ -1101,6 +1203,9 @@ ok "the restarted sessions get the newer prompt" "$(grep -- "--bg --resume $TL1 
 ok "the plugin is updated once on each account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"
 ok "the one that started the update restarts last" "$(grep -- '--bg --resume' "$T/claude.log" | tail -1 | cut -d' ' -f3)" "$TL1"
 ok "and the log says once that the update starts, and that it is done" "$(grep -c 'update starts$' "$T/update.out") $(tail -1 "$T/update.out" | cut -c21-)" "1 update done"
+
+echo "== no write through GitHub's GraphQL API where REST has an endpoint"
+ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"
 
 echo
 [ ! -f "$G/unhandled" ] || { echo "unhandled gh calls:"; sort -u "$G/unhandled"; }

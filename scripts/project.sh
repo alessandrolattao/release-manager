@@ -6,7 +6,8 @@
 #   project.sh check
 #       prints each board linked to the repository whose Status field lacks one of the statuses the plugin
 #       sets (Todo, In Progress, In Review, Done), with what it lacks and, when the user was already asked
-#       about it, their answer: (asked: yes|no); nothing when every board has them or there is no board
+#       about it, their answer: (asked: yes|no); otherwise what to do: ask the user, then project.sh asked.
+#       Nothing when every board has them or there is no board
 #   project.sh asked <project number> yes|no
 #       records the user's answer about adding a board's missing statuses, so it is asked once
 #   project.sh add-status <project number> "<status>"
@@ -63,14 +64,19 @@ check() {
 			field(name: "Status") { ... on ProjectV2SingleSelectField { options { name } } } } } } }' \
 		-F o="${repo_full%/*}" -F n="${repo_full#*/}" |
 		jq -r '.data.repository.projectsV2.nodes[]
-			| if .field.options == null then "\(.number)\tboard \(.number) \"\(.title)\" has no Status field"
+			| if .field.options == null then "\(.number)\tboard \(.number) \"\(.title)\" has no Status field\tit"
 			  else ([.field.options[].name | ascii_downcase]) as $have
 				| [("Todo", "In Progress", "In Review", "Done") | select(ascii_downcase as $w | $have | index($w) | not)] as $lack
 				| select($lack | length > 0)
-				| "\(.number)\tboard \(.number) \"\(.title)\" lacks: \($lack | join(", "))" end' |
-		while IFS="$tab" read -r number line; do
+				| "\(.number)\tboard \(.number) \"\(.title)\" lacks: \($lack | join(", "))\t\(if ($lack | length) == 1 then "it" else "them" end)" end' |
+		while IFS="$tab" read -r number line what; do
 			answer=$(cat "$repo_dir/board-asked.$number" 2>/dev/null || true)
-			echo "$line${answer:+ (asked: $answer)}"
+			# A board never asked about says what to do with it.
+			if [ -n "$answer" ]; then
+				echo "$line (asked: $answer)"
+			else
+				echo "$line. Ask the user whether to add $what, then: project.sh asked $number yes|no"
+			fi
 		done
 }
 

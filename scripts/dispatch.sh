@@ -1,7 +1,8 @@
 #!/bin/sh
 # One cycle of the team's dispatcher. dispatcher.sh, a process of its own, runs it every minute; one
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
-#   1. hands each new GitHub comment of the repository to the session it is written to;
+#   1. hands each new GitHub comment of the repository (not an edit of an older one) to the session it is
+#      written to;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      repository's tech lead;
 #   3. marks dead sessions stuck (red, in the agent list too), or done when they are developers or QA agents
@@ -71,8 +72,10 @@ touch "$seen"
 since=$(cat "$cursor" 2>/dev/null || date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
 date -u +%Y-%m-%dT%H:%M:%SZ >"$cursor.next"
 # Each comment: id, author, issue, link, who signed it (note.sh's hidden last line, "-" when none), its first
-# two non-empty lines.
-if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&per_page=100" --jq '.[] | [
+# two non-empty lines. The listing also returns the comments edited since the cursor: one written before it
+# is an edit, and wakes nobody, whoever wrote it.
+if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?since=$since&per_page=100" --jq '.[]
+	| select(.created_at >= env.since) | [
 		(.id | tostring), .user.login, (.issue_url | split("/") | last), .html_url,
 		([.body | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"),
 		((.body | gsub("\r"; "") | split("\n") | map(select(length > 0))) as $l | ($l[0] // ""), ($l[1] // ""))
@@ -294,6 +297,9 @@ fi
 # 6. A free checkout with someone waiting wakes the first of them; then the board's summary.
 sh "$here/checkout.sh" next >/dev/null 2>&1 || true
 holder=$(sed -n 1p "$repo_dir/checkout" 2>/dev/null || true)
+# One that took it as it is (checkout.sh take --as-is) shows with as-is after its name.
+held_as=""
+[ "$(sed -n 4p "$repo_dir/checkout" 2>/dev/null)" != as-is ] || held_as=" as-is"
 base=$(base_branch)
 # The default branch's CI, asked at most every 5 minutes: every machine shares one GitHub account and its
 # hourly API allowance.
@@ -325,7 +331,7 @@ elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {numb
 				detail: (if $quiet > 3600 then "quiet \($quiet / 3600 | floor)h, on \(.host)"
 					elif $asks then "waits for \(.to), on \(.host)" else "on \(.host)" end)}' "$f"
 	done | jq -s -c '.')
-jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$holder")" \
+jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && echo "$(address_of "$holder")$held_as")" \
 	--arg held_since "$(sed -n 2p "$repo_dir/checkout" 2>/dev/null)" \
 	--arg waiting "$(while read -r w; do [ -n "$w" ] && address_of "$w"; done <"$repo_dir/checkout.queue" 2>/dev/null | paste -sd, -)" \
 	--argjson ready "$(printf '%s\n' "$workable" | grep -c . || true)" --arg next "${next:+#$next}" \

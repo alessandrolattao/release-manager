@@ -571,11 +571,14 @@ async function addressOf($: EngineInterface, id: string): Promise<string> {
   return status.role === 'spike' ? `spike ${status.topic ?? ''}`.trim() : 'team'
 }
 
-// The main checkout's lock (scripts/checkout.sh): who holds it, and this session's place in its queue.
+// The main checkout's lock (scripts/checkout.sh): who holds it, with as-is after its name when it took it
+// as it is (its fourth line), and this session's place in its queue.
 async function checkoutOf($: EngineInterface, dir: string, me: string): Promise<string> {
-  const holder = (await readText($, `${dir}/checkout`)).split('\n')[0] ?? ''
+  const lock = (await readText($, `${dir}/checkout`)).split('\n')
+  const holder = lock[0] ?? ''
+  const how = lock[3] === 'as-is' ? ' as-is' : ''
   const queue = (await readText($, `${dir}/checkout.queue`)).split('\n').filter(line => line !== '')
-  const held = holder === '' ? 'free' : holder === me ? 'held by you' : `held by ${await addressOf($, holder)}`
+  const held = holder === '' ? 'free' : `held by ${holder === me ? 'you' : await addressOf($, holder)}${how}`
   const place = queue.indexOf(me)
   return place < 0 ? held : `${held} · you are ${place + 1} of ${queue.length} in the queue`
 }

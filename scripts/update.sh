@@ -143,7 +143,7 @@ look() {
 		waiting="If you are waiting for something (another agent, the checkout, CI), declare it with sh \"$plugin/scripts/status.sh\" <others|working> \"<what you wait for>\" [--for <minutes>] and end your turn."
 		;;
 	esac
-	prompt="The team plugin was updated to $(basename "$plugin") and this session was restarted to load it. Its scripts are now in $plugin/scripts: use this path from now on. Your role's rules may have changed: read $told again now, whole, and follow it from here on (its {{...}} placeholders stand for what you already know: your issue, branch, worktree, repository). Then go on from where you were. Commands you started in the background before the restart (a \`main-ci.sh --wait\`, a spike's wait) keep running and their end still reaches you: do not start them again. $waiting"
+	prompt="The team plugin was updated to $(basename "$plugin") and this session was restarted to load it. Its scripts are now in $plugin/scripts: use this path from now on. Your role's rules may have changed: read $told again now, whole, and follow it from here on (its {{...}} placeholders stand for what you already know: your issue, branch, worktree, repository). Then go on from where you were. Commands you started in the background before the restart (a \`main-ci.sh --wait\`, a spike's wait) keep running and their end still reaches you: do not start them again. Subagents you started with the Agent tool before the restart may have been stopped: if a hand-back you wait for does not come, start that subagent again. $waiting"
 	out=$( (cd "$dir" && as "$cfg" claude --bg --resume "$id" "$prompt") </dev/null 2>&1 | head -1)
 	echo "$name: $out"
 }

@@ -77,7 +77,15 @@ case "$*" in
 	[ ! -f "$G/state-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 	if [ -f "$G/closed-$3" ]; then echo CLOSED; else echo OPEN; fi ;;
 "api --paginate repos/test/repo/issues/comments?since="*"per_page=100") cat "$G/mentions.json" 2>/dev/null || echo '[]' ;;
-"api --paginate repos/test/repo/issues/comments?since="*) cat "$G/repo-comments.tsv" 2>/dev/null ;;
+"api --paginate repos/test/repo/issues/comments?since="*)
+	# A JSON listing is answered as GitHub does: the comments updated since the cursor, edits too, through the
+	# caller's --jq filter. Otherwise the rows that filter would give.
+	if [ -f "$G/repo-comments.json" ]; then
+		s=$(printf '%s' "$3" | sed -n 's/.*since=\([^&]*\).*/\1/p')
+		jq --arg s "$s" '[.[] | select(.updated_at >= $s)]' "$G/repo-comments.json" | jq -r "$5"
+	else
+		cat "$G/repo-comments.tsv" 2>/dev/null
+	fi ;;
 "pr view 50 --json mergeCommit --jq .mergeCommit.oid // empty") echo deadbeefcafe ;;
 "run list --commit deadbeefcafe "*) cat "$G/runs" 2>/dev/null || echo '[]' ;;
 "run list "*) echo '[]' ;;
@@ -224,6 +232,19 @@ ok "the board summary is written, with no cap on developers" "$(jq -r '.develope
 ok "the 5-hour usage, red when it runs out first" "$(jq -r '.usage.h5 | "\(.tone) \(.text) ·\(.alt)"' "$R/board.json")" "alert 80% · runs out 23:00 ·"
 ok "the weekly usage, green when it lasts" "$(jq -r '.usage.d7.tone' "$R/board.json")" "ok"
 
+echo "== dispatch.sh: only new comments are handed out, not edits"
+# Two comments written before the cursor and edited after it, so the listing returns them; one written after.
+echo 2026-11-25T10:00:00Z >"$R/comments.since"
+cat >"$G/repo-comments.json" <<'EOF'
+[{"id":110,"user":{"login":"tester"},"created_at":"2026-11-25T09:00:00Z","updated_at":"2026-11-25T10:05:00Z","issue_url":"https://x/42","html_url":"https://x/42#c110","body":"**tech lead → dev #42**\n\nmessaggio corretto"},
+ {"id":111,"user":{"login":"tester"},"created_at":"2026-11-25T09:30:00Z","updated_at":"2026-11-25T10:06:00Z","issue_url":"https://x/42","html_url":"https://x/42#c111","body":"superato da un commento successivo"},
+ {"id":112,"user":{"login":"tester"},"created_at":"2026-11-25T10:07:00Z","updated_at":"2026-11-25T10:07:00Z","issue_url":"https://x/42","html_url":"https://x/42#c112","body":"**tech lead → dev #42**\n\nnuovo messaggio"}]
+EOF
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "an old comment edited after the cursor wakes nobody" "$(cat "$S"/*/wake 2>/dev/null | grep -c 'c110\|c111')" "0"
+ok "a new comment still wakes its reader" "$(grep -c 'c112' "$S/$DEV/wake" 2>/dev/null)" "1"
+rm -f "$G/repo-comments.json"
+
 echo "== dispatch.sh: a question left in a chat goes to the tech lead after 5 minutes"
 date +%s >"$S/$DEV2/idle"
 printf '%s\n%s\n%s\n%s\n' "$(($(date +%s) - 400))" "Quale porta uso?" 43 "Quale porta uso?" >"$S/$DEV2/asked"
@@ -336,6 +357,42 @@ CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" give >/dev/null
 ok "given back, the checkout is on main" "$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)" "main"
 ok "the next in the queue is woken" "$(grep -c 'checkout is free' "$S/$DEV2/wake")" "1"
 ok "the giver is back in its worktree" "$(st "$DEV" place)" "worktree 42"
+
+echo "== checkout.sh take --as-is"
+held() { [ -f "$R/checkout" ] && echo held || echo free; }
+cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+# A commit of main's own, so what stays checked out differs from the agent's branch.
+git -C "$ROOT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "on main only"
+head_before=$(git -C "$ROOT" rev-parse HEAD)
+echo staged >"$ROOT/staged.txt" && git -C "$ROOT" add staged.txt
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --as-is >/dev/null 2>&1; code=$?
+ok "take --as-is refuses a main checkout with local changes, as take does" "$code $(held)" "1 free"
+git -C "$ROOT" rm -q --cached staged.txt && rm -f "$ROOT/staged.txt"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --asis >/dev/null 2>&1; code=$?
+ok "a mistyped option is refused and moves nothing" "$code $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(held)" "2 main free"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --as-is >/dev/null; code=$?
+ok "take --as-is holds the checkout" "$code $(sed -n 1p "$R/checkout")" "0 $DEV"
+ok "and leaves HEAD where it was" "$(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(git -C "$ROOT" rev-parse HEAD)" "main $head_before"
+ok "its place is the checkout" "$(st "$DEV" place)" "checkout"
+ok "the head tested is the one checked out" "$(st "$DEV" tested_head)" "$head_before"
+ok "who shows as-is after the holder's name" "$(cd "$ROOT" && sh "$SC/checkout.sh" who | head -1 | sed 's/ since [^,]*,/,/')" "held by dev #42 as-is, on main"
+(cd "$ROOT" && sh "$SC/dispatch.sh" >/dev/null 2>&1)
+ok "and so does the board's summary" "$(jq -r '.checkout.holder' "$R/board.json")" "dev #42 as-is"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null; code=$?
+ok "a second agent queues as it does with take" "$code $(st "$DEV2" state)" "3 others"
+ok "its row names the holder with as-is" "$(st "$DEV2" detail)" "queued for the checkout (held by dev #42 as-is)"
+woken=$(grep -c 'checkout is free' "$S/$DEV2/wake")
+cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" give >/dev/null; code=$?
+ok "give frees it, on main" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD)" "0 free main"
+ok "and wakes the next in the queue" "$(grep -c 'checkout is free' "$S/$DEV2/wake")" "$((woken + 1))"
+git -C "$ROOT" reset -q --hard origin/main
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null
+(cd "$ROOT" && sh "$SC/dispatch.sh" >/dev/null 2>&1)
+ok "a take after it holds without as-is" "$(jq -r '.checkout.holder' "$R/board.json") $(cd "$ROOT" && sh "$SC/checkout.sh" who | head -1 | sed 's/ since [^,]*,/,/')" "dev #43 held by dev #43, on 43-other"
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
 
 echo "== review, QA and merge: on the branch, before the pull request"
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
@@ -845,6 +902,7 @@ ok "nobody is left busy" "$(grep -c 'still busy' "$T/update.out")" "0"
 ok "the plugin is updated on the team's account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"
 ok "a live session resumes on the new version" "$(grep -c -- "--bg --resume $TL1 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts: use this path from now on. Your role.s rules may have changed: read [^ ]*/skills/tech-lead/SKILL.md again" "$T/claude.log")" "1"
 ok "it is told its background commands keep running" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -cF 'Then go on from where you were. Commands you started in the background before the restart (a `main-ci.sh --wait`, a spike'"'"'s wait) keep running and their end still reaches you: do not start them again.')" "1"
+ok "and that its subagents may have been stopped, to start again when their hand-back does not come" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -cF 'do not start them again. Subagents you started with the Agent tool before the restart may have been stopped: if a hand-back you wait for does not come, start that subagent again.')" "1"
 ok "with no flags, which would start a copy" "$(grep -- '--resume' "$T/claude.log" | grep -c -- '--name')" "0"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"

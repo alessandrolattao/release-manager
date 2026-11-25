@@ -129,6 +129,16 @@ check deny tech-lead "echo 'gh api repos/someone/else/issues' | xargs -0 bash -c
 check deny tech-lead "echo 'git push' | xargs -0 bash -c"
 check deny tech-lead "xargs -0 sh -c <<< 'gh api repos/someone/else/issues'"
 check deny tech-lead "xargs -0 sh -c <<< 'git push'"
+check deny tech-lead "sh -c '>/dev/null git push'"
+check deny tech-lead "bash -c '<x gh api repos/someone/else/issues'"
+# A redirection is no part of the command: >/dev/null git push is git push, git >/dev/null push too.
+check deny tech-lead '>/dev/null git push'
+check deny tech-lead '2>/dev/null git commit -m x'
+check deny tech-lead 'git >/dev/null push origin HEAD'
+check deny tech-lead '>/dev/null sudo git push'
+check deny tech-lead ">/dev/null bash -c 'git push'"
+check allow tech-lead '>/dev/null git log -1'
+check deny tech-lead "cd $S && >out.txt git log -1"
 check deny tech-lead "eval \"\$(echo 'gh api repos/someone/else/issues')\""
 check deny tech-lead "eval \"\$(printf 'git push')\""
 check deny tech-lead "bash -c \"\$(echo 'git push')\""

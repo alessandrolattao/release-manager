@@ -81,6 +81,8 @@ WRAPPERS = {
     "setsid": ("--ctty --fork --help --version --wait", ""),
 }
 WRAPPERS = {name: (longs.split(), set(values.split())) for name, (longs, values) in WRAPPERS.items()}
+# A redirection operator, as the tokenizer splits it from its target (>, >>, 2> is 2 then >, &>, >&, <).
+REDIRECT = re.compile(r"&?[<>]{1,2}[&|]?")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
 # API rule's.
@@ -123,6 +125,9 @@ def commands_of(text):
         tokens = list(lexer)
     except ValueError:
         tokens = text.split()
+    # shlex runs punctuation together (;>, ;;>): separators and redirections come apart, <( stays one word.
+    tokens = [part for token in tokens
+              for part in (re.findall(r"<\(|[;|()]+|[<>&]+", token) if token and set(token) <= set(";&|()<>") else [token])]
     commands, current, separator = [], [], ""
     for token in tokens:
         if token and set(token) <= set(";&|()"):
@@ -167,7 +172,7 @@ def command_words(words):
     """A command's words from the command itself on, past assignments and wrappers with their options (sudo -u
     me, sudo -nu me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1), read as getopt reads them; whether env
     -S gave them (its string, split into words, is the command); and the wrappers that came before it."""
-    words, wrapper, split, wrappers = list(words), None, False, set()
+    words, wrapper, split, wrappers = unredirected(words), None, False, set()
     while words:
         word, value = words[0], None
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
@@ -240,9 +245,9 @@ def code_of(words, stdin=None):
 
 def given_string(args):
     """The string after a shell's -c, past a --; None when none comes (xargs gives it, or a redirection
-    follows)."""
+    follows: a word of <, >, & alone, as the tokenizer splits them; '>/dev/null git push' is a string)."""
     args = args[1:] if args[:1] == ["--"] else args
-    return args[0] if args and not re.fullmatch(r"\d*[<>].*", args[0]) else None
+    return args[0] if args and not re.fullmatch(r"[<>&]+\(?", args[0]) else None
 
 
 def with_printed(code):
@@ -304,6 +309,21 @@ def remote_command(args):
         else:
             break
     return " ".join(args[j:]) if host is not None and j < len(args) else None
+
+
+def unredirected(words):
+    """A command's words without its redirections, operator and target (>/dev/null git push is git push), and
+    the file descriptor before one (2>/dev/null)."""
+    out, i = [], 0
+    while i < len(words):
+        if REDIRECT.fullmatch(words[i]):
+            if out and out[-1].isdigit():
+                out.pop()
+            i += 1 if words[i + 1:i + 2] == ["<("] else 2
+        else:
+            out.append(words[i])
+            i += 1
+    return out
 
 
 def bare(words):
@@ -490,8 +510,8 @@ for match in LINK.finditer(script):
         refuse(f"it links {match.group(1)}")
 
 where = cwd
-for n, (words, _) in enumerate(commands):
-    words = bare(words)
+for n, (written, _) in enumerate(commands):
+    words = bare(unredirected(bare(written)))
     if not words:
         continue
     head = os.path.basename(words[0])
@@ -530,6 +550,10 @@ for n, (words, _) in enumerate(commands):
 
     top = toplevel(where)
     other = top if top and top != root and not top.startswith(root + os.sep) else None
+    # A redirection before the command (>out.txt git log): main took it for the command and refused it in
+    # another repository; so does this.
+    if other and bare(written)[:1] != words[:1] and any(re.match(r"^\d*>>?$", w) for w in written):
+        refuse(f"it writes a file while in another repository ({other})")
 
     if head == "git":
         j, gitdir = 1, where
@@ -585,6 +609,6 @@ for n, (words, _) in enumerate(commands):
     if other:
         if head in BUILD:
             refuse(f"{head} could change another repository ({other}); there you may only read")
-        if any(re.match(r"^\d*>>?$", w) for w in words):
+        if any(re.match(r"^\d*>>?$", w) for w in written):
             refuse(f"it writes a file while in another repository ({other})")
 sys.exit(0)

@@ -39,7 +39,7 @@ jobs_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/jobs"
 job_of() { printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId == $s) | .id][0] // empty'; }
 # running <session-id>: the agent list shows a process behind the session.
 running() { [ "$(printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId == $s and .status != null)] | length')" != 0 ]; }
-# wake <session-id> <from> <text> <link>: the monitor of that session wakes it between turns.
+# wake <session-id> <from> <text> <link>: the hooks module of that session wakes it between turns.
 wake() { printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "$2" "$(printf '%s' "$3" | tr '\t\n' '  ' | cut -c1-200)" "$4" >>"$sessions_dir/$1/wake"; }
 # note <issue> <jq filter> [jq args]: what last happened on an issue, from the comments read here (which
 # machine took it, the last team message and when), for the board's agents of other machines.

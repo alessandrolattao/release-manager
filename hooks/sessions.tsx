@@ -13,7 +13,11 @@ import type { Board, BoardRow } from '../types'
 //   - a turn that starts means working; one that ends on an error, or a session silent for 20 minutes
 //     while it should be working, means stuck.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
-//     the last turn ended, empty during a turn (hooks/session-events.sh wakes a session only between turns).
+//     the last turn ended, empty during a turn.
+//   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
+//     comment (the dispatcher appends it to `wake`), the main checkout freed for it, and in a tech lead the
+//     messages other repositories left in its inbox (tell.sh). A session outside the team runs nothing.
+//   - a prompt the user writes to a team session means working with them, whatever it waited on.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh) started by hand, which a
 //     click on its row starts when it is stopped.
@@ -25,6 +29,10 @@ const ALTERNATE_S = 4
 const DISPATCHER_START_MS = 30000
 const DISPATCHER_ALIVE_S = 660
 const STUCK_AFTER_S = 20 * 60
+// A wake waits until the model has been stopped for this long.
+const WAKE_QUIET_S = 5
+// A tech lead the user comes back to after this long hears that its inbox holds messages.
+const INBOX_PAUSE_S = 15 * 60
 const EXPECT_MS = 15000
 const PANE = 'team-board'
 const COLORS: Record<string, string> = { working: 'cyan', others: 'purple', you: 'yellow', stuck: 'red', idle: 'green', done: 'default' }
@@ -54,6 +62,9 @@ const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: 
 })
 
 let stateRoot: string | undefined
+let dataRoot: string | undefined
+// The inbox messages already told to this tech lead.
+let toldInbox = new Set<string>()
 let isBusy = false
 let isSyncing = false
 let isStartingDispatcher = false
@@ -77,6 +88,7 @@ type Status = {
   busy_until?: number
   stage?: string
   resume_to?: { state: string; detail: string; since: number }
+  asked_on?: string | null
 }
 
 // The detail a turn that starts gives; a turn that ends with it untouched changed nothing.
@@ -88,6 +100,24 @@ async function rootOf($: EngineInterface): Promise<string> {
     stateRoot = `${state}/team`
   }
   return stateRoot
+}
+
+async function dataOf($: EngineInterface): Promise<string> {
+  if (dataRoot === undefined) {
+    const data = (await $.env.get('XDG_DATA_HOME')) || `${(await $.env.get('HOME')) ?? ''}/.local/share`
+    dataRoot = `${data}/team`
+  }
+  return dataRoot
+}
+
+// The messages other repositories left for this repository's tech leads (tell.sh), unread.
+async function inboxOf($: EngineInterface, repo: string): Promise<string[]> {
+  try {
+    const entries = await $.fs.list(`${await dataOf($)}/inbox/${repo.replace('/', '_')}/new`)
+    return entries.filter(entry => entry.kind === 'file').map(entry => entry.name)
+  } catch {
+    return []
+  }
 }
 
 async function folderOf($: EngineInterface): Promise<string> {
@@ -484,6 +514,7 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (!isBusy) {
+      await wakeUp($, folder, role, status, now)
       await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
       await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
     }
@@ -492,6 +523,84 @@ async function tick($: EngineInterface): Promise<void> {
   } finally {
     isSyncing = false
   }
+}
+
+// Wakes the session, between turns, with what was written to it since: a GitHub comment the dispatcher
+// appended to `wake` (one line each: time, from, what, link), the main checkout freed for it, and for a tech
+// lead the messages other repositories left in its inbox. Once the model has been stopped a few seconds; a
+// tech lead whose last message asked the user something in its chat is left alone: the user is talking to it.
+// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again.
+async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
+  const idleSince = Number(await readText($, `${folder}/idle`))
+  if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
+    return
+  }
+  if (role === 'tech-lead' && status.state === 'you' && (status.asked_on ?? null) === null) {
+    return
+  }
+  const parts: string[] = []
+  let wake = ''
+  try {
+    wake = await $.fs.read(`${folder}/wake`)
+  } catch {
+    wake = ''
+  }
+  const lines = wake.split('\n').filter(line => line !== '')
+  let delivered = Number(await readText($, `${folder}/wake-read`)) || 0
+  if (delivered > lines.length) {
+    delivered = 0
+  }
+  if (lines.length > delivered) {
+    const fresh = lines.slice(delivered).map(line => {
+      const [, from = '', what = '', link = ''] = line.split('\t')
+      return `${from}: ${what}${link !== '' ? ` (${link})` : ''}`
+    })
+    parts.push(`for you on GitHub: ${fresh.join('; ')}`)
+    await $.fs.write(`${folder}/wake-read`, `${lines.length}\n`)
+  }
+  if (role === 'tech-lead' && status.repo) {
+    const inbox = await inboxOf($, status.repo)
+    const fresh = inbox.filter(name => !toldInbox.has(name))
+    if (fresh.length > 0) {
+      parts.push(`${fresh.length} message(s) from other repositories: sh "${$.plugin.root}/scripts/inbox.sh" read`)
+    }
+    toldInbox = new Set(inbox)
+  }
+  if (parts.length > 0) {
+    void $.prompt.submit({ text: parts.join('; ') }).catch(err => $.ui.log(`team: ${String(err)}`))
+  }
+}
+
+// The user writing to a team session (at its prompt, through Remote Control or Slack): it works with them,
+// and whatever it waited on is over (markTurn would otherwise put the wait back when the turn ends). A tech
+// lead the user comes back to after a pause hears, in one line of context, that other repositories left
+// messages in its inbox; the messages never enter the conversation here. The plugin's own wakes, the
+// engine's notifications and the scripts' prompts are not the user.
+async function heardUser($: EngineInterface): Promise<string | undefined> {
+  const folder = await folderOf($)
+  const role = await readText($, `${folder}/role`)
+  if (role === '') {
+    return undefined
+  }
+  const now = Math.floor((await $.clock.now()) / 1000)
+  const status = await readStatus($, folder)
+  if (status.state !== 'working' || status.detail !== 'with you') {
+    status.since = now
+  }
+  status.state = 'working'
+  status.detail = 'with you'
+  delete status.resume_to
+  await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
+  if (role !== 'tech-lead' || !status.repo) {
+    return undefined
+  }
+  const before = Number(await readText($, `${folder}/last-prompt`)) || 0
+  await $.fs.write(`${folder}/last-prompt`, `${now}\n`)
+  if (now - before < INBOX_PAUSE_S) {
+    return undefined
+  }
+  const waiting = (await inboxOf($, status.repo)).length
+  return waiting === 0 ? undefined : `📨 ${waiting} message(s) from other repositories wait in your inbox (inbox.sh). Mention it in one line before answering, do not read them unless the user wants to; answer what the user asked.`
 }
 
 async function failedTurn($: EngineInterface, reason: string): Promise<void> {
@@ -534,6 +643,23 @@ export const register: Register = on => {
   on('command.run', { command: 'team' }, async $ => {
     await openBoard($)
     return { text: 'Team pane opened.' }
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    const kind = e.origin?.kind
+    const isUser = kind === 'composer' || kind === 'bridge' || kind === 'slack-ping' || (kind === 'unclassified' && e.isMeta !== true)
+    if (!isUser) {
+      return next(e)
+    }
+    try {
+      const note = await heardUser($)
+      if (note !== undefined) {
+        return next({ ...e, context: [...(e.context ?? []), note] })
+      }
+    } catch (err) {
+      $.ui.log(`team: ${String(err)}`)
+    }
+    return next(e)
   })
 
   on('turn.start', async ($, e, next) => {

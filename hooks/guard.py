@@ -35,9 +35,9 @@ SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh"
 # wget URL to api.github.com. GraphQL names no repository: it is not judged.
 GH_API_ENDPOINT = re.compile(r"^(?:(?i:(?:https?://)?api\.github\.com)(?::\d+)?)?/?repos/([\w.-]+/[\w.-]+)")
 API_URL = re.compile(r"(?<![\w.-])(?i:api\.github\.com)(?::\d+)?/repos/([\w.-]+/[\w.-]+)")
-# A command substitution runs as a command of its own, also where it is double-quoted ("$(...)") and so one
-# word; inside single quotes, or escaped (\` or \$( in a string, an odd number of backslashes), it is text.
-SUBSTITUTION = re.compile(r"(?<!\\)(?:\\\\)*\$\(([^)]*)|(?<!\\)(?:\\\\)*`([^`]*)`")
+# gh's flags that take a value, which may come before its command too (gh -X POST api ...).
+GH_VALUE_FLAGS = {"-X", "--method", "-H", "--header", "-f", "--raw-field", "-F", "--field", "--input", "-q", "--jq",
+                  "-t", "--template", "--cache", "-p", "--preview", "--hostname", "-R", "--repo"}
 # The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
 SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
@@ -77,7 +77,7 @@ def commands_of(text):
     words of a quoted string stay one word. A comment starts only where a word does, as in the shell (shlex
     would also start one inside a word: a#b)."""
     try:
-        lexer = shlex.shlex(unquoted(text, strings=False), posix=True, punctuation_chars=";&|()<>")
+        lexer = shlex.shlex(scan(text)[0], posix=True, punctuation_chars=";&|()<>")
         lexer.whitespace_split = True
         lexer.commenters = ""
         tokens = list(lexer)
@@ -147,9 +147,8 @@ def api_calls(text):
     """The repositories whose API a shell text calls, as written in it: in its commands and in the command
     substitutions the shell runs."""
     found = []
-    for match in SUBSTITUTION.finditer(unquoted(text)):
-        k = 1 if match.group(1) is not None else 2
-        found += api_calls(text[match.start(k):match.end(k)])
+    for inner in scan(text)[1]:
+        found += api_calls(inner)
     previous = None
     for words, separator in commands_of(text):
         found += api_repos(words, previous if piped(separator) else None)
@@ -162,8 +161,8 @@ def api_repos(words, piped_from=None):
     command runs them (X=1, env, timeout, nice, xargs, ...) or a shell does (sh -c '...', | sh, sh <<< ...)."""
     for i, word in enumerate(words):
         head = os.path.basename(word)
-        if head == "gh" and words[i + 1:i + 2] == ["api"]:
-            return [m.group(1) for w in words[i + 2:] if (m := GH_API_ENDPOINT.match(w))]
+        if head == "gh" and gh_command(words[i + 1:]) == "api":
+            return [m.group(1) for w in words[i + 1:] if (m := GH_API_ENDPOINT.match(w))]
         if head in ("curl", "wget"):
             return [m.group(1) for w in words[i + 1:] for m in API_URL.finditer(w)]
         if head in SHELLS and (inner := handed_to_shell(words[i:], piped_from)) is not None:
@@ -171,29 +170,76 @@ def api_repos(words, piped_from=None):
     return []
 
 
-def unquoted(text, strings=True):
-    """The text, as long as it was, with its comments blanked, and the inside of its single-quoted strings too
-    unless strings is False: the shell runs nothing there."""
-    out, quote, i = [], None, 0
+def gh_command(words):
+    """gh's command among the words after gh: the first one that is no flag nor a flag's value."""
+    j = 0
+    while j < len(words) and words[j].startswith("-"):
+        j += 2 if words[j] in GH_VALUE_FLAGS else 1
+    return words[j] if j < len(words) else None
+
+
+def scan(text):
+    """Reads a shell text as the shell does, near enough: the text, as long as it was, with its comments
+    blanked, and the command texts of its substitutions. A substitution is $(...) or `...`, bare or double-
+    quoted; inside single quotes or escaped (an odd number of backslashes) it is text. A comment starts where a
+    word does (not in a#b, nor right after a substitution: $(x)#b) and ends with its line."""
+    out, inners, quote, i, after = list(text), [], None, 0, -1
     while i < len(text):
         c = text[i]
         if quote == "'":
             quote = None if c == "'" else quote
-            out.append(" " if strings and c != "'" else c)
-        elif quote == "#":
-            quote = None if c == "\n" else quote
-            out.append(c if c == "\n" else " ")
-        elif c == "\\":
-            out.append(text[i:i + 2])
             i += 1
+        elif c == "\\":
+            i += 2
+        elif c == "'" and quote is None:
+            quote = "'"
+            i += 1
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+            i += 1
+        elif c == "#" and quote is None and i != after and (i == 0 or text[i - 1] in " \t\n;&|()<>"):
+            end = text.find("\n", i)
+            end = len(text) if end < 0 else end
+            out[i:end] = " " * (end - i)
+            i = end
+        elif text.startswith("$(", i) or c == "`":
+            start = i + (2 if c == "$" else 1)
+            end = closing(text, start) if c == "$" else closing_backtick(text, start)
+            inners.append(text[start:end])
+            i = after = end + 1
         else:
-            if c == '"':
-                quote = None if quote == '"' else '"'
-            elif quote is None and (c == "'" or (c == "#" and (i == 0 or text[i - 1] in " \t\n;&|()"))):
-                quote = c
-            out.append(" " if quote == "#" else c)
+            i += 1
+    return "".join(out), inners
+
+
+def closing(text, i):
+    """Where the ) that closes a $( is, from just after the $(: past nested parentheses and quoted ones; the end
+    of the text when none closes it."""
+    depth, quote = 1, None
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            quote = None if c == "'" else quote
+        elif c == "\\":
+            i += 1
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c in "()" and quote is None:
+            depth += 1 if c == "(" else -1
+            if depth == 0:
+                return i
         i += 1
-    return "".join(out)
+    return len(text)
+
+
+def closing_backtick(text, i):
+    """Where the backtick that closes a `...` is, from just after the opening one; the end of the text when none
+    closes it."""
+    while i < len(text) and text[i] != "`":
+        i += 2 if text[i] == "\\" else 1
+    return min(i, len(text))
 
 
 # Here-documents are data: their bodies go before anything is parsed. A line ending in an odd number of
@@ -208,7 +254,9 @@ for line in command.split("\n"):
         lines[-1] = lines[-1][:-1] + line
     else:
         lines.append(line)
-    goes_on = (len(line) - len(line.rstrip("\\"))) % 2 == 1
+    # A backslash inside a comment continues nothing.
+    logical = scan(lines[-1])[0]
+    goes_on = (len(logical) - len(logical.rstrip("\\"))) % 2 == 1
     # `<<<word` is a here-string, on its own line: nothing after it is skipped.
     match = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
     if match:

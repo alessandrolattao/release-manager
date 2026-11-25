@@ -123,6 +123,24 @@ check deny tech-lead "echo 'gh api repos/someone/else/issues' | sh"
 check deny tech-lead "echo 'gh api repos/someone/else/issues' | timeout 5 sh"
 check deny tech-lead "sh <<< 'gh api repos/someone/else/issues'"
 check allow tech-lead "echo 'gh api repos/test/repo/issues' | sh"
+# gh takes api's own flags before api too.
+check deny tech-lead 'gh -X POST api repos/someone/else/issues -f title=x'
+check deny tech-lead 'gh --method POST api repos/someone/else/issues'
+check deny tech-lead 'gh -H "Accept: application/json" api repos/someone/else/issues'
+check deny tech-lead 'gh --hostname github.com api repos/someone/else/issues'
+check allow tech-lead 'gh -X GET api repos/test/repo/issues'
+# A substitution ends at the ) that closes it, past the parentheses of a quoted jq filter.
+check deny tech-lead "x=\"\$(gh api --jq 'map(.title)' repos/someone/else/issues)\""
+check deny tech-lead "echo \"\$(gh api --jq '.[] | select(.x)' repos/someone/else/issues)\""
+check deny tech-lead "echo \"\$(echo \"\$(date)\") \$(gh api repos/someone/else/issues)\""
+# A comment ends with its line: a backslash in it continues nothing.
+check deny tech-lead '# note \
+git push origin HEAD'
+check deny tech-lead 'gh issue view 3 # see \
+gh api repos/someone/else/issues'
+# A # right after a substitution is in the word: $(x)#b.
+check deny tech-lead 'echo $(echo a)#b; gh api repos/someone/else/issues'
+check deny tech-lead 'echo `echo a`#b; git push'
 # A line ending in a backslash goes on in the next one; a here-document's body stays data.
 check deny tech-lead 'gh api -X POST \
   repos/someone/else/issues \

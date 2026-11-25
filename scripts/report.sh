@@ -36,8 +36,10 @@ from=$(jq -r 'if .role == "tech-lead" then "tech lead"
 	elif .role == "spike" then "spike " + (.topic // "")
 	else "team" end' "$sessions_dir/$me/status" 2>/dev/null || echo team)
 
-same=$(gh issue list -R "$plugin" --state open --label flow-report --limit 100 --json number,title 2>/dev/null |
-	jq -r --arg t "$title" '.[] | select((.title | ascii_downcase) == ($t | ascii_downcase)) | .number' 2>/dev/null | head -1 || true)
+# The REST listing, not `gh issue list --label`: that one goes through the search index, which misses an
+# issue opened seconds earlier. The REST listing counts pull requests among the issues: they are no reports.
+same=$(gh api "repos/$plugin/issues?labels=flow-report&state=open&per_page=100" 2>/dev/null |
+	jq -r --arg t "$title" '.[] | select(.pull_request | not) | select((.title | ascii_downcase) == ($t | ascii_downcase)) | .number' 2>/dev/null | head -1 || true)
 note=$(printf '%s\n\n_Reported by a %s session, plugin %s._\n\n<!-- team · %s -->\n' "$body" "$role" "$version" "$from")
 if [ -n "$same" ]; then
 	printf '%s\n' "$note" | gh issue comment "$same" -R "$plugin" --body-file -

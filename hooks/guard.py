@@ -12,8 +12,9 @@ Refused:
     comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
     POST on repos/<other>/issues (a new one), issues/<n>/comments, labels or assignees and issues/comments/<id>,
     PATCH on repos/<other>/issues/comments/<id>;
-  - in another repository's checkout, where gh takes the repository from the folder, gh as if that repository
-    came with -R ({owner}/{repo} placeholders refused there), and the plugin's scripts;
+  - in another repository's checkout (reached by cd, pushd, env -C, or GIT_DIR / GIT_WORK_TREE), where gh takes
+    the repository from the folder, gh as if that repository came with -R ({owner}/{repo} and :owner/:repo
+    placeholders refused there), and the plugin's scripts;
   - a repository reached by its id (repositories/<id>), whose it is the guard cannot tell;
   - a GraphQL mutation typed by hand (gh api graphql, curl), or a query the guard cannot read (a file, stdin, a
     variable); the plugin's scripts run theirs;
@@ -184,7 +185,7 @@ def elsewhere_refused(head, words, assigns, checkout=None):
     pointed += [n for n in named if repo_of(n) not in (None, own)]
     if head == "gh" and checkout:
         # gh api fills {owner} and {repo} with the folder's repository: there it names its endpoint plainly.
-        if any(re.search(r"\{(owner|repo|branch)\}", w) for w in words):
+        if any(re.search(r"\{(owner|repo|branch)\}|:(owner|repo)\b", w) for w in words):
             return f"in another repository's checkout ({checkout}) gh fills {{owner}}/{{repo}} with that repository"
         if rest[:1] != ["api"]:
             pointed.append(f"the repository of {checkout}")
@@ -286,12 +287,25 @@ if current:
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
 
-where = cwd
+where, pushed = cwd, []
 for words in segments:
-    assigns = []
+    assigns, chdir = [], None
     while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec")):
         if "=" in words[0]:
             assigns.append(words[0])
+        elif words[0] == "env":
+            # env's options, among them -C / --chdir, the folder the command runs in.
+            rest = words[1:]
+            while rest and rest[0].startswith("-"):
+                option = rest.pop(0)
+                if option in ("-C", "--chdir", "-u", "--unset") and rest:
+                    value = rest.pop(0)
+                    chdir = value if option in ("-C", "--chdir") else chdir
+                elif option.startswith("--chdir="):
+                    chdir = option.split("=", 1)[1]
+                elif option.startswith("-C") and len(option) > 2:
+                    chdir = option[2:]
+            words = [words[0]] + rest
         words = words[1:]
     if not words:
         # Only assignments: what they hold may be used by the next command.
@@ -300,12 +314,20 @@ for words in segments:
             refuse(why)
         continue
     head = os.path.basename(words[0])
-    top = toplevel(where)
+    here = os.path.realpath(os.path.join(where, os.path.expanduser(chdir))) if chdir else where
+    top = toplevel(here)
     other = top if top and top != root and not top.startswith(root + os.sep) else None
+    # GIT_DIR or GIT_WORK_TREE outside the repository: git and gh act on that one, here or in the next commands.
+    for value in [w.split("=", 1)[1] for w in assigns + words if w.startswith(("GIT_DIR=", "GIT_WORK_TREE="))]:
+        real = os.path.realpath(os.path.join(here, os.path.expanduser(value)))
+        if real != root and not real.startswith(root + os.sep):
+            other = real
+            if head not in ("gh", "git"):
+                refuse(f"GIT_DIR or GIT_WORK_TREE points git and gh at another repository ({real})")
 
     # The plugin's own scripts: they hold their own rules.
     target = words[1] if head in ("sh", "bash") and len(words) > 1 else words[0]
-    real = os.path.realpath(os.path.join(where, os.path.expanduser(target)))
+    real = os.path.realpath(os.path.join(here, os.path.expanduser(target)))
     if real.startswith(plugin + os.sep) and real.endswith(".sh"):
         if role == "spike" and os.path.basename(real) in SPIKE_FORBIDDEN_SCRIPTS:
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
@@ -328,15 +350,20 @@ for words in segments:
         inner = " ".join(words[1:])
     if inner is not None:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
-                                input=f"cd {shlex.quote(where)}\n{inner}", capture_output=True, text=True)
+                                input=f"cd {shlex.quote(here)}\n{inner}", capture_output=True, text=True)
         if nested.returncode != 0:
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
         continue
 
-    if head == "cd" and len(words) > 1:
+    if head in ("cd", "pushd") and len(words) > 1:
+        if head == "pushd":
+            pushed.append(where)
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
+        continue
+    if head == "popd":
+        where = pushed.pop() if pushed else where
         continue
 
     why = elsewhere_refused(head, words, assigns, other) or graphql_refused(head, words)
@@ -344,7 +371,7 @@ for words in segments:
         refuse(why)
 
     if head == "git":
-        j, gitdir = 1, where
+        j, gitdir = 1, here
         while j < len(words) and words[j].startswith("-"):
             if words[j] == "-C" and j + 1 < len(words):
                 gitdir = os.path.realpath(os.path.join(where, os.path.expanduser(words[j + 1])))
@@ -357,6 +384,7 @@ for words in segments:
         rest = words[j + 1:]
         gtop = toplevel(gitdir)
         elsewhere = gtop if gtop and gtop != root and not gtop.startswith(root + os.sep) else None
+        elsewhere = elsewhere or (other if other and gitdir == here else None)
         if elsewhere:
             if sub in ("switch", "checkout", "restore", "pull"):
                 refuse(f"it moves another repository ({elsewhere}); read another branch with git -C <repo> show <branch>:<file>")

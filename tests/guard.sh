@@ -245,6 +245,23 @@ check deny tech-lead "cd $S && sh $P/scripts/ready.sh 5"
 check deny spike "cd $S && gh issue view 3"
 check allow spike "cd $S && gh repo view"
 check allow tech-lead "gh api 'repos/{owner}/{repo}/issues/3'"
+check deny tech-lead "cd $S && gh api -X PUT repos/:owner/:repo/pulls/5/merge"
+check deny spike "cd $S && gh api repos/:owner/:repo/issues/3 -f state=closed"
+# The folder gh and git run in, however it is reached: cd, pushd, env -C, GIT_DIR or GIT_WORK_TREE.
+check deny tech-lead "pushd $S && gh issue close 3"
+check deny tech-lead "pushd $S && sh $P/scripts/ready.sh 5"
+check allow tech-lead "pushd $S && popd && gh issue close 3"
+check deny tech-lead "env -C $S gh issue close 3"
+check deny tech-lead "env --chdir=$S gh release create v1"
+check allow tech-lead "env -C $S gh issue view 3"
+check allow tech-lead "env -C $S git log --oneline -1"
+check deny tech-lead "GIT_DIR=$S/.git gh issue close 3"
+check deny tech-lead "GIT_DIR=$S/.git git checkout main"
+check deny tech-lead "GIT_WORK_TREE=$S git checkout main"
+check allow tech-lead "git checkout main"
+check deny tech-lead "env -i -C $S gh issue close 3"
+check deny tech-lead "export GIT_DIR=$S/.git; gh issue close 3"
+check allow tech-lead "GIT_DIR=$R/.git git log --oneline -1"
 # A spike only reads, and still not another repository through GitHub.
 check deny spike 'gh issue view 3 -R someone/else'
 check deny spike 'gh api repos/someone/else/issues'

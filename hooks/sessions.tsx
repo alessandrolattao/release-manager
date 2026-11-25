@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
-import type { ApiContentBlock, EngineInterface, Register } from 'claude-code'
+import type { ApiContentBlock, ElementTable, EngineInterface, Register } from 'claude-code'
 
-import type { Board, BoardRow } from '../types'
+import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 
-// Every team session's look, and a tech lead's board.
+// Every team session's look, a tech lead's board and a developer's pane.
 //
 // The scripts and hooks write each session's status in its own folder,
 // <state>/team/sessions/<session id>/status (scripts/session-dir.sh). This module runs inside every session:
@@ -21,6 +21,11 @@ import type { Board, BoardRow } from '../types'
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
 //     starts when it is stopped.
+//   - in a developer it draws the developer's pane (/team opens it), in the board's look: its issue and the
+//     issue's own GitHub status, its branch, its pull request with its checks, its work (git in its worktree,
+//     at every refresh), its state, and a summary with the checkout, the reviews, the default branch's CI and
+//     its model. The status and the pull request come from GitHub at most every 5 minutes, cached in the
+//     session's folder (`github`). A QA agent or a spike has none.
 //   - a tech lead looks every 30 minutes for a newer version of the plugin, published on its repository's
 //     default branch; the board's foot offers it, and a click runs /team:update (scripts/update.sh).
 //   - a tech lead keeps that dispatcher running: stopped (a restart of the machine, a crash), it starts it
@@ -43,6 +48,12 @@ const WAKE_QUIET_S = 5
 const INBOX_PAUSE_S = 15 * 60
 const EXPECT_MS = 15000
 const PANE = 'team-board'
+const DEV_PANE = 'team-dev'
+// A developer reads the issue's status and its pull request from GitHub at most this often: every machine
+// shares one account and its hourly API allowance.
+const GITHUB_EVERY_S = 5 * 60
+const GITHUB_TIMEOUT_MS = 30000
+const GIT_TIMEOUT_MS = 10000
 const COLORS: Record<string, string> = { working: 'cyan', others: 'purple', you: 'yellow', stuck: 'red', idle: 'green', done: 'default' }
 const IDLE_DETAIL = 'waiting for work'
 // The board: the agents grouped by state, in this order, each name on the background of its state.
@@ -68,6 +79,13 @@ const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', worki
 const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, dispatcher: { running: false, version: '' }, updated: 0 }, {
   shape: 'board-4',
 })
+
+// A developer's pane, refreshed with the board's rhythm.
+const dev = atom(
+  { plugin: 'team', key: 'dev' } as const,
+  { repo: '', issue: 0, title: '', branch: '', status: '', pr: null, read: 0, work: null, state: '', detail: '', since: 0, checkout: '', review: '', ci: '', updated: 0 },
+  { shape: 'dev-1' },
+)
 
 // The plugin's newest published version, when newer than the one running: the board's foot offers it.
 const latest = atom({ plugin: 'team', key: 'latest' } as const, '')
@@ -106,6 +124,7 @@ type Status = {
   since?: number
   busy_until?: number
   stage?: string
+  branch?: string
   resume_to?: { state: string; detail: string; since: number }
   asked_on?: string | null
 }
@@ -300,12 +319,14 @@ const LOOKS: Record<Look, { color?: string; dimColor?: boolean; bold?: boolean }
   alert: { color: 'red', bold: true },
 }
 const SIDE = 2
+// A developer's pane: the width of its label column ("BRANCH" and a space or two).
+const LABEL_WIDTH = 8
 
 const width = (row: Row) => row.reduce((n, segment) => n + [...segment.text].length, 0)
 
-// The title: a dialog titled TEAM with the project's name centered in a thin inner frame. Null when the
-// pane is too narrow.
-function titleRows(name: string, columns: number): Row[] | null {
+// The title: a dialog titled TEAM (a developer's: DEV #<n>) with the project's name centered in a thin inner
+// frame. Null when the pane is too narrow.
+function titleRows(name: string, columns: number, title = 'TEAM'): Row[] | null {
   const inside = columns - 5 - 2 * SIDE
   const box = inside - 2
   if (box < name.length) {
@@ -326,7 +347,7 @@ function titleRows(name: string, columns: number): Row[] | null {
       ],
       [{ text: `└${'─'.repeat(box)}┘`, look: 'frame' }],
     ],
-    'TEAM',
+    title,
   )
 }
 
@@ -355,6 +376,12 @@ function wrap(text: string, max: number): string[] {
   }
   lines.push(line)
   return lines
+}
+
+// cut <text> <width>: the text on one line of at most that many characters, an ellipsis at its end when cut.
+function cut(text: string, max: number): string {
+  const chars = [...text]
+  return chars.length <= max ? text : `${chars.slice(0, Math.max(0, max - 1)).join('')}…`
 }
 
 // dialogRows <inside width> <left margin> <rows> <title>: a dialog of the DOS programs of the 80s and 90s,
@@ -409,6 +436,40 @@ function summaryRows(items: Item[], columns: number): Row[] | null {
     })
   }
   return dialogRows(inside, SIDE, content, 'SUMMARY')
+}
+
+// The elements a pane draws with, on any surface.
+type Ui = Pick<ElementTable, 'Box' | 'Text' | 'Button' | 'Link'>
+
+function segmentOf(ui: Ui, segment: Segment, key: string) {
+  const { Text } = ui
+  return (
+    <Text key={key} {...LOOKS[segment.look]}>
+      {segment.text}
+    </Text>
+  )
+}
+
+// A row holding a control is laid out in a row of its parts, the control a Button around its text.
+function drawRows($: EngineInterface, ui: Ui, rows: Row[], key: string) {
+  const { Box, Text, Button } = ui
+  return rows.map((row, i) =>
+    row.some(segment => segment.press !== undefined) ? (
+      <Box key={`${key}-${i}`} flexDirection="row">
+        {row.map((segment, j) =>
+          segment.press === 'start-dispatcher' ? (
+            <Button key={`${key}-${i}-${j}`} plain onPress={() => startDispatcher($)}>
+              {segmentOf(ui, segment, `${key}-${i}-${j}-text`)}
+            </Button>
+          ) : (
+            segmentOf(ui, segment, `${key}-${i}-${j}`)
+          ),
+        )}
+      </Box>
+    ) : (
+      <Text key={`${key}-${i}`}>{row.map((segment, j) => segmentOf(ui, segment, `${key}-${i}-${j}`))}</Text>
+    ),
+  )
 }
 
 function age(since: number, now: number): string {
@@ -493,6 +554,203 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
     version: await readText($, `${root}/repos/${key}/dispatcher.version`),
   }
   await update($, board, () => ({ repo, rows, summary, dispatcher, updated: now }))
+}
+
+// How comments name a session, as scripts/repo.sh address_of does: "tech lead", "dev #<n>", "qa #<n>",
+// "spike <topic>".
+async function addressOf($: EngineInterface, id: string): Promise<string> {
+  const status = await readStatus($, `${await rootOf($)}/sessions/${id}`)
+  if (status.role === 'tech-lead') {
+    return 'tech lead'
+  }
+  if (status.role === 'dev' || status.role === 'qa') {
+    return `${status.role} #${status.issue ?? '?'}`
+  }
+  return status.role === 'spike' ? `spike ${status.topic ?? ''}`.trim() : 'team'
+}
+
+// The main checkout's lock (scripts/checkout.sh): who holds it, and this session's place in its queue.
+async function checkoutOf($: EngineInterface, dir: string, me: string): Promise<string> {
+  const holder = (await readText($, `${dir}/checkout`)).split('\n')[0] ?? ''
+  const queue = (await readText($, `${dir}/checkout.queue`)).split('\n').filter(line => line !== '')
+  const held = holder === '' ? 'free' : holder === me ? 'held by you' : `held by ${await addressOf($, holder)}`
+  const place = queue.indexOf(me)
+  return place < 0 ? held : `${held} · you are ${place + 1} of ${queue.length} in the queue`
+}
+
+// git <args> in the developer's worktree: what it printed, null when it failed.
+async function gitOf($: EngineInterface, cwd: string, args: string[]): Promise<string | null> {
+  try {
+    const ran = await $.process.run(['git', ...args], { cwd, timeoutMs: GIT_TIMEOUT_MS })
+    return ran.exitCode === 0 ? ran.stdout.trim() : null
+  } catch {
+    return null
+  }
+}
+
+// The branch's work, local and read at every refresh: the commits ahead of the default branch, and the
+// files and lines changed since the two parted. Null when git cannot tell.
+async function workOf($: EngineInterface, cwd: string, base: string): Promise<DevWork | null> {
+  if (base === '') {
+    return null
+  }
+  const commits = await gitOf($, cwd, ['rev-list', '--count', `origin/${base}..HEAD`])
+  const stat = await gitOf($, cwd, ['diff', '--shortstat', `origin/${base}...HEAD`])
+  if (commits === null || stat === null) {
+    return null
+  }
+  // " 4 files changed, 120 insertions(+), 15 deletions(-)", a part left out when it is 0, all of it when
+  // nothing changed.
+  const count = (pattern: RegExp) => Number(pattern.exec(stat)?.[1] ?? 0)
+  return {
+    commits: Number(commits) || 0,
+    files: count(/(\d+) files? changed/),
+    added: count(/(\d+) insertions?\(\+\)/),
+    removed: count(/(\d+) deletions?\(-\)/),
+  }
+}
+
+// What a developer last read from GitHub, kept in its session's folder (`github`): when, the issue's own
+// status, whether the issue carries the label qa (null before the first read), and the branch's newest pull
+// request.
+type GithubRead = { at: number; status: string; qa: boolean | null; pr: DevPr | null }
+
+async function githubOf($: EngineInterface, folder: string): Promise<GithubRead> {
+  try {
+    const known = JSON.parse(await $.fs.read(`${folder}/github`)) as Partial<GithubRead>
+    return { at: Number(known.at) || 0, status: known.status ?? '', qa: known.qa ?? null, pr: known.pr ?? null }
+  } catch {
+    return { at: 0, status: '', qa: null, pr: null }
+  }
+}
+
+const ISSUE_QUERY =
+  'query($o: String!, $n: String!, $i: Int!) { repository(owner: $o, name: $n) { issue(number: $i) { status { name } labels(first: 30) { nodes { name } } } } }'
+
+// One check of a pull request's head: a check run (status, conclusion) or a commit status (state).
+type Check = { __typename?: string; status?: string; conclusion?: string; state?: string }
+
+// The checks of a pull request's head, judged as merge.sh does: a check run passes when it completed with
+// success, skipped or neutral, a commit status when it is a success; one not finished yet is running.
+function checksOf(rollup: readonly Check[]): DevPr['checks'] {
+  let failed = 0
+  let pending = 0
+  for (const check of rollup) {
+    if (check.__typename === 'StatusContext') {
+      if (check.state === 'PENDING' || check.state === 'EXPECTED') {
+        pending++
+      } else if (check.state !== 'SUCCESS') {
+        failed++
+      }
+    } else if (check.status !== 'COMPLETED') {
+      pending++
+    } else if (!['SUCCESS', 'SKIPPED', 'NEUTRAL'].includes(check.conclusion ?? '')) {
+      failed++
+    }
+  }
+  return { total: rollup.length, failed, pending }
+}
+
+let isReadingGithub = false
+
+// Reads from GitHub, in two calls, the issue's own status with its labels and the branch's newest pull
+// request in any state, and keeps them in the session's folder with when. Whatever the outcome GitHub is not
+// asked again for 5 minutes; a call that fails keeps what the last read found.
+async function readGithub($: EngineInterface, folder: string, cwd: string, repo: string, issue: number, branch: string, now: number): Promise<void> {
+  if (isReadingGithub) {
+    return
+  }
+  isReadingGithub = true
+  const known = await githubOf($, folder)
+  let { status, qa, pr } = known
+  try {
+    const [owner = '', name = ''] = repo.split('/')
+    const asked = await $.process.run(
+      ['gh', 'api', 'graphql', '-f', `query=${ISSUE_QUERY}`, '-F', `o=${owner}`, '-F', `n=${name}`, '-F', `i=${issue}`,
+        '--jq', '.data.repository.issue | {status: (.status.name // ""), qa: ([.labels.nodes[].name] | index("qa") != null)}'],
+      { cwd, timeoutMs: GITHUB_TIMEOUT_MS },
+    )
+    if (asked.exitCode === 0) {
+      const answer = JSON.parse(asked.stdout) as { status?: string; qa?: boolean }
+      status = answer.status ?? ''
+      qa = answer.qa ?? null
+    }
+    if (branch !== '') {
+      const listed = await $.process.run(
+        ['gh', 'pr', 'list', '--repo', repo, '--head', branch, '--state', 'all', '--limit', '1', '--json', 'number,title,url,state,statusCheckRollup'],
+        { cwd, timeoutMs: GITHUB_TIMEOUT_MS },
+      )
+      if (listed.exitCode === 0) {
+        const [newest] = JSON.parse(listed.stdout) as { number: number; title: string; url: string; state: string; statusCheckRollup?: Check[] }[]
+        pr =
+          newest === undefined
+            ? null
+            : { number: newest.number, title: newest.title, url: newest.url, state: newest.state, checks: checksOf(newest.statusCheckRollup ?? []) }
+      }
+    }
+  } catch (err) {
+    $.ui.log(`team: github: ${String(err)}`)
+  } finally {
+    try {
+      await $.fs.write(`${folder}/github`, `${JSON.stringify({ at: now, status, qa, pr })}\n`)
+    } catch (err) {
+      $.ui.log(`team: github: ${String(err)}`)
+    }
+    isReadingGithub = false
+  }
+}
+
+// The reviews of the pull request (review.sh, qa.sh): each counts only for the worktree's HEAD, as merge.sh
+// wants it for the head it merges. "decision review passed · QA needed".
+async function reviewOf($: EngineInterface, dir: string, cwd: string, pr: DevPr | null, qa: boolean | null): Promise<string> {
+  const head = (await gitOf($, cwd, ['rev-parse', 'HEAD'])) ?? ''
+  const reviewed = pr === null ? '' : ((await readText($, `${dir}/review/${pr.number}`)).split('\t')[0] ?? '')
+  const decision = head !== '' && reviewed === head ? 'decision review passed' : 'decision review not passed'
+  // qa/<pr>: "requested <head> <issue> <session>" once asked, then "pass <head>" or "fail <head>".
+  const [outcome = '', tested = ''] = pr === null ? [] : (await readText($, `${dir}/qa/${pr.number}`)).split('\t')
+  let quality = qa === null ? '' : qa ? 'QA needed' : 'no QA'
+  if (outcome === 'requested') {
+    quality = 'QA asked'
+  } else if ((outcome === 'pass' || outcome === 'fail') && head !== '' && tested === head) {
+    quality = outcome === 'pass' ? 'QA passed' : 'QA failed'
+  }
+  return quality === '' ? decision : `${decision} · ${quality}`
+}
+
+// A developer's pane: its own status file, git in its worktree, what it last read from GitHub (asked again
+// in the background once 5 minutes have passed), the checkout lock, the review and QA records and the
+// default branch's CI as the dispatcher wrote it.
+async function refreshDev($: EngineInterface, folder: string, status: Status, now: number): Promise<void> {
+  const repo = status.repo ?? ''
+  const dir = `${await rootOf($)}/repos/${repo.replace('/', '_')}`
+  const cwd = (await readText($, `${folder}/cwd`)) || (await $.session.cwd())
+  const branch = status.branch ?? ''
+  const github = await githubOf($, folder)
+  if (repo !== '' && status.issue !== undefined && now - github.at >= GITHUB_EVERY_S) {
+    void readGithub($, folder, cwd, repo, status.issue, branch, now)
+  }
+  const work = await workOf($, cwd, await readText($, `${dir}/base`))
+  const checkout = await checkoutOf($, dir, await $.session.id())
+  const review = await reviewOf($, dir, cwd, github.pr, github.qa)
+  const ci = await readText($, `${dir}/ci`)
+  const next: Dev = {
+    repo,
+    issue: status.issue ?? 0,
+    title: status.title ?? '',
+    branch,
+    status: github.status,
+    pr: github.pr,
+    read: github.at,
+    work,
+    state: status.state ?? 'working',
+    detail: status.detail ?? '',
+    since: status.since ?? 0,
+    checkout,
+    review,
+    ci,
+    updated: now,
+  }
+  await update($, dev, () => next)
 }
 
 // "claude-fable-5-2" as "Fable 5.2"; anything else as it is.
@@ -613,6 +871,10 @@ async function openBoard($: EngineInterface): Promise<void> {
   await $.ui.open({ id: PANE, title: 'Team' })
 }
 
+async function openDev($: EngineInterface): Promise<void> {
+  await $.ui.open({ id: DEV_PANE, title: 'Team' })
+}
+
 
 async function tick($: EngineInterface): Promise<void> {
   if (isSyncing) {
@@ -650,6 +912,19 @@ async function tick($: EngineInterface): Promise<void> {
           isPaneOpened = true
           void openBoard($)
         }
+      }
+    }
+    if (role === 'dev' && tickNumber % BOARD_EVERY_TICKS === 0) {
+      // What the pane cannot read never keeps the session from its wakes and its color.
+      try {
+        await refreshDev($, folder, status, now)
+        await noteModel($)
+      } catch (err) {
+        $.ui.log(`team: dev pane: ${String(err)}`)
+      }
+      if (!isPaneOpened) {
+        isPaneOpened = true
+        void openDev($)
       }
     }
     if (!isBusy) {
@@ -779,8 +1054,13 @@ export const register: Register = on => {
     return result
   })
 
+  // A developer's pane in a developer session, the board anywhere else.
   on('command.run', { command: 'team' }, async $ => {
-    await openBoard($)
+    if ((await readText($, `${await folderOf($)}/role`)) === 'dev') {
+      await openDev($)
+    } else {
+      await openBoard($)
+    }
     return { text: 'Team pane opened.' }
   })
 
@@ -846,7 +1126,8 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
     const data: Board = await read($, board)
     const now = Math.floor((await $.clock.now()) / 1000)
     // Every agent is drawn: the pane's body scrolls (the wheel, or the keys while the pane has the focus).
@@ -885,30 +1166,7 @@ export const register: Register = on => {
     // A newer version published: the foot offers it, and a click on update runs /team:update.
     const offer = newer === '' ? '' : ` · ${newer} available · `
     const offerAction = newer === '' ? '' : 'update'
-    const segmentOf = (segment: Segment, key: string) => (
-      <Text key={key} {...LOOKS[segment.look]}>
-        {segment.text}
-      </Text>
-    )
-    // A row holding a control is laid out in a row of its parts, the control a Button around its text.
-    const draw = (rows: Row[], key: string) =>
-      rows.map((row, i) =>
-        row.some(segment => segment.press !== undefined) ? (
-          <Box key={`${key}-${i}`} flexDirection="row">
-            {row.map((segment, j) =>
-              segment.press === 'start-dispatcher' ? (
-                <Button key={`${key}-${i}-${j}`} plain onPress={() => startDispatcher($)}>
-                  {segmentOf(segment, `${key}-${i}-${j}-text`)}
-                </Button>
-              ) : (
-                segmentOf(segment, `${key}-${i}-${j}`)
-              ),
-            )}
-          </Box>
-        ) : (
-          <Text key={`${key}-${i}`}>{row.map((segment, j) => segmentOf(segment, `${key}-${i}-${j}`))}</Text>
-        ),
-      )
+    const draw = (rows: Row[], key: string) => drawRows($, ui, rows, key)
     return (
       <Box flexDirection="column">
         {title === null ? <Text bold>{project}</Text> : draw(title, 'title')}
@@ -976,6 +1234,105 @@ export const register: Register = on => {
             </Button>
           </Box>
         )}
+      </Box>
+    )
+  })
+
+  // A developer's pane, in the board's look: the title dialog, the rows behind a dim label column, the
+  // summary dialog, the plugin's version at the foot.
+  on('ui.render', { component: 'Pane', requestId: DEV_PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Link } = ui
+    const data: Dev = await read($, dev)
+    const now = Math.floor((await $.clock.now()) / 1000)
+    const columns = Math.max(24, e.props.bodyColumns)
+    const project = data.repo.split('/')[1] ?? '...'
+    const title = titleRows(project, columns, `DEV #${data.issue || '?'}`)
+    // The rows, one column in from each side of the pane: what follows the label has the rest.
+    const room = Math.max(8, columns - 2 - LABEL_WIDTH)
+    const label = (text: string) => <Text dimColor>{text.padEnd(LABEL_WIDTH)}</Text>
+    const lines = (name: string, text: string, look: Look = 'text') =>
+      wrap(text, room).map((part, i) => (
+        <Text key={`${name}-${i}`}>
+          {label(i === 0 ? name : '')}
+          <Text {...LOOKS[look]}>{part}</Text>
+        </Text>
+      ))
+    // Before GitHub was read once: three dots; a read that found nothing: a question mark.
+    const unread = data.read === 0
+    const issueUrl = data.repo === '' || data.issue === 0 ? '' : `https://github.com/${data.repo}/issues/${data.issue}`
+    const pr = data.pr
+    const checks =
+      pr === null
+        ? { text: '', look: 'text' as Look }
+        : pr.checks.total === 0
+          ? { text: 'no checks', look: 'text' as Look }
+          : pr.checks.failed > 0
+            ? { text: `checks failed: ${pr.checks.failed} of ${pr.checks.total}`, look: 'alert' as Look }
+            : pr.checks.pending > 0
+              ? { text: `checks running: ${pr.checks.pending} of ${pr.checks.total}`, look: 'text' as Look }
+              : { text: 'checks green', look: 'ok' as Look }
+    const many = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+    const work = data.work === null ? '?' : `${many(data.work.commits, 'commit')} · ${many(data.work.files, 'file')} · +${data.work.added} -${data.work.removed}`
+    const look = BACKGROUNDS[data.state] ?? { bg: 'gray', fg: 'white' }
+    const items: Item[] = [
+      { label: 'checkout', value: data.checkout || '?' },
+      { label: 'review', value: data.review || '?' },
+      { label: 'main CI', value: data.ci || '?' },
+      { label: 'model', value: withEffort(modelName(await read($, model)) || '?', await read($, effort)) },
+    ]
+    const bottom = summaryRows(items, columns)
+    const version = await versionOf($)
+    const footer = version === '' ? 'team' : `team ${version}`
+    return (
+      <Box flexDirection="column">
+        {title === null ? <Text bold>{project}</Text> : drawRows($, ui, title, 'title')}
+        <Box flexDirection="column" paddingLeft={1} paddingRight={1} marginTop={1}>
+          <Text>
+            {label('ISSUE')}
+            {issueUrl === '' ? '...' : <Link href={issueUrl}>{cut(`#${data.issue} ${data.title}`, room)}</Link>}
+          </Text>
+          {lines('STATUS', data.status || (unread ? '...' : '?'))}
+          {lines('BRANCH', data.branch || '?')}
+          {pr === null ? (
+            lines('PR', unread ? '...' : 'none yet')
+          ) : (
+            <Box flexDirection="column">
+              <Text>
+                {label('PR')}
+                <Link href={pr.url}>{cut(`#${pr.number} ${pr.title}`, room)}</Link>
+              </Text>
+              <Text>
+                {label('')}
+                {pr.state.toLowerCase()} · <Text {...LOOKS[checks.look]}>{checks.text}</Text>
+              </Text>
+            </Box>
+          )}
+          {lines('WORK', work)}
+          <Text>
+            {label('STATE')}
+            <Text backgroundColor={look.bg} color={look.fg}>
+              {' '}
+              {`${VERBS[data.state] ?? (data.state || '?')} ${age(data.since, now)}`}{' '}
+            </Text>
+          </Text>
+          {data.detail !== '' && lines('', data.detail)}
+        </Box>
+        <Box flexDirection="column" marginTop={1}>
+          {bottom === null
+            ? items.map(item => (
+                <Text key={`summary-${item.label}`}>
+                  <Text dimColor>{item.label.padEnd(11)}</Text> <Text>{item.value}</Text>
+                </Text>
+              ))
+            : drawRows($, ui, bottom, 'summary')}
+        </Box>
+        {/* An empty row, then the version: a Text holding a space, since an empty one takes no height. */}
+        <Text> </Text>
+        <Text dimColor>
+          {' '.repeat(Math.max(0, Math.floor((columns - footer.length) / 2)))}
+          {footer}
+        </Text>
       </Box>
     )
   })

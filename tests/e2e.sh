@@ -733,6 +733,8 @@ ok "one item per line" "$(pt 'on:\n- workflow_dispatch\n- push\njobs:\n')" "push
 ok "a list on the line under on:" "$(pt 'on:\n  [pull_request, push]\njobs:\n')" "push"
 ok "a map on the line under on:" "$(pt 'on:\n  {push: {branches: [main]}}\njobs:\n')" "push"
 ok "a list with no push on the line under on:" "$(pt 'on:\n  [pull_request]\njobs:\n')" "no"
+ok "a map whose key's list sits at the key's indentation is no list of events" "$(pt "name: stale\non:\n  schedule:\n  - cron: '0 0 * * *'\n  workflow_dispatch:\njobs:\n")" "no"
+ok "and with push among its keys" "$(pt "on:\n  schedule:\n  - cron: '0 0 * * *'\n  push:\n    branches:\n    - main\n")" "push"
 ok "an item it cannot read as a name: it cannot tell, so push" "$(pt 'on:\n  - [pull_request]\njobs:\n')" "push"
 ok "a map: push with filters counts, they are not interpreted" "$(pt 'on:\n  push:\n    tags: [v*]\n    branches-ignore: [main]\njobs:\n  push:\n')" "push"
 ok "a map with no push: neither a deeper key nor a later block counts" "$(pt 'on:\n  # push: off\n  pull_request:\n    branches: [push]\n  schedule:\n    - cron: x\njobs:\n  push:\n')" "no"

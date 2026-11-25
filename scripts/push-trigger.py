@@ -53,8 +53,10 @@ for at, line in enumerate(lines):
         answer(flow(value, at + 1))
     if value:
         answer(events_push([value]))
-    # Under on:: a list or a map in brackets, or the keys and the list items at its first indentation.
-    indent, events = None, []
+    # Under on:: a list or a map in brackets, or, at its first indentation, the items of a list or the keys
+    # of a map, as its first line says. In a map, the lines of a list there are a key's own list, written at
+    # the key's indentation (schedule: then - cron: ...), not events.
+    indent, listed, events = None, None, []
     for nxt in range(at + 1, len(lines)):
         child = lines[nxt]
         item = bare(child)
@@ -64,11 +66,11 @@ for at, line in enumerate(lines):
             break
         depth = len(child) - len(child.lstrip())
         if indent is None:
-            indent = depth
+            indent, listed = depth, item.startswith("-")
             if item[:1] in ("[", "{"):
                 answer(flow(item, nxt + 1))
-        if depth != indent:
+        if depth != indent or item.startswith("-") != listed:
             continue
-        events.append(bare(item[1:]) if item.startswith("-") else bare(item.split(":", 1)[0]))
+        events.append(bare(item[1:]) if listed else bare(item.split(":", 1)[0]))
     answer(events_push(events))
 answer(True)

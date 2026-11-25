@@ -81,6 +81,11 @@ check deny tech-lead "ssh -p 2222 -o StrictHostKeyChecking=no -l me host 'git co
 check allow tech-lead "ssh host 'git log -1'"
 check allow tech-lead "source <(echo 'export X=1')"
 check allow tech-lead "eval 'git status'"
+# After a wrapper (timeout, xargs, sudo -u ...), a command that runs code is read too, for every rule.
+check deny tech-lead "timeout 10 bash -c 'git push'"
+check deny tech-lead "echo 1 | xargs sh -c 'git commit -m x'"
+check deny tech-lead "echo 'git push' | sudo -u me sh"
+check allow tech-lead "timeout 10 bash -c 'git log -1'"
 check deny tech-lead 'cat <<< hello
 git push'
 # git symbolic-ref only reads with one argument; with two, or --delete, it changes the repository.
@@ -202,6 +207,11 @@ check allow tech-lead 'tail -5 "$HOME/.local/state/team/repos/someone_else/dispa
 check allow tech-lead 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/repos/someone_else/dispatcher.log"'
 check allow tech-lead 'cat "$(pwd)/.local/state/team/repos/a_b/x.log"'
 check deny tech-lead 'curl -s ${API}/repos/someone/else/issues'
+# ./ and dir/../ fold before the judgment, as a URL client folds them.
+check deny tech-lead 'curl -s https://api.github.com/x/../repos/someone/else/issues'
+check deny tech-lead 'curl -s https://api.github.com/./repos/someone/else/issues'
+check deny tech-lead 'curl -s "$API/v3/../repos/someone/else/issues"'
+check allow tech-lead 'tail -1 ~/.local/state/team/../team/repos/someone_else/dispatcher.log'
 # A word that only names a shell, . or eval is no command that runs code.
 check allow tech-lead 'echo "see repos/a/b" | grep .'
 check allow tech-lead "printf '%s\\n' 'see repos/a/b' | grep -c sh"

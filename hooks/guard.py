@@ -47,8 +47,9 @@ SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 # The commands that run a string as code, and ssh's options that take a value.
 CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
-# Commands that run the command after them (timeout 5 sh, xargs -I{} sh -c, nice -n 5 ssh ...).
-WRAPPERS = {"timeout", "nice", "ionice", "command", "builtin", "xargs", "stdbuf", "setsid", "doas"}
+# Commands that run the command after them (timeout 5 sh, xargs -I{} sh -c, sudo -u me sh ...).
+WRAPPERS = {"sudo", "doas", "env", "time", "nohup", "exec", "timeout", "nice", "ionice", "command", "builtin", "xargs",
+            "stdbuf", "setsid"}
 SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
@@ -138,7 +139,8 @@ def code_of(words, piped_from=None):
     ssh's remote command. The command is the first word, or a later one when the first is a wrapper (timeout,
     xargs, ...); a shell with -c counts anywhere (find -exec sh -c). A word that only names one (grep -c sh,
     jq .) runs nothing. None when the command runs no code."""
-    words = bare(words)
+    while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
+        words = words[1:]
     wrapped = bool(words) and os.path.basename(words[0]) in WRAPPERS
     for i, word in enumerate(words):
         head, rest, code = os.path.basename(word), words[i + 1:], None
@@ -206,6 +208,7 @@ def is_call(text, at, strings):
             return False
     else:
         word = re.search(r"[^\s'\"=;&|()<>`]*$", text[:at]).group()
+    word = folded(word)
     if ENDPOINT_PREFIX.fullmatch(word) or VARIABLE_BEFORE.search(word):
         return True
     return string is None and "/" not in word
@@ -246,6 +249,17 @@ def scan(text):
     if quote:
         strings.append((opened, len(text)))
     return "".join(out), inners, "".join(plain), strings
+
+
+def folded(word):
+    """A word with its /./ and dir/../ folded, as a URL client folds them (api.github.com/x/../repos/...); a
+    leading ./ or ../ stays, a local path's own."""
+    while True:
+        fold = re.sub(r"(?<=/)\./", "", word)
+        fold = re.sub(r"(?:(?<=/)|^)(?!\.\.?/)[^/]+/\.\./", "", fold)
+        if fold == word:
+            return word
+        word = fold
 
 
 def closing(text, i):
@@ -328,7 +342,7 @@ for n, (words, separator) in enumerate(commands):
 
     # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...') is
     # checked as a command of its own.
-    inner = code_of(words, commands[n - 1][0] if n and piped(separator) else None) if head in CODE_RUNNERS else None
+    inner = code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None)
     if inner is not None:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
                                 input=f"cd {shlex.quote(where)}\n{inner}", capture_output=True, text=True)

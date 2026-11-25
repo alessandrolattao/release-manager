@@ -70,6 +70,8 @@ done
 [ -z "$caller" ] || [ ! -s "$sessions_dir/$caller/role" ] || echo "$caller")
 for id in $list; do
 	folder="$sessions_dir/$id"
+	# Ended while the update waited on another session: nothing to restart.
+	[ -s "$folder/role" ] && [ -f "$folder/status" ] || continue
 	role=$(cat "$folder/role")
 	cfg=$(cat "$folder/config" 2>/dev/null || true)
 	dir=$(cat "$folder/cwd" 2>/dev/null || true)
@@ -90,6 +92,8 @@ for id in $list; do
 		echo "$name: still busy after 30 minutes, left on its version"
 		continue
 	}
+	# Done while it was waited on: the plugin removes it, nothing to restart.
+	[ -f "$folder/status" ] && [ "$(jq -r '.state // ""' "$folder/status")" != done ] || continue
 	as "$cfg" claude stop "${id%%-*}" </dev/null >/dev/null 2>&1
 	n=0
 	until gone "$cfg" "$id" || [ "$n" -ge "$GONE" ]; do

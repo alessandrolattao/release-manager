@@ -76,7 +76,7 @@ How a repository is developed and tested comes from the repository itself: its C
 
 ## Updating
 
-After a new version is published, run `/team:update` in any Claude Code session on each machine. It updates the plugin on every account the team uses there, restarts every live team session on the new version once it is quiet (no turn is cut, the conversation goes on), and restarts the dispatchers that were running. Its log is `~/.local/state/team/update.log`.
+After a new version is published, run `/team:update` in any Claude Code session on each machine; a tech lead's board looks for one every 30 minutes and offers it at its foot, where a click on `update` does the same. It updates the plugin on every account the team uses there, restarts every live team session on the new version once it is quiet (no turn is cut, the conversation goes on), and restarts the dispatchers that were running. Its log is `~/.local/state/team/update.log`.
 
 ## License
 

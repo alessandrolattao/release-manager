@@ -43,6 +43,7 @@ export type Board = {
 
 declare module 'claude-code' {
   interface PluginState {
-    team: { board: Shaped<Board> }
+    // latest: the plugin's newest published version, when it is newer than the one running, else ''.
+    team: { board: Shaped<Board>; latest: string }
   }
 }

@@ -29,17 +29,22 @@ function folder(on: On, seed: Record<string, string>, inbox: string[] = []): Map
 
 // What the engine answers beneath the plugins at the start of a session. The processes the module runs (a
 // tech lead starting its dispatcher) are recorded, their command lines joined by spaces, and succeed.
-function engine(on: On, logs: string[] = []): string[] {
+function engine(on: On, logs: string[] = [], published = '9.9.9', toasts: string[] = []): string[] {
   const runs: string[] = []
   on('session.start', () => ({ cwd: '/repo' }))
   on('ui.log', (_$, e) => {
     logs.push(JSON.stringify(e))
     return { value: undefined }
   })
-  on('ui.toast', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
   on('command.register', () => ({ value: { command: 'team' } }))
   // /color and /rename, which the module runs between turns.
   on('command.run', () => ({ text: '' }))
+  // The version published on the plugin's repository: the one running.
+  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ name: 'team', version: published }) } }))
   on('process.run', (_$, e) => {
     runs.push(e.argv.join(' '))
     return { value: { exitCode: 0, stdout: 'the dispatcher runs', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -171,6 +176,7 @@ function stoppedDispatcher(on: On, extra: Record<string, string> = {}): void {
     status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
     'dispatcher.alive': String(NOW / 1000 - 3600),
     cwd: '/repo',
+    'plugin.json': '{"name":"team","version":"9.9.9","repository":"https://github.com/acme/team"}',
     ...extra,
   })
 }
@@ -199,4 +205,19 @@ test('a dispatcher the user stopped stays stopped', async ($, on) => {
   await $.session.start(START)
   await clock.advance(8000)
   expect(runs).toEqual([])
+})
+
+test('a tech lead finds a newer version of the plugin and says so, once', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  stoppedDispatcher(on, { 'dispatcher.alive': String(NOW / 1000) })
+  const toasts: string[] = []
+  const runs = engine(on, [], '9.10.0', toasts)
+
+  await $.session.start(START)
+  await clock.advance(4000)
+  expect(toasts).toEqual(['team 9.10.0 is out: click update at the foot of the board'])
+  expect(runs).toEqual([])
+  await clock.advance(20000)
+  expect(toasts.length).toBe(1)
 })

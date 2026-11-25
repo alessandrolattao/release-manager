@@ -1,3 +1,4 @@
+import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 import type { Board } from '../types'
@@ -29,9 +30,17 @@ const BOARD: Board = {
   updated: 0,
 }
 
+// The values the module keeps, as the atoms store them: the board with its shape tag, and the newest version
+// published ('' when the running one is the newest).
+function stored(on: On, newer = ''): void {
+  on('state.get', (_$, e) => ({
+    value: e.key === 'board' ? { value: { shape: 'board-4', value: BOARD }, version: 1 } : { value: newer, version: 1 },
+  }))
+}
+
 test('the board groups the agents by state, names on the color of their state', async ($, on) => {
   // As the atom keeps it: a value with its shape tag.
-  on('state.get', () => ({ value: { value: { shape: 'board-4', value: BOARD }, version: 1 } }))
+  stored(on)
   on('clock.now', () => ({ value: 120000 }))
   on('fs.read', () => ({ value: '{"name":"team","version":"9.9.9"}' }))
 
@@ -73,7 +82,7 @@ test('the board groups the agents by state, names on the color of their state', 
 })
 
 test('above 90% a usage line alternates with when the window resets', async ($, on) => {
-  on('state.get', () => ({ value: { value: { shape: 'board-4', value: BOARD }, version: 1 } }))
+  stored(on)
   on('fs.read', () => ({ value: '{"name":"team","version":"9.9.9"}' }))
   // 124 seconds: the second half of a 4-second step shows the reset instead.
   on('clock.now', () => ({ value: 124000 }))
@@ -82,5 +91,26 @@ test('above 90% a usage line alternates with when the window resets', async ($, 
   expect((await ui.find({ type: 'Text', text: /^93% · resets 14:00$/ }))?.props.color).toBe('red')
   expect(await ui.find({ type: 'Text', text: /runs out/ })).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: /^11% · lasts$/ }))?.props.color).toBe('green')
+  await ui.unmount()
+})
+
+test('a newer version at the foot, and update runs /team:update', async ($, on) => {
+  stored(on, '9.9.10')
+  on('clock.now', () => ({ value: 120000 }))
+  on('fs.read', () => ({ value: '{"name":"team","version":"9.9.9"}' }))
+  on('session.id', () => ({ value: 'abc-123' }))
+  on('session.cwd', () => ({ value: '/repo' }))
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  const runs: string[] = []
+  on('process.run', (_$, e) => {
+    runs.push(e.argv.join(' '))
+    return { value: { exitCode: 0, stdout: 'update started', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: / · 9\.9\.10 available · $/ }))?.props.color).toBe('yellow')
+  await ui.press({ key: 'update' })
+  expect(runs.filter(run => run.endsWith('/scripts/update.sh start')).length).toBe(1)
   await ui.unmount()
 })

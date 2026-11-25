@@ -104,6 +104,16 @@ check allow tech-lead "echo 'git push' | sudo grep -c sh"
 check deny tech-lead "echo 'git push' | timeout -s KILL 5 sh"
 check deny tech-lead "echo 1 | xargs -I {} sh -c 'git push'"
 check deny tech-lead "echo 'git push' | nice -n 5 sh"
+# env -S splits its string into the command; sudo -R, env -P and doas -a take a value.
+check deny tech-lead "echo 'git push' | env -S sh"
+check deny tech-lead "env -S \"bash -c 'git push'\""
+check deny tech-lead "env -S 'git push origin HEAD'"
+check deny tech-lead "env --split-string='git commit -m x'"
+check deny tech-lead 'env -S "gh api repos/someone/else/issues"'
+check allow tech-lead "env -S 'git log -1'"
+check deny tech-lead "echo 'git push' | env -P /bin sh"
+check deny tech-lead "echo 'git push' | sudo -R / sh"
+check deny tech-lead "echo 'git push' | doas -a style sh"
 # ssh reads options after the host too, and -- ends them.
 check deny tech-lead "ssh host -- 'git push'"
 check deny tech-lead "ssh host -t 'git push'"

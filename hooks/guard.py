@@ -50,12 +50,12 @@ SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
 SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
 # Commands that run the command after them (timeout 5 sh, xargs -I {} sh -c, sudo -u me sh ...), with their
-# options that take a value.
+# options that take a value. env -S is apart: its string is the command, split into words.
 WRAPPERS = {
-    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-T", "-U", "--user", "--group", "--chdir", "--prompt",
-             "--role", "--type", "--other-user", "--close-from", "--host", "--command-timeout"},
-    "doas": {"-u", "-C"},
-    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},
+    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-R", "-t", "-T", "-U", "--user", "--group", "--chdir",
+             "--chroot", "--prompt", "--role", "--type", "--other-user", "--close-from", "--host", "--command-timeout"},
+    "doas": {"-u", "-C", "-a"},
+    "env": {"-u", "-C", "-P", "-a", "--unset", "--chdir", "--argv0"},
     "time": {"-f", "-o", "--format", "--output"},
     "nohup": set(),
     "exec": {"-a"},
@@ -151,40 +151,50 @@ def printed(words):
     return " ".join(rest[1:] if rest[:1] == ["--"] else rest).replace("\\n", "\n")
 
 
-def command_at(words):
-    """Where the command is among a command's words: the first one past assignments and wrappers with their
-    options (sudo -u me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1); len(words) when none is."""
-    j, wrapper = 0, None
-    while j < len(words):
-        word = words[j]
+def command_words(words):
+    """A command's words from the command itself on, past assignments and wrappers with their options (sudo -u
+    me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1), and whether env -S gave them (its string, split into
+    words, is the command)."""
+    words, wrapper, split = list(words), None, False
+    while words:
+        word = words[0]
+        given = re.fullmatch(r"(?:-S|--split-string=?)(.*)", word) if wrapper == "env" else None
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
-            j += 1
+            words = words[1:]
         elif os.path.basename(word) in WRAPPERS:
-            wrapper, j = os.path.basename(word), j + 1
+            wrapper, words = os.path.basename(word), words[1:]
+        elif given:
+            value, rest = (given.group(1), words[1:]) if given.group(1) else (words[1] if len(words) > 1 else "", words[2:])
+            try:
+                words = shlex.split(value) + rest
+            except ValueError:
+                words = value.split() + rest
+            split = True
         elif wrapper and word.startswith("-"):
-            j += 2 if word in WRAPPERS[wrapper] else 1
+            words = words[2:] if word in WRAPPERS[wrapper] else words[1:]
         elif wrapper == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", word):
-            j += 1
+            words = words[1:]
         else:
             break
-    return j
+    return words, split
 
 
 def code_of(words, piped_from=None):
     """The text a command runs as code: a shell's -c string (bash -lc too) or <<< string; what echo, printf or
     cat <<< prints into a shell, or into source or ., through a pipe or a <(...); eval's words; ssh's remote
-    command. The command is the word command_at finds: a later word that only names one is an argument
-    (sudo git commit -m eval, grep -c sh, jq .). None when the command runs no code."""
-    j = command_at(words)
-    if j >= len(words):
+    command; the command env -S's string makes. The command is the word command_words finds: a later word that
+    only names one is an argument (sudo git commit -m eval, grep -c sh, jq .). None when the command runs no
+    code."""
+    command, split = command_words(words)
+    if not command:
         return None
-    head, rest = os.path.basename(words[j]), words[j + 1:]
+    head, rest = os.path.basename(command[0]), command[1:]
     if head == "eval":
         return " ".join(rest)
     if head == "ssh":
         return remote_command(rest)
     if head not in CODE_RUNNERS:
-        return None
+        return shlex.join(command) if split else None
     k = next((k for k, w in enumerate(rest) if w in ("<<<", "<(") or (head in SHELLS and SHELL_COMMAND.fullmatch(w))), None)
     if k is None:
         return printed(piped_from) if piped_from else None

@@ -58,7 +58,7 @@ API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 VAR_REF = re.compile(r"repos/[^\s?#]*\$")
 LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
 # A repository reached by its numeric id: whose it is the guard cannot tell.
-BY_ID = re.compile(r"(?:^|/)repositories/\d+", re.IGNORECASE)
+BY_ID = re.compile(r"(?:^|/)repositories/(?:\d+|[^/\s]*[$`])", re.IGNORECASE)
 # What a tech lead may POST or PATCH on another repository, past repos/<owner>/<name>: a new issue, an issue's
 # comments, labels and assignees, and a comment. GitHub takes a POST on what it patches as that PATCH, so a POST
 # on an issue itself (which can close it, or a pull request) is no more allowed than a PATCH there.
@@ -161,8 +161,8 @@ def mentioned(texts):
 
 
 def elsewhere_name(name):
-    """A repository named for gh is another one: not this one, or one held in a shell variable."""
-    return "$" in name or repo_of(name) not in (None, own)
+    """A repository named for gh is another one: not this one, or one the shell fills in (a variable, backticks)."""
+    return "$" in name or "`" in name or repo_of(name) not in (None, own)
 
 
 def elsewhere_named(words, assigns):
@@ -264,20 +264,49 @@ def shell_fills_query(text):
     quotes. Inside single quotes a $name is the query's own variable; the tokenizer drops the quotes, so only the
     raw text tells the two apart."""
     for match in re.finditer(r"query=", text):
-        quote = None
+        quote, escaped = None, False
         for char in text[match.end():]:
+            if escaped:
+                escaped = False
+                continue
             if quote is None and (char.isspace() or char in ";&|<>()"):
                 break
-            if char in "'\"" and quote in (None, char):
+            if char == "\\" and quote != "'":
+                escaped = True
+            elif char in "'\"" and quote in (None, char):
                 quote = None if quote == char else char
             elif char in "$`" and quote != "'":
                 return True
     return False
 
 
+def api_positionals(rest):
+    """The words of a gh api call that are no option nor an option's value: its endpoint, as gh reads them."""
+    found, value_of = [], None
+    for i, w in enumerate(rest[1:], 1):
+        if value_of == i:
+            continue
+        if w.startswith("--"):
+            if w.partition("=")[0] in GH_API_LONG_VALUES and "=" not in w:
+                value_of = i + 1
+        elif w.startswith("-") and len(w) > 1:
+            for k, letter in enumerate(w[1:], 2):
+                if letter in GH_API_SHORT_VALUES:
+                    if not w[k:]:
+                        value_of = i + 1
+                    break
+        else:
+            found.append(w)
+    return found
+
+
 def graphql_refused(head, words):
     """Why a command sends GitHub's GraphQL API a mutation typed by hand, or a query the guard cannot read."""
     rest = gh_words(words[1:])[0] if head == "gh" else []
+    # An endpoint that starts with what the shell fills in: which API it calls the guard cannot tell (one that
+    # starts as repos/<owner>/<name>/ is judged by the rules on another repository).
+    if rest[:1] == ["api"] and any(re.match(r"[$`]", w) for w in api_positionals(rest)):
+        return "the gh api endpoint is held in a variable: which API it calls the guard cannot tell"
     if rest[:1] == ["api"] and any(GRAPHQL.search(w) for w in rest[1:] if not FIELD.match(w)):
         if any(MUTATION.search(w) for w in rest):
             return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
@@ -330,7 +359,7 @@ if any(s[:2] == ["gh", "search"] for s in segments):
 # Another repository named in the text must be in a command the guard judged and let through: a word the
 # tokenizer drops (a # inside a word), an option it skips (env -S) or an argument after a sh -c string is not.
 judged = Counter()
-where, pushed = cwd, []
+where, previous, pushed = cwd, cwd, []
 for words in segments:
     assigns, chdir = [], None
     while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec", "command")):
@@ -341,13 +370,18 @@ for words in segments:
             rest = words[1:]
             while rest and rest[0].startswith("-"):
                 option = rest.pop(0)
-                if option in ("-C", "--chdir", "-u", "--unset") and rest:
+                if option in ("--chdir", "--unset") and rest:
                     value = rest.pop(0)
-                    chdir = value if option in ("-C", "--chdir") else chdir
+                    chdir = value if option == "--chdir" else chdir
                 elif option.startswith("--chdir="):
                     chdir = option.split("=", 1)[1]
-                elif option.startswith("-C") and len(option) > 2:
-                    chdir = option[2:]
+                elif not option.startswith("--"):
+                    # Short options stack (-iC <dir>, -iC<dir>): C and u take the rest of the word, or the next one.
+                    for k, letter in enumerate(option[1:], 2):
+                        if letter in "Cu":
+                            value = option[k:] or (rest.pop(0) if rest else "")
+                            chdir = value if letter == "C" else chdir
+                            break
             words = [words[0]] + rest
         words = words[1:]
     if not words:
@@ -403,13 +437,21 @@ for words in segments:
         judged += mentioned([inner])
         continue
 
+    if head == "cd" and words[1:2] == ["-"]:
+        where, previous = previous, where
+        continue
+    if head == "pushd" and len(words) == 1:
+        # pushd alone swaps the folder with the last one pushed.
+        if pushed:
+            where, pushed[-1] = pushed[-1], where
+        continue
     if head in ("cd", "pushd") and len(words) > 1:
         if head == "pushd":
             pushed.append(where)
-        where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
+        where, previous = os.path.realpath(os.path.join(where, os.path.expanduser(words[1]))), where
         continue
     if head == "popd":
-        where = pushed.pop() if pushed else where
+        where, previous = (pushed.pop() if pushed else where), where
         continue
 
     why = elsewhere_refused(head, words, assigns, other) or graphql_refused(head, words)
@@ -421,7 +463,7 @@ for words in segments:
         j, gitdir = 1, here
         while j < len(words) and words[j].startswith("-"):
             if words[j] == "-C" and j + 1 < len(words):
-                gitdir = os.path.realpath(os.path.join(where, os.path.expanduser(words[j + 1])))
+                gitdir = os.path.realpath(os.path.join(here, os.path.expanduser(words[j + 1])))
                 j += 2
             elif words[j] == "-c":
                 j += 2
@@ -479,7 +521,8 @@ for words in segments:
             refuse(f"{head} could change another repository ({other}); there you may only read")
         if any(re.match(r"^\d*>>?$", w) for w in words):
             refuse(f"it writes a file while in another repository ({other})")
-unjudged = mentioned([script]) - judged
+# The words judged come without the shell's quotes and backslashes: the text is read the same way.
+unjudged = mentioned([re.sub(r"[\"'\\\\]", "", script)]) - judged
 if unjudged:
     (kind, name), _ = next(iter(unjudged.items()))
     refuse(f"it {kind} {name} where the guard cannot judge it")

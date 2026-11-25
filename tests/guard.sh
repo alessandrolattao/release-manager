@@ -296,6 +296,29 @@ check deny tech-lead 'echo x#; gh api -X PUT repos/someone/else/pulls/5/merge'
 check deny spike 'echo x#; gh issue close https://github.com/someone/else/issues/5'
 check allow tech-lead "bash -c 'gh api repos/someone/else/issues/3'"
 check allow tech-lead 'gh issue view 3 -R someone/else; gh api repos/someone/else/issues/3/comments'
+# The whole text is read as the words are, without quotes and backslashes: an allowed command cannot cover
+# another repository named where no judged command holds it.
+check deny tech-lead "gh api \"repos/some\"one/else/issues/3; bash -c 'gh api -X PUT \"\$0\"' repos/someone/else/pulls/5/merge"
+check deny tech-lead 'gh api repos/someone\/else/issues/3; echo x#; gh api -X PUT repos/someone/else/pulls/5/merge'
+check deny tech-lead "eval gh api \"repos/some\"one/else/issues/3; bash -c 'gh api -X PUT \"\$0\"' repos/someone/else/pulls/5/merge"
+check deny tech-lead "gh issue view https://github.com/some\\one/else/issues/3; env -S'gh issue close https://github.com/someone/else/issues/5'"
+check deny spike "gh repo view \"https://github.com/some\"one/else; bash -c 'gh issue close \"\$0\"' https://github.com/someone/else/issues/5"
+check allow tech-lead 'gh api "repos/some"one/else/issues/3'
+# The folder, however it is reached: grouped env options, cd -, pushd alone; git -C from there.
+check deny tech-lead "env -iC $S gh issue close 3"
+check deny tech-lead "env -iC$S gh issue close 3"
+check deny tech-lead "cd $S; cd /tmp; cd -; gh issue close 3"
+check allow tech-lead "cd $S; cd -; gh issue close 3"
+check deny tech-lead "pushd $S; pushd /tmp; pushd; gh issue close 3"
+check deny tech-lead "env -C $S git -C . checkout main"
+# What the shell fills in: repositories/\$ID, backticks around a -R value, an endpoint held in a variable.
+check deny tech-lead 'gh api -X PUT "repositories/$ID/pulls/5/merge"'
+check deny tech-lead 'gh release create v1 -R `echo someone/else`'
+check deny tech-lead 'EP=graphql; gh api "$EP" -F query=@m.graphql'
+check deny tech-lead 'gh api "$EP"'
+check allow tech-lead 'gh api -H "$ACCEPT" repos/test/repo/issues/3'
+# An escaped \$ in double quotes is the query's own variable.
+check allow tech-lead 'gh api graphql -F o=x -f query="query(\$o: String!) { repository(owner: \$o, name: \"b\") { id } }"'
 # A spike only reads, and still not another repository through GitHub.
 check deny spike 'gh issue view 3 -R someone/else'
 check deny spike 'gh api repos/someone/else/issues'

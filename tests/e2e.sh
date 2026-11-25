@@ -335,18 +335,24 @@ echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 dev --repo someone/
 ok "and only to its tech lead" "$code" "2"
 echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 "tech lead" --repo Test/Repo >/dev/null 2>&1; code=$?
 ok "--repo names another repository, never this one" "$code" "2"
+echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 "tech lead" --repo 'someone/else/forks#' >/dev/null 2>&1; code=$?
+ok "--repo is a repository, <owner>/<name>, nothing more" "$code" "2"
 printf 'Trovato: gli ordini annullati restano aperti\n' | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/note.sh" 7 --repo someone/else >/dev/null
 f=$(ls -t "$G/comments/7."* | head -1)
 ok "note.sh --repo writes on that repository" "$(repo_of_last "$f")" "someone/else"
 ok "as written, signed with this repository" "$(head -1 "$f") | $(tail -1 "$f")" "Trovato: gli ordini annullati restano aperti | <!-- team · tech lead of test/repo -->"
 echo "x" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/note.sh" 7 --repo someone/else >/dev/null 2>&1; code=$?
 ok "note.sh --repo only from a tech lead" "$code" "2"
+echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/note.sh" 7 --repo 'someone/else/actions/runs/1/rerun#' >/dev/null 2>&1; code=$?
+ok "note.sh --repo only <owner>/<name>" "$code" "2"
 url=$(printf 'Gli ordini si leggono da un endpoint\n' | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/open-issue.sh" "Orders endpoint" @me --repo someone/else)
 n=${url##*/}
 ok "open-issue.sh --repo opens it on that repository" "$url | $(cat "$G/issues/$n.title") | $(cat "$G/issues/$n.meta")" "https://github.com/someone/else/issues/$n | Orders endpoint | repo=someone/else labels= assignees=tester"
 ok "its body as written, signed with this repository" "$(head -1 "$G/issues/$n.body") | $(tail -1 "$G/issues/$n.body")" "Gli ordini si leggono da un endpoint | <!-- team · tech lead of test/repo -->"
 echo "x" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/open-issue.sh" "x" @me --repo someone/else >/dev/null 2>&1; code=$?
 ok "open-issue.sh --repo only from a tech lead" "$code" "2"
+echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/open-issue.sh" "x" @me --repo 'someone/else/milestones#' >/dev/null 2>&1; code=$?
+ok "open-issue.sh --repo only <owner>/<name>" "$code" "2"
 
 echo "== dispatch.sh: what another repository's tech lead writes here"
 {

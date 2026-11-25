@@ -147,8 +147,13 @@ lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 # that repository's dispatcher wakes its own tech lead with it.
 signer_elsewhere="tech lead of $repo_full"
 # may_write_elsewhere <session-id> <owner/name>: exits 2, saying why, unless the session is a tech lead and
-# the repository is another one. Called as a command, never in $(...): it ends the script.
+# the repository is another one, named <owner>/<name> and nothing more (the scripts write under
+# repos/<owner>/<name>/issues). Called as a command, never in $(...): it ends the script.
 may_write_elsewhere() {
+	printf '%s\n' "$2" | grep -Eqx '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' || {
+		echo "--repo takes a repository as <owner>/<name>, not '$2'" >&2
+		exit 2
+	}
 	[ "$(jq -r '.role // ""' "$sessions_dir/$1/status" 2>/dev/null || true)" = tech-lead ] || {
 		echo "only a tech lead writes on another repository: write to your tech lead on the issue (comment.sh <n> \"tech lead\")" >&2
 		exit 2

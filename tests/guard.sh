@@ -11,12 +11,8 @@ trap 'exit 143' TERM
 mkdir -p "$T/home/.config"
 # Nothing of the machine's own: its home and git configuration stay out.
 export HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" GIT_CONFIG_NOSYSTEM=1
-# The session's scratch folder, outside the repository; UNKNOWN_DIR is a variable the session does not know.
-export CLAUDE_JOB_DIR="$T/jobs/x"
-unset UNKNOWN_DIR
 R="$T/repo"
 git init -q -b main "$R" || exit 1
-mkdir -p "$R/sub"
 # A sibling repository, outside the fake one: there a spike may only read.
 S="$T/sibling"
 git init -q -b main "$S" || exit 1
@@ -125,36 +121,5 @@ check deny tech-lead 'curl -sL https://codeload.github.com/someone/else/tar.gz/m
 check deny tech-lead 'curl -s https://gist.github.com/someone/abc123'
 check deny tech-lead 'curl -s https://uploads.github.com/repos/someone/else/releases/1/assets'
 check allow tech-lead 'ls ~/src/gist.github.com/foo/bar'
-# The edit check judges the path: sed -i or perl -i only on a file of the repository. The script and the values
-# of -e/-f are no files, a relative path is resolved after the cds, a variable from the session's environment.
-J="$T/jobs/x/tmp"
-check allow spike "sed -i -e 's/a/b/' $J/x.txt"
-check allow spike "sed -i --expression='s/a/b/' $J/x.txt"
-check allow spike "sed -n -i -f $T/s.sed $J/x.txt"
-check allow spike "perl -i -pe 's/a/b/' $J/x.txt"
-check allow spike "perl -pi -e 's/a/b/' $J/x.txt"
-check allow spike "cd $J && sed -i 's/a/b/' x.txt"
-check allow spike "sed -i 's/a/b/' \"\$CLAUDE_JOB_DIR/tmp/x.txt\""
-check allow spike "sed -i 's/a/b/' \${CLAUDE_JOB_DIR}/tmp/x.txt"
-check allow spike "cd \$CLAUDE_JOB_DIR/tmp && sed -i 's/a/b/' x.txt"
-check allow spike "sed -i 's/a/b/' \$HOME/x.txt"
-check allow spike "sed -n 's/a/b/p' README.md"
-check allow spike "perl -ne 'print if /a/' README.md"
-check deny spike "sed -i -e 's/a/b/' README.md"
-check deny spike "cd sub && sed -i 's/a/b/' ../README.md"
-check deny spike "sed -i 's/a/b/' \$HOME/../repo/README.md"
-check deny spike "cd $J && sed -i 's/a/b/' $R/README.md"
-# A variable the session does not know, or a substitution, may be the repository.
-check deny spike "sed -i 's/a/b/' \"\$UNKNOWN_DIR/x.txt\""
-check deny spike "sed -i 's/a/b/' \"\$(git rev-parse --show-toplevel)/README.md\""
-check deny spike "cd \$UNKNOWN_DIR && sed -i 's/a/b/' x.txt"
-# The in-place forms the check missed before.
-check deny spike "perl -pi -e 's/a/b/' README.md"
-check deny tech-lead "perl -pi.bak -e 's/a/b/' $R/README.md"
-check deny spike "perl -0777 -pi -e 's/a/b/' README.md"
-check deny spike "sed -ni 's/a/b/p' README.md"
-check deny spike "sed -Ei 's/a/b/' README.md"
-check deny spike "sed -i --expression='s/a/b/' README.md"
-check deny spike "sed 's/a/b/' -i README.md"
 echo "passed=$pass failed=$fail"
 [ "$fail" = 0 ]

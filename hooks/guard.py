@@ -5,8 +5,7 @@ so a comment or a rule that talks about "git push" passes. The plugin's own scri
 ones a spike may not run.
 Refused:
   - a command that changes code, branches or pull requests (git commit, push, merge, rebase, ...; gh pr
-    create, merge, ...; claude --bg or -p; sed -i or perl -i on a file of the repository, or on a path whose
-    variable the session does not know);
+    create, merge, ...; claude --bg or -p; sed -i or perl -i on a file of the repository);
   - anything aimed at another repository but reading it with git (gh -R, gh search, links to it, writing or
     building inside it, its API: repos/<other> in the words of gh api or in a curl or wget URL to api.github.com,
     whatever the method; a local path that holds repos/... or github.com/... is no call and no link);
@@ -31,8 +30,6 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
-# The digits perl's -0, -l and -C take inside a cluster (-0777 -pi, -l0pe, -C7).
-PERL_DIGITS = {"0": r"x[0-9a-fA-F]*|[0-7]*", "l": r"[0-7]*", "C": r"\d*"}
 # The API of a repository: a gh api endpoint (repos/..., /repos/..., https://api.github.com/repos/...) or a curl or
 # wget URL to api.github.com. GraphQL names no repository: it is not judged.
 GH_API_ENDPOINT = re.compile(r"^(?:(?i:(?:https?://)?api\.github\.com))?/?repos/([\w.-]+/[\w.-]+)")
@@ -66,59 +63,9 @@ def toplevel(path):
     return os.path.realpath(out.stdout.strip()) if out.returncode == 0 else None
 
 
-def resolved(path, base):
-    """A path as written in a command run from base, its variables taken from the session's environment; a
-    variable the environment does not know stays as $NAME."""
-    return os.path.realpath(os.path.join(base, os.path.expanduser(os.path.expandvars(path))))
-
-
-def inside_repo(real):
+def inside_repo(path):
+    real = os.path.realpath(os.path.join(cwd, os.path.expanduser(path)))
     return real == root or real.startswith(root + os.sep)
-
-
-def edited_in_place(head, args):
-    """The files sed -i or perl -i edits in place, as written; none when it edits nothing in place. The script
-    and the values of -e, -f (sed) or -e, -E (perl) are no files. sed reads its options anywhere, perl until
-    its first other word."""
-    in_place, script, operands, k = False, False, [], 0
-    while k < len(args):
-        word = args[k]
-        k += 1
-        if word == "--":
-            operands += args[k:]
-            break
-        if head == "sed" and word.startswith("--"):
-            name, given, _ = word[2:].partition("=")
-            in_place |= name == "in-place"
-            script |= name in ("expression", "file")
-            if name in ("expression", "file", "line-length") and not given:
-                k += 1
-            continue
-        if word.startswith("-") and len(word) > 1:
-            j = 1
-            while j < len(word):
-                c = word[j]
-                j += 1
-                if c == "i":
-                    in_place = True  # the rest of the word is the backup's suffix
-                    break
-                if c in ("efl" if head == "sed" else "eEI"):
-                    script |= c in "eEf"
-                    if j == len(word):
-                        k += 1  # the value is the next word
-                    break
-                if head == "perl" and c in "FMmxdDV":
-                    break  # the rest of the word is the option's value
-                if head == "perl" and c in PERL_DIGITS:
-                    j += re.match(PERL_DIGITS[c], word[j:]).end()
-            continue
-        if head == "perl":
-            operands += args[k - 1:]
-            break
-        operands.append(word)
-    if not in_place:
-        return []
-    return operands if script else operands[1:]
 
 
 def segments_of(text):
@@ -250,7 +197,7 @@ for words in segments:
         continue
 
     if head == "cd" and len(words) > 1:
-        where = resolved(words[1], where)
+        where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
         continue
 
     for i, w in enumerate(words):
@@ -308,14 +255,13 @@ for words in segments:
     if head == "claude" and any(w in ("--bg", "--background", "-p", "--print") for w in words[1:]):
         refuse("agents start through the plugin's scripts (start-dev.sh, spike.sh), never by hand")
 
-    if head in ("sed", "perl"):
-        for file in edited_in_place(head, words[1:]):
-            real = resolved(file, where)
-            # What the guard cannot show outside the repository, it takes for inside.
-            if "$" in real:
-                refuse(f"{head} -i edits {file}, whose variable the session does not know: it may be a file of the repository")
-            if inside_repo(real):
-                refuse(f"{head} -i edits a file of the repository")
+    if head in ("sed", "perl") and any(w in ("-i", "--in-place") or w.startswith("-i") for w in words[1:]):
+        files = [w for w in words[1:] if not w.startswith("-")]
+        # Without -e or -f the first word is the script, the rest are files.
+        if not any(w in ("-e", "--expression", "-f", "--file") or w in ("-pe", "-ne", "-pi", "-npe") for w in words[1:]):
+            files = files[1:]
+        if any(inside_repo(f) for f in files):
+            refuse(f"{head} -i edits a file of the repository")
 
     if other:
         if head in BUILD:

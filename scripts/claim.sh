@@ -17,6 +17,8 @@ issue=${2:-}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 # The machine: its host name, which several installs may share ("fedora"), and the start of its machine id,
 # which they do not.
 host=$( (hostname -s 2>/dev/null || hostname) | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-\n' '-' | head -1)
@@ -60,7 +62,7 @@ take)
 		exit 1
 	fi
 	link=$(printf '**dispatcher · %s** takes #%s\n\nA developer starts on %s, unless another machine took the issue first.\n' \
-		"$host" "$issue" "$host" | gh issue comment "$issue" --body-file -)
+		"$host" "$issue" "$host" | rest_body "repos/$repo_full/issues/$issue/comments" --jq .html_url)
 	mine=${link##*-}
 	sleep "$WAIT"
 	first=$(takes | head -1)
@@ -69,7 +71,7 @@ take)
 		echo "issue $issue: taken by this machine ($host)"
 		exit 0
 	fi
-	gh api -X DELETE "repos/$repo_full/issues/comments/$mine" >/dev/null 2>&1 || true
+	rest -X DELETE "repos/$repo_full/issues/comments/$mine" >/dev/null 2>&1 || true
 	echo "issue $issue: taken by ${first#* }"
 	exit 1
 	;;
@@ -77,7 +79,8 @@ release)
 	why=${3:?why the issue is released}
 	who=$(address_of "${CLAUDE_CODE_SESSION_ID:-}")
 	[ "$who" != team ] || who="dispatcher · $host"
-	printf '**%s** releases #%s\n\n%s\n' "$who" "$issue" "$why" | gh issue comment "$issue" --body-file - >/dev/null
+	printf '**%s** releases #%s\n\n%s\n' "$who" "$issue" "$why" |
+		rest_body "repos/$repo_full/issues/$issue/comments" >/dev/null
 	sh "$here/issue-status.sh" "$issue" todo >/dev/null 2>&1 || true
 	echo "issue $issue: released, Todo again"
 	;;

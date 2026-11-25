@@ -358,6 +358,20 @@ check deny tech-lead "declare HO''ME=https://api.github.com; curl -s ~/repos/som
 check deny tech-lead 'declare "H$(echo O)ME=https://api.github.com"; curl -s ~/repos/someone/else/issues'
 check deny tech-lead 'source ./env.sh; curl -s ~/repos/someone/else/issues'
 check deny tech-lead '. ./env.sh; curl -s $HOME/repos/someone/else/issues'
+# The host of a URL is no folder to fold away: curl stays on it and sends /repos/...
+check deny tech-lead 'curl -s https://api.github.com/../repos/someone/else/issues'
+check deny tech-lead 'curl -s https://API.github.com/x/../../repos/someone/else/issues'
+check allow tech-lead 'curl -s https://example.com/../repos/a/b'
+# A space inside ${...} is no other text in the string.
+check deny tech-lead 'gh api "${X:+ }repos/someone/else/issues"'
+check deny tech-lead 'gh api "${X/ /}repos/someone/else/issues"'
+# An escaped space or ; is in its word: a # after it starts no comment.
+check deny tech-lead 'echo \ #x; gh api repos/someone/else/issues'
+check deny tech-lead 'echo \;#x; gh api repos/someone/else/issues'
+check deny tech-lead 'echo \ #x; git push'
+# Inside $'...', \' is a quote of the string, not its end.
+check deny tech-lead "echo \$'\\'' ; gh api repos/someone/else/issues #'"
+check allow tech-lead "gh issue comment 3 --body \$'see repos/a/b'"
 check allow tech-lead 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/repos/someone_else/dispatcher.log"; cat ~/../repos/a/b'
 # Only spaces before repos/ in a quoted string are no other text: it still starts with the endpoint.
 check deny tech-lead "echo ' repos/someone/else/issues' | xargs gh api"

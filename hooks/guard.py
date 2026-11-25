@@ -38,8 +38,8 @@ SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh"
 # wget, a variable, a function, data piped into xargs: all alike). GraphQL names no repository: it is not judged.
 REPOS = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 # What may come before repos/ in its word in an API call: nothing, slashes, or the API's host (any case, any
-# scheme or user before it, a port).
-ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?/*")
+# scheme or user before it, a port), and ./ or ../ after it, which curl folds away above the host's root.
+ENDPOINT_PREFIX = re.compile(r"(?:\S*(?i:api\.github\.com)(?::\d+)?)?(?:/+\.\.?)*/*")
 # A variable or a substitution (blanked as $) right before repos/, with only slashes and .. between: it may
 # stand for the API's host ($API/repos/..., $API/../repos/...). One at the start of a local path does not
 # ($X/.../repos/), nor does $HOME, the home folder as ~ is.
@@ -360,8 +360,9 @@ def is_call(text, at, strings):
     and ends."""
     string = next((start for start, end in strings if start <= at < end), None)
     inside = text[string:at] if string is not None else ""
-    # Spaces at the start of the string are no other text (' repos/...' still starts with the endpoint).
-    if re.search(r"\s", inside.lstrip()):
+    # Spaces at the start of the string are no other text (' repos/...' still starts with the endpoint), nor is
+    # a space inside ${...} ("${X:+ }repos/...").
+    if re.search(r"\s", re.sub(r"\$\{[^}]*\}", "$V", inside).lstrip()):
         return False
     if inside != inside.lstrip():
         word = inside.lstrip()
@@ -417,23 +418,38 @@ def scan(text):
     blanked and its unquoted new lines turned into ; (they end a command); the command texts of its
     substitutions; the text with its substitutions blanked too, as $; and where the text of each quoted string
     starts and ends. A substitution is $(...) or `...`, bare or double-quoted; inside single quotes or escaped
-    (an odd number of backslashes) it is text. A comment starts where a word does (not in a#b, nor right after a
-    substitution: $(x)#b) and ends with its line."""
+    (an odd number of backslashes) it is text; in $'...' a backslash quotes the next character, a quote included.
+    A comment starts where a word does (not in a#b, nor right after a substitution or an escaped character, a
+    space or ; included: $(x)#b) and ends with its line."""
     out, plain, inners, strings = list(text), list(text), [], []
     quote, opened, i, after = None, 0, 0, -1
     while i < len(text):
         c = text[i]
-        if quote == "'" and c != "'":
+        if quote == "$'":
+            # $'...': a backslash quotes the next character there, \' included.
+            if c == "'":
+                strings.append((opened, i))
+                quote = None
+            elif c == "\\" and i + 1 < len(text):
+                out[i + 1] = marked(text[i + 1])
+                i += 1
+            out[i] = marked(out[i]) if c != "'" else c
+            i += 1
+        elif quote == "'" and c != "'":
             out[i] = marked(c)
             i += 1
         elif c == "\\" and quote != "'":
+            # An escaped character is in its word: a # right after it starts no comment (\ #x).
             if i + 1 < len(text):
                 out[i + 1] = marked(text[i + 1])
-            i += 2
+            i = after = i + 2
         elif c in "'\"" and quote in (None, c):
             if quote:
                 strings.append((opened, i))
-            quote, opened = (None, 0) if quote else (c, i + 1)
+                quote = None
+            else:
+                quote = "$'" if c == "'" and i and text[i - 1] == "$" and i != after else c
+                opened = i + 1
             i += 1
         elif c == "\n" and quote is None:
             out[i] = ";"
@@ -466,10 +482,10 @@ def scan(text):
 def folded(word):
     """A word with its /./ and dir/../ folded, as a URL client folds them (api.github.com/x/../repos/...); a
     leading ./ or ../ stays, a local path's own, and so does a .. after ~ or a variable, whose folder is not
-    known here (~/../repos/... is a local path)."""
+    known here (~/../repos/... is a local path), or after a URL's host, which curl stays on."""
     while True:
         fold = re.sub(r"(?<=/)\./", "", word)
-        fold = re.sub(r"(?:(?<=/)|^)(?!\.\.?/)(?![~$])[^/]+/\.\./", "", fold)
+        fold = re.sub(r"(?:(?<=/)(?<!//)|^)(?!\.\.?/)(?![~$])[^/]+/\.\./", "", fold)
         if fold == word:
             return word
         word = fold

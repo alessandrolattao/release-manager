@@ -286,6 +286,8 @@ ok "the giver is back in its worktree" "$(st "$DEV" place)" "worktree 42"
 echo "== checkout.sh take --as-is"
 held() { [ -f "$R/checkout" ] && echo held || echo free; }
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+# A commit of main's own, so what stays checked out differs from the agent's branch.
+git -C "$ROOT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "on main only"
 head_before=$(git -C "$ROOT" rev-parse HEAD)
 echo staged >"$ROOT/staged.txt" && git -C "$ROOT" add staged.txt
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --as-is >/dev/null 2>&1; code=$?
@@ -297,6 +299,7 @@ CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --as-is >/dev/null; code=$
 ok "take --as-is holds the checkout" "$code $(sed -n 1p "$R/checkout")" "0 $DEV"
 ok "and leaves HEAD where it was" "$(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(git -C "$ROOT" rev-parse HEAD)" "main $head_before"
 ok "its place is the checkout" "$(st "$DEV" place)" "checkout"
+ok "the head tested is the one checked out" "$(st "$DEV" tested_head)" "$head_before"
 ok "who shows as-is after the holder's name" "$(cd "$ROOT" && sh "$SC/checkout.sh" who | head -1 | sed 's/ since [^,]*,/,/')" "held by dev #42 as-is, on main"
 (cd "$ROOT" && sh "$SC/dispatch.sh" >/dev/null 2>&1)
 ok "and so does the board's summary" "$(jq -r '.checkout.holder' "$R/board.json")" "dev #42 as-is"
@@ -308,6 +311,7 @@ cd "$ROOT/.claude/worktrees/42-feature" || exit 1
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" give >/dev/null; code=$?
 ok "give frees it, on main" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD)" "0 free main"
 ok "and wakes the next in the queue" "$(grep -c 'checkout is free' "$S/$DEV2/wake")" "$((woken + 1))"
+git -C "$ROOT" reset -q --hard origin/main
 cd "$ROOT/.claude/worktrees/43-other" || exit 1
 CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null
 (cd "$ROOT" && sh "$SC/dispatch.sh" >/dev/null 2>&1)

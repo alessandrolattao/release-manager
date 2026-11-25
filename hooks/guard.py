@@ -32,7 +32,7 @@ READ_GIT = {"log", "show", "diff", "grep", "ls-files", "ls-tree", "blame", "bran
             "rev-list", "cat-file", "describe", "shortlog", "remote", "config", "worktree", "tag", "merge-base"}
 BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "ln", "install", "truncate", "npm", "npx",
          "bun", "bunx", "yarn", "pnpm", "go", "make", "cargo", "pip", "uv", "docker", "sst", "terraform", "cdk", "patch"}
-SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
+SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "merge-bot.sh", "checkout.sh"}
 # The API of a repository: repos/<owner>/<name>, refused by default wherever the shell runs it (gh api, curl,
 # wget, a variable, a function, data piped into xargs: all alike). GraphQL names no repository: it is not judged.
 REPOS = re.compile(r"repos/([\w.-]+/[\w.-]+)")
@@ -47,10 +47,10 @@ SHELLS = ("sh", "bash", "zsh", "dash")
 SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 # The commands that run a string as code, and ssh's options that take a value.
 CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
+SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
 # Commands that run the command after them (timeout 5 sh, xargs -I{} sh -c, sudo -u me sh ...).
 WRAPPERS = {"sudo", "doas", "env", "time", "nohup", "exec", "timeout", "nice", "ionice", "command", "builtin", "xargs",
             "stdbuf", "setsid"}
-SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
 # API rule's.

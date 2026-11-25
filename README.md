@@ -14,7 +14,7 @@ claude --bg --name "tech lead" "/team:tech-lead"   # the one you talk to, one pe
 
 Developers start by themselves. Every minute a dispatcher (a process of its own, not a model) starts one on the next workable issue: assigned to you, labelled `ready for development`, nothing blocking it, no `question`, best priority first. There is no cap: what is ready is what you want built, so you decide the pace by what you mark ready. The board's summary shows how long the plan usage lasts at this pace, as [clessidra](https://github.com/alessandrolattao/clessidra) estimates it. The same dispatcher wakes the sessions with the comments written to them and keeps the board's summary.
 
-The dispatcher runs only when you start it, one per repository on each machine that works on it: click its red `stopped` row in the board's summary, or run `/team:dispatcher` in a Claude Code session in the repository's checkout (`/team:dispatcher stop` stops it, `status` tells). It goes on after that session ends; after a restart of the machine it stays stopped until you start it again. After a plugin update, `/team:update` restarts it on the new version; the summary shows the version it runs.
+There is one dispatcher per repository on each machine that works on it. The tech lead keeps its machine's running: when it finds it stopped (a restart of the machine, a crash) it starts it again. `/team:dispatcher stop` in a Claude Code session in the repository's checkout stops it until you start it again yourself: click its red `stopped` row in the board's summary, or run `/team:dispatcher` (`status` tells). It goes on after that session ends. After a plugin update, `/team:update` restarts it on the new version; the summary shows the version it runs.
 
 ## GitHub is where the team talks
 
@@ -39,7 +39,7 @@ A rule holds for everyone, on every machine. A general one lives in this plugin,
 
 ## Several machines
 
-The team can work on one repository from several machines at once: start a dispatcher on each (`/team:dispatcher` in the repository's checkout), and keep the tech lead on the machine you talk to it from. GitHub is all they share.
+The team can work on one repository from several machines at once: keep the tech lead on the machine you talk to it from, and start a dispatcher on each of the others (`/team:dispatcher` in the repository's checkout; with no tech lead there, after a restart of the machine you start it again). GitHub is all they share.
 
 - **One machine per issue.** A workable issue is `ready for development` and not started (its own GitHub status is not In progress, In review or Done). Before it starts a developer, a machine takes the issue with a comment, `**dispatcher · <machine>** takes #<n>`, and waits 30 seconds: the oldest take still standing wins, sets the issue's status to In progress (the project's Status follows, when the issue is on a board), and starts; any other deletes its take. The developer sets In review when it opens its pull request; the merge closes the issue.
 - **Takeover.** An issue stays In progress while a machine works on it. When one stays there too long (a machine switched off), tell the tech lead to take it over: it releases the issue (`**tech lead** releases #<n>`), which is Todo again, and the first free machine takes it, from its pushed branch.
@@ -57,7 +57,7 @@ Machines may run different versions of the plugin for a while: the lines they ex
 
 ## When something goes wrong
 
-After a restart of the machine, the first Claude Code session that starts resumes the tech leads that were running, and their dispatcher resumes the developers and QA agents. When a session meets a problem of the plugin itself, it reports it as an issue on this repository, describing the plugin only.
+After a restart of the machine, the first Claude Code session that starts resumes the tech leads that were running, they start their dispatcher again (unless you had stopped it), and it resumes the developers and QA agents. When a session meets a problem of the plugin itself, it reports it as an issue on this repository, describing the plugin only.
 
 ## Install
 

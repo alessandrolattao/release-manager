@@ -19,8 +19,10 @@ import type { Board, BoardRow } from '../types'
 //     messages other repositories left in its inbox (tell.sh). A session outside the team runs nothing.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
-//     summary with the dispatcher, a process of its own (scripts/dispatcher.sh) started by hand, which a
-//     click on its row starts when it is stopped.
+//     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
+//     starts when it is stopped.
+//   - a tech lead keeps that dispatcher running: stopped (a restart of the machine, a crash), it starts it
+//     again; one the user stopped by hand stays stopped until the user starts it.
 
 const TICK_MS = 2000
 const ALIVE_EVERY_TICKS = 30
@@ -28,6 +30,8 @@ const BOARD_EVERY_TICKS = 2
 const ALTERNATE_S = 4
 const DISPATCHER_START_MS = 30000
 const DISPATCHER_ALIVE_S = 660
+// A dispatcher the tech lead could not start is tried again after this long.
+const DISPATCHER_RETRY_S = 300
 const STUCK_AFTER_S = 20 * 60
 // A wake waits until the model has been stopped for this long.
 const WAKE_QUIET_S = 5
@@ -68,6 +72,7 @@ let toldInbox = new Set<string>()
 let isBusy = false
 let isSyncing = false
 let isStartingDispatcher = false
+let dispatcherTriedAt = 0
 let isPaneOpened = false
 let ticks = 0
 const applied = new Map<string, string>()
@@ -221,8 +226,9 @@ async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
   }
 }
 
-// Starts this repository's dispatcher on this machine, when the user clicks its stopped row on the board: a
-// process of its own (scripts/dispatcher.sh), which goes on after this session ends.
+// Starts this repository's dispatcher on this machine, when the user clicks its stopped row on the board or
+// the tech lead finds it stopped: a process of its own (scripts/dispatcher.sh), which goes on after this
+// session ends.
 async function startDispatcher($: EngineInterface): Promise<void> {
   if (isStartingDispatcher) {
     return
@@ -243,6 +249,22 @@ async function startDispatcher($: EngineInterface): Promise<void> {
   } finally {
     isStartingDispatcher = false
   }
+}
+
+// A tech lead keeps its repository's dispatcher running on this machine: stopped by a restart of the
+// machine or a crash, it starts it again, at most once every few minutes. One the user stopped by hand
+// (dispatcher.stopped, which a start by hand removes) stays stopped: the user starts it again.
+async function keepDispatcher($: EngineInterface, repo: string, nowMs: number): Promise<void> {
+  const dir = `${await rootOf($)}/repos/${repo.replace('/', '_')}`
+  const lastCycle = Number(await readText($, `${dir}/dispatcher.alive`)) || 0
+  if (Math.floor(nowMs / 1000) - lastCycle <= DISPATCHER_ALIVE_S) {
+    return
+  }
+  if ((await readText($, `${dir}/dispatcher.stopped`)) !== '' || nowMs - dispatcherTriedAt < DISPATCHER_RETRY_S * 1000) {
+    return
+  }
+  dispatcherTriedAt = nowMs
+  void startDispatcher($)
 }
 
 // The board's windows: dialogs of the DOS programs of the 80s and 90s (dialogRows), one for the title and
@@ -507,6 +529,7 @@ async function tick($: EngineInterface): Promise<void> {
     if (role === 'tech-lead') {
       if (tickNumber % BOARD_EVERY_TICKS === 0 && status.repo) {
         await refreshBoard($, status.repo)
+        await keepDispatcher($, status.repo, nowMs)
         if (!isPaneOpened) {
           isPaneOpened = true
           void openBoard($)

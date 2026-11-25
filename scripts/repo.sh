@@ -142,7 +142,7 @@ inbox_dir() { printf '%s/inbox/%s' "$team_data" "$(printf '%s' "${1:-$repo_full}
 # lower <text>: the text in lower case (owner/name compares without case, as on GitHub).
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
-# On another repository a tech lead reads and writes issues and comments, never its code (hooks/guard.py).
+# On another repository a tech lead reads and writes issues and comments, never its code (the tech lead skill).
 # What it writes there is signed with this repository, `<!-- team · tech lead of <this repository> -->`, so
 # that repository's dispatcher wakes its own tech lead with it.
 signer_elsewhere="tech lead of $repo_full"

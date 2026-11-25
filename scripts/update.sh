@@ -1,11 +1,15 @@
 #!/bin/sh
 # Updates the team plugin on this machine and moves the team onto the new version:
-#   1. updates the plugin on every Claude Code account the team's sessions here use;
+#   1. updates the plugin on every Claude Code account the team's sessions here use; when none of them got
+#      a new version, it restarts nothing and ends ("nothing to update");
 #   2. restarts on the new version every dispatcher that was running here (a stopped one stays stopped);
 #   3. restarts every live team session on the new version, each once it is quiet (its conversation
 #      unchanged for 90 seconds, so no turn is cut): the quiet ones at once, the busy ones as soon as they
 #      go quiet, the one that started the update last; resuming it with no flags (a flag would start a
 #      copy) and a message with the new version and where its scripts are.
+# In steps 2 and 3 a dispatcher or a session already on the newest version installed for its account is left
+# alone ("already on <version>"): the version it runs is in dispatcher.version, a session's in its folder's
+# `version` (hooks/sessions.tsx). One that recorded none, started by an older version, is restarted.
 # After step 1 the newest installed version's own update.sh does the rest, so the restart prompt and every
 # later step are the new version's, whatever version started the update.
 # A process of its own, so it goes on after the session that started it is restarted too.
@@ -24,7 +28,7 @@ GONE=${UPDATE_GONE:-60}
 if [ "${1:-start}" = start ]; then
 	mkdir -p "$team_state"
 	setsid nohup sh "$here/update.sh" run >"$log" 2>&1 </dev/null &
-	echo "the team is updating on this machine: sessions restart as they go quiet (log: $log)"
+	echo "the team is updating on this machine: the sessions behind the new version restart as they go quiet (log: $log)"
 	exit 0
 fi
 
@@ -47,6 +51,15 @@ alive() {
 }
 # newest <config dir>: the newest installed version's folder of the plugin on that account.
 newest() { ls -d "$(home_of "$1")/plugins/cache/team/team/"*/ 2>/dev/null | sort -V | tail -1 | sed 's#/$##'; }
+# installed <accounts>: each account and the newest version of the plugin installed on it, one per line.
+installed() {
+	printf '%s\n' "$1" | while IFS= read -r cfg; do
+		p=$(newest "$cfg")
+		printf '%s\t%s\n' "$cfg" "${p##*/}"
+	done
+}
+# behind <version> <newest>: the version is older than the newest one; an empty version (none recorded) is.
+behind() { [ -z "$1" ] || { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }; }
 running() { [ "$(as "$1" claude agents --json </dev/null 2>/dev/null | jq --arg s "$2" '[.[] | select(.sessionId == $s and .status != null)] | length')" != 0 ]; }
 gone() {
 	roster=$(jq --arg s "$2" '[.workers[]? | select(.sessionId == $s)] | length' "$(home_of "$1")/daemon/roster.json" 2>/dev/null || echo 0)
@@ -58,10 +71,17 @@ gone() {
 if [ "${2:-}" != --plugin-updated ]; then
 	echo "$(date '+%F %T') update starts"
 	accounts=$( { cat "$sessions_dir"/*/config 2>/dev/null; echo; } | sort -u)
+	before=$(installed "$accounts")
 	printf '%s\n' "$accounts" | while IFS= read -r cfg; do
 		as "$cfg" claude plugin marketplace update team </dev/null >/dev/null 2>&1
 		echo "account $(home_of "$cfg"): $(as "$cfg" claude plugin update team@team </dev/null 2>&1 | tail -1)"
 	done
+	# No account got a new version: every session and dispatcher already runs what it can.
+	if [ "$(installed "$accounts")" = "$before" ]; then
+		echo "nothing to update"
+		echo "$(date '+%F %T') update done"
+		exit 0
+	fi
 	# The rest is the newest installed version's, on any of those accounts, unless this is that version.
 	latest=$(printf '%s\n' "$accounts" | while IFS= read -r cfg; do
 		p=$(newest "$cfg")
@@ -98,6 +118,11 @@ for repo in "$team_state"/repos/*/; do
 		echo "dispatcher $(basename "$repo"): left as it is (no folder or plugin)"
 		continue
 	}
+	have=$(cat "$repo/dispatcher.version" 2>/dev/null || true)
+	behind "$have" "${plugin##*/}" || {
+		echo "dispatcher $(basename "$repo"): already on $have"
+		continue
+	}
 	(cd "$root" && as "$cfg" sh "$plugin/scripts/dispatcher.sh" stop >/dev/null 2>&1)
 	echo "dispatcher $(basename "$repo"): $( (cd "$root" && as "$cfg" sh "$plugin/scripts/dispatcher.sh" start) 2>&1 | tail -1)"
 done
@@ -118,6 +143,11 @@ look() {
 	plugin=$(newest "$cfg")
 	[ -n "$plugin" ] && [ -d "$dir" ] || {
 		echo "$name: left as it is (no plugin or folder)"
+		return 0
+	}
+	have=$(cat "$folder/version" 2>/dev/null || true)
+	behind "$have" "${plugin##*/}" || {
+		echo "$name: already on $have"
 		return 0
 	}
 	# Quiet: its conversation unchanged for $QUIET seconds, so no turn is cut.

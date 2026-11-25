@@ -1,7 +1,8 @@
 # Sourced by every script and hook: where the team keeps its state. One place serves every Claude Code
 # account, since session ids are unique across them.
 #   $team_state/sessions/<id>/   one folder per session: role, cwd, config, alive, idle, status, color, name,
-#                                asked, blocked, wake (what the hooks module and the scripts read and write)
+#                                asked, blocked, wake, version (what the hooks module and the scripts read and
+#                                write)
 #   $team_state/repos/<key>/     one folder per repository: the checkout lock, the dispatcher's lock and
 #                                cursor, QA and review records, the board
 #   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages

@@ -14,6 +14,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     while it should be working, means stuck.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn.
+//   - it writes `version`, the plugin version it loaded at session start, once the session's folder has a
+//     `role`: at session start, or at the first tick that finds the one role.sh wrote. scripts/update.sh
+//     restarts only the sessions behind the newest version installed.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`), the main checkout freed for it, and in a tech lead the
 //     messages other repositories left in its inbox (tell.sh). A session outside the team runs nothing.
@@ -859,7 +862,8 @@ async function startUpdate($: EngineInterface): Promise<void> {
   }
 }
 
-// The plugin's version, read once from its manifest, for the foot of the board.
+// The plugin's version, read once from its manifest (at session start), for the foot of the board and the
+// session's `version`.
 let pluginVersion: string | undefined
 async function versionOf($: EngineInterface): Promise<string> {
   if (pluginVersion === undefined) {
@@ -871,6 +875,24 @@ async function versionOf($: EngineInterface): Promise<string> {
     }
   }
   return pluginVersion
+}
+
+// The folder this module wrote its `version` in; another one (none yet) gets it at the next chance.
+let versionFolder = ''
+// Writes the version the session loaded in a team session's folder, once: scripts/update.sh reads it.
+async function noteVersion($: EngineInterface, folder: string): Promise<void> {
+  if (versionFolder === folder) {
+    return
+  }
+  try {
+    const version = await versionOf($)
+    if (version !== '') {
+      await $.fs.write(`${folder}/version`, `${version}\n`)
+    }
+    versionFolder = folder
+  } catch (err) {
+    $.ui.log(`team: version: ${String(err)}`)
+  }
 }
 
 async function openBoard($: EngineInterface): Promise<void> {
@@ -893,6 +915,7 @@ async function tick($: EngineInterface): Promise<void> {
     if (role === '') {
       return
     }
+    await noteVersion($, folder)
     const nowMs = await $.clock.now()
     const now = Math.floor(nowMs / 1000)
     expected = expected.filter(x => x.until > nowMs)
@@ -1074,6 +1097,12 @@ function emptied(content: readonly ApiContentBlock[]): ApiContentBlock[] {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    // The version loaded now, kept for the session's `version`: in a team session's folder alone.
+    await versionOf($)
+    const folder = await folderOf($)
+    if ((await readText($, `${folder}/role`)) !== '') {
+      await noteVersion($, folder)
+    }
     await $.command.register({ name: 'team', description: 'Open the team pane: the project, its agents by state, the summary' })
     if (!isBusy) {
       await markTurn($, false)

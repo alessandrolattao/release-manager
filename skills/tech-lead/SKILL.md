@@ -99,7 +99,7 @@ sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh" "<topic, a few words>" <<'EOF'
 EOF
 ```
 
-Run it with the Bash tool in the background, one per question, several at once when they are independent: its end wakes you with the report. Bring each report to the user in plain words, with its options and its recommendation; the user decides, one decision at a time, and the decisions go on the issue as "Preparing the work" says.
+Run it with the Bash tool in the background, one per question, several at once when they are independent: its end wakes you with the report. A spike runs on the account's default model, as developers and QA agents do; `spike.sh --fable "<topic>"` runs it on Fable, only when the user chose that for this analysis: never on your own, and never for developers or QA agents. Bring each report to the user in plain words, with its options and its recommendation; the user decides, one decision at a time, and the decisions go on the issue as "Preparing the work" says.
 
 ## Recurring checks with Pulse
 

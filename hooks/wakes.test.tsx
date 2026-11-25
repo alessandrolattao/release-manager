@@ -41,6 +41,7 @@ function engine(on: On, logs: string[] = [], published = '9.9.9', toasts: string
     return { value: undefined }
   })
   on('command.register', () => ({ value: { command: 'team' } }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
   // /color and /rename, which the module runs between turns.
   on('command.run', () => ({ text: '' }))
   // The version published on the plugin's repository: the one running.

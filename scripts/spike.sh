@@ -3,9 +3,11 @@
 # technical analysis or an opinion the user asked for. It writes its report to a file; this script
 # waits for the session to end and prints the report. Run it with the Bash tool in the background:
 # its end wakes you with the report.
-#   spike.sh "<topic>" [minutes] <<'EOF'
+#   spike.sh [--fable] "<topic>" [minutes] <<'EOF'
 #   <the question: what to find out, what is already known or decided, what the user wants back>
 #   EOF
+# It runs on the account's default model; --fable runs it on Fable, only when the user chose that for this
+# analysis.
 #   spike.sh --wait <id> <report> [minutes]    wait again for a spike still at work
 # Run it from the main checkout. <minutes> (default 60) bounds the wait, not the spike.
 set -eu
@@ -52,6 +54,11 @@ if [ "${1:-}" = "--wait" ]; then
 	exit 0
 fi
 
+model=default
+if [ "${1:-}" = --fable ]; then
+	model=fable
+	shift
+fi
 topic=${1:?topic}
 minutes=${2:-60}
 # shellcheck source=scripts/repo.sh
@@ -80,7 +87,7 @@ brief="$brief
 $question"
 
 cd "$root"
-full=$(launch "$name" "$brief")
+full=$(launch "$name" "$brief" "$model")
 sh "$here/role.sh" "$full" spike "$topic" >/dev/null
 id=${full%%-*}
 echo "spike $id started as $name; report in $report"

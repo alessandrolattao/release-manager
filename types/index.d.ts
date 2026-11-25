@@ -44,6 +44,7 @@ export type Board = {
 declare module 'claude-code' {
   interface PluginState {
     // latest: the plugin's newest published version, when it is newer than the one running, else ''.
-    team: { board: Shaped<Board>; latest: string }
+    // model: this session's model, as /model shows it, for the board's summary.
+    team: { board: Shaped<Board>; latest: string; model: string }
   }
 }

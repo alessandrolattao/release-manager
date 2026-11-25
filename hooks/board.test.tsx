@@ -34,7 +34,10 @@ const BOARD: Board = {
 // published ('' when the running one is the newest).
 function stored(on: On, newer = ''): void {
   on('state.get', (_$, e) => ({
-    value: e.key === 'board' ? { value: { shape: 'board-4', value: BOARD }, version: 1 } : { value: newer, version: 1 },
+    value:
+      e.key === 'board'
+        ? { value: { shape: 'board-4', value: BOARD }, version: 1 }
+        : { value: e.key === 'model' ? 'claude-fable-5-2' : newer, version: 1 },
   }))
 }
 
@@ -74,6 +77,8 @@ test('the board groups the agents by state, names on the color of their state', 
   const stopped = await ui.find({ type: 'Text', text: /^stopped · click to start$/ })
   expect(stopped?.props.color).toBe('red')
   expect(await ui.find({ type: 'Button' })).toBeTruthy()
+  // The tech lead's model, by its name.
+  expect((await ui.find({ type: 'Text', text: /model +Fable 5\.2/ }))?.text).toMatch(/model +Fable 5\.2/)
   // At the foot, the plugin's version centered in the 48 columns.
   const foot = (await ui.find({ type: 'Text', text: /team 9\.9\.9/ }))?.text ?? ''
   expect(foot.trim()).toBe('team 9.9.9')

@@ -12,6 +12,7 @@
 #   dev | qa     the developer or the QA agent of that issue
 #   "<address>"  a session by its address, as "dev #42" or "qa #42"
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
+# The status records whom you wait on (waits_on: the address, or "the user"): their comment ends the wait.
 #   --fyi        a reply or a piece of news: nobody owes you an answer, your state does not change, and the
 #                header says so ("**dev #42 → tech lead** · fyi")
 # Prints the comment's link.
@@ -66,8 +67,9 @@ fi
 	if [ "$to" = you ]; then
 		state_set "$me" you "$first"
 		# Asked on GitHub, so the answer comes on GitHub: the plugin wakes the session with it.
-		status_set "$me" --argjson n "$issue" '.asked_on = $n'
+		status_set "$me" --argjson n "$issue" '.asked_on = $n | .waits_on = "the user"'
 	else
 		state_set "$me" others "waits for $address: $first"
+		status_set "$me" --arg w "$address" '.waits_on = $w'
 	fi
 }

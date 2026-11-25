@@ -12,6 +12,9 @@
 # when all of them were, the newest commit of the default branch, which holds the change, is followed instead.
 # A repository with no workflow that runs on a push gets NO CI at once, without waiting: the work ends with the
 # merge, as with GREEN.
+# While GitHub has not marked a merge that landed (merge.sh says so), the merge commit is the default branch's
+# commit whose second parent is the pull request's head. A squash or a rebase leaves none: not merged, until
+# GitHub marks it.
 set -eu
 
 pr=${1:?pull request number}
@@ -20,6 +23,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/repo.sh"
 base=$(base_branch)
 sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // empty')
+if [ -z "$sha" ]; then
+	head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)
+	if [ -n "$head" ] && in_base "$head"; then
+		sha=$(git rev-list --merges --parents "$head..origin/$base" | awk -v h="$head" '$3 == h { print $1 }' | tail -n 1)
+	fi
+fi
 [ -n "$sha" ] || {
 	echo "#$pr is not merged"
 	exit 1

@@ -114,6 +114,14 @@ check allow tech-lead "env -S 'git log -1'"
 check deny tech-lead "echo 'git push' | env -P /bin sh"
 check deny tech-lead "echo 'git push' | sudo -R / sh"
 check deny tech-lead "echo 'git push' | doas -a style sh"
+# Short options come bundled too, as getopt reads them: -iS, -nu me, -0I {}.
+check deny tech-lead 'env -iS "gh api repos/someone/else/issues"'
+check deny tech-lead "env -iS 'git push'"
+check deny tech-lead "echo 'git push' | sudo -nu me sh"
+check deny tech-lead "echo 'git push' | sudo -num sh"
+check deny tech-lead "echo 'git push' | env -Sbash"
+check deny tech-lead "echo 1 | xargs -0I {} sh -c 'git push'"
+check allow tech-lead "env -iS 'git log -1'"
 # ssh reads options after the host too, and -- ends them.
 check deny tech-lead "ssh host -- 'git push'"
 check deny tech-lead "ssh host -t 'git push'"

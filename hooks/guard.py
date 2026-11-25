@@ -153,30 +153,43 @@ def printed(words):
 
 def command_words(words):
     """A command's words from the command itself on, past assignments and wrappers with their options (sudo -u
-    me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1), and whether env -S gave them (its string, split into
-    words, is the command)."""
+    me, sudo -nu me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1), read as getopt reads them; and whether
+    env -S gave them (its string, split into words, is the command)."""
     words, wrapper, split = list(words), None, False
     while words:
-        word = words[0]
-        given = re.fullmatch(r"(?:-S|--split-string=?)(.*)", word) if wrapper == "env" else None
+        word, value = words[0], None
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
             words = words[1:]
         elif os.path.basename(word) in WRAPPERS:
             wrapper, words = os.path.basename(word), words[1:]
-        elif given:
-            value, rest = (given.group(1), words[1:]) if given.group(1) else (words[1] if len(words) > 1 else "", words[2:])
-            try:
-                words = shlex.split(value) + rest
-            except ValueError:
-                words = value.split() + rest
-            split = True
-        elif wrapper and word.startswith("-"):
-            words = words[2:] if word in WRAPPERS[wrapper] else words[1:]
+        elif wrapper and word.startswith("--"):
+            name, eq, given = word.partition("=")
+            takes = name in WRAPPERS[wrapper] or (wrapper == "env" and name == "--split-string")
+            value, words = (given, words[1:]) if eq or not takes else (words[1] if len(words) > 1 else "", words[2:])
+            if wrapper == "env" and name == "--split-string":
+                words, split = split_words(value) + words, True
+        elif wrapper and word.startswith("-") and len(word) > 1:
+            words = words[1:]
+            for i, c in enumerate(word[1:], 2):
+                if "-" + c in WRAPPERS[wrapper] or (wrapper == "env" and c == "S"):
+                    value = word[i:] or (words[0] if words else "")
+                    words = words if word[i:] else words[1:]
+                    if c == "S":
+                        words, split = split_words(value) + words, True
+                    break
         elif wrapper == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", word):
             words = words[1:]
         else:
             break
     return words, split
+
+
+def split_words(text):
+    """A string split into words as the shell would split it (env -S)."""
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
 
 
 def code_of(words, piped_from=None):

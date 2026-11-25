@@ -280,6 +280,25 @@ sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a dead developer whose issue cannot be read stays red" "$(grep -c 'deadjob1' "$T/claude.log") $(st "$DEV2" state)" "0 stuck"
 rm -f "$G/closed-42" "$G/closed-43" "$G/closed-45" "$G/state-broken"
 
+echo "== dispatch.sh: a developer that ran done.sh goes after 2 minutes, with its worktree and branch"
+git -C "$ROOT" branch -q 60-done
+git -C "$ROOT" push -q origin 60-done
+git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/60-done" 60-done
+DEV60=22222222-0000-0000-0000-000000000060
+(cd "$ROOT/.claude/worktrees/60-done" && sh "$SC/role.sh" "$DEV60" dev 60 60-done >/dev/null)
+CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null
+date +%s >"$S/$DEV60/alive"
+: >"$T/claude.log"
+cat >"$T/agents.json" <<EOF
+[{"id":"donejob1","sessionId":"$DEV60","status":"idle","state":"done"},{"id":"deadjob1","sessionId":"$DEV2","status":null,"state":"blocked"}]
+EOF
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "within 2 minutes of done.sh it stays, to end its turn" "$(grep -c 'donejob1' "$T/claude.log") $([ -d "$S/$DEV60" ] && echo yes || echo no)" "0 yes"
+jq ".since = $(($(date +%s) - 121))" "$S/$DEV60/status" >"$S/$DEV60/status.t" && mv "$S/$DEV60/status.t" "$S/$DEV60/status"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "after 2 minutes it is stopped and removed" "$(grep -c -x -e 'stop donejob1' -e 'rm donejob1' "$T/claude.log") $([ -d "$S/$DEV60" ] && echo yes || echo no)" "2 no"
+ok "with its clean worktree and its merged branch" "$([ -d "$ROOT/.claude/worktrees/60-done" ] && echo yes || echo no) $(git -C "$ROOT" branch --list 60-done | wc -l | tr -d ' ')" "no 0"
+
 echo "== resume-agents.sh: dead agents come back, stopped ones stay"
 echo true >"$G/issue-open"
 : >"$T/claude.log"

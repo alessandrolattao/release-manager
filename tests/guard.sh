@@ -157,6 +157,37 @@ check deny tech-lead 'gh issue view 3 -R someone/else `gh pr merge 5 -R someone/
 check deny tech-lead 'gh issue create -R someone/else --title x --body-file <(gh api -X PUT repos/someone/else/pulls/5/merge)'
 check deny tech-lead 'gh api repos/someone/else/issues -f body="$(gh api -X PUT repos/someone/else/pulls/5/merge)"'
 check allow tech-lead 'echo $(gh api repos/someone/else/issues/3 --jq .title)'
+# On another repository POST creates an issue, or adds to one its comments, labels and assignees, or edits a
+# comment; nothing else, whatever form the path takes.
+check deny tech-lead 'gh api repos/someone/else/issues/$N -f state=closed'
+check deny tech-lead 'gh api repos/someone/else/issues/%35 -f state=closed'
+check deny tech-lead 'gh api repos/someone/else/issues/5.json --input -'
+check deny tech-lead 'gh api repos/someone/else/issues/5/lock -f lock_reason=resolved'
+check deny tech-lead 'gh api repos/someone/else/issues/%35/comments -f body=x'
+check allow tech-lead 'gh api repos/someone/else/issues/5/assignees -f "assignees[]=a"'
+check allow tech-lead 'gh api -X POST repos/someone/else/issues/comments/9 -f body=x'
+# A repository reached by its id: whose it is the guard cannot tell.
+check deny tech-lead 'gh api -X PUT repositories/123/pulls/5/merge'
+check deny tech-lead 'gh api repositories/123/issues/5'
+check deny tech-lead 'curl -s https://api.github.com/repositories/123/issues'
+check deny spike 'gh api repositories/123'
+# GraphQL: queries typed by hand pass, mutations and what the guard cannot read do not; the scripts run theirs.
+check allow tech-lead "gh api graphql -f query='{ viewer { login } }'"
+check allow tech-lead "gh api graphql -F owner=a -f query='query(\$owner: String!) { repository(owner: \$owner, name: \"b\") { issue(number: 1) { title } } }'"
+check allow spike "gh api graphql -f query='{ viewer { login } }'"
+check deny tech-lead "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'"
+check deny spike "gh api graphql -f query='mutation { closeIssue(input: {issueId: \"x\"}) { clientMutationId } }'"
+check deny tech-lead "gh api https://api.github.com/graphql -f query='mutation { x }'"
+check deny tech-lead 'gh api graphql -F query=@m.graphql'
+check deny tech-lead "gh api graphql -F query=@- <<'EOF'
+mutation { x }
+EOF"
+check deny tech-lead 'gh api graphql -f query="$Q"'
+check deny tech-lead 'gh api graphql -f query="query Q { viewer { login } } $M" -f operationName=M'
+check deny tech-lead 'gh api graphql -f query="$(cat m.graphql)"'
+check deny tech-lead 'gh api graphql --input body.json'
+check deny tech-lead "curl -s -X POST https://api.github.com/graphql -d '{\"query\": \"mutation { x }\"}'"
+check allow tech-lead "sh $P/scripts/block.sh 5 3"
 # gh repo: a tech lead or a spike views or clones a repository, any one, and changes none, this one included.
 check allow tech-lead 'gh repo view'
 check allow tech-lead 'gh repo view someone/else --json description'

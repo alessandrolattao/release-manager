@@ -10,7 +10,11 @@ Refused:
     gh search, links to it, writing or building inside it), except, for a tech lead, its issues and comments:
     gh issue view, list, create, edit, comment and gh pr view, list, diff, comment, whether the repository
     comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
-    POST on repos/<other>/issues... but an issue itself, PATCH on repos/<other>/issues/comments/<id>;
+    POST on repos/<other>/issues (a new one), issues/<n>/comments, labels or assignees and issues/comments/<id>,
+    PATCH on repos/<other>/issues/comments/<id>;
+  - a repository reached by its id (repositories/<id>), whose it is the guard cannot tell;
+  - a GraphQL mutation typed by hand (gh api graphql, curl), or a query the guard cannot read (a file, stdin, a
+    variable); the plugin's scripts run theirs;
   - any gh repo subcommand but view, clone, gitignore and license, on any repository (view and clone pass
     with a link to another one too);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
@@ -44,6 +48,16 @@ GH_API_LONG_VALUES = {"--cache", "--field", "--header", "--hostname", "--input",
 GH_REPO_READS = {"view", "clone", "gitignore", "license"}
 API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
+# A repository reached by its numeric id: whose it is the guard cannot tell.
+BY_ID = re.compile(r"(?:^|/)repositories/\d+", re.IGNORECASE)
+# What a tech lead may POST or PATCH on another repository, past repos/<owner>/<name>: a new issue, an issue's
+# comments, labels and assignees, and a comment. GitHub takes a POST on what it patches as that PATCH, so a POST
+# on an issue itself (which can close it, or a pull request) is no more allowed than a PATCH there.
+POST_ELSEWHERE = re.compile(r"^/issues(/\d+/(comments|labels|assignees))?/?$|^/issues/comments/\d+/?$")
+PATCH_ELSEWHERE = re.compile(r"^/issues/comments/\d+/?$")
+# GitHub's GraphQL endpoint as gh api names it, and a mutation in what is sent there.
+GRAPHQL = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?graphql/?$", re.IGNORECASE)
+MUTATION = re.compile(r"\bmutation\b")
 # A gh api endpoint: a path or a URL of the API, the repository, then the rest of the path.
 ENDPOINT = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)(/[^?#]*)?", re.IGNORECASE)
 
@@ -128,16 +142,19 @@ def api_method(words):
 
 def elsewhere_named(words, assigns):
     """The other repositories a command reaches by its words: GH_REPO, which points gh at one before the
-    command or for the next ones (export, declare -x, env); its API paths; its links."""
+    command or for the next ones (export, declare -x, env); its API paths; its links; any repository by id."""
     text = assigns + words
     pointed = [w.split("=", 1)[1] for w in text if w.startswith("GH_REPO=")]
     pointed = [n for n in pointed if repo_of(n) not in (None, own)]
     called = [m.group(1) for w in text for m in API_REF.finditer(w) if m.group(1).lower() != own]
     linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
-    return pointed, called, linked
+    by_id = [m.group(0).lstrip("/") for w in text for m in BY_ID.finditer(w)]
+    return pointed, called, linked, by_id
 
 
-def elsewhere_reason(pointed, called, linked):
+def elsewhere_reason(pointed, called, linked, by_id):
+    if by_id:
+        return f"it calls the API of a repository by its id ({by_id[0]}): whose it is the guard cannot tell"
     if pointed:
         return f"it points gh at {pointed[0]}"
     if called:
@@ -151,7 +168,9 @@ def elsewhere_refused(head, words, assigns):
     A tech lead may read another repository's issues and pull requests and write issues and comments there;
     everything else stays refused, as for a spike.
     """
-    pointed, called, linked = elsewhere_named(words, assigns)
+    pointed, called, linked, by_id = elsewhere_named(words, assigns)
+    if by_id:
+        return elsewhere_reason(pointed, called, linked, by_id)
     rest, named = words[1:], []
     if head == "gh":
         rest, named = gh_words(rest)
@@ -180,16 +199,41 @@ def elsewhere_refused(head, words, assigns):
             path = m.group(2) or ""
             if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
                 continue
-            # PATCH on an issue can close it, or a pull request: only a comment is edited this way. GitHub takes
-            # a POST on what it patches as that PATCH, so a POST on an issue itself is refused too.
-            if method == "POST" and re.match(r"^/issues(/|$)", path) and not re.match(r"^/issues/\d+/?$", path):
+            if method == "POST" and POST_ELSEWHERE.match(path):
                 continue
-            if method == "PATCH" and re.match(r"^/issues/comments/\d+/?$", path):
+            if method == "PATCH" and PATCH_ELSEWHERE.match(path):
                 continue
             return (f"{method} {w} is not for this repository: on {m.group(1)} it reads issues and pull requests "
                     "and writes issues and comments only")
         return None
-    return elsewhere_reason(pointed, called, linked)
+    return elsewhere_reason(pointed, called, linked, by_id)
+
+
+def unreadable_query(query):
+    """A GraphQL query the guard cannot read: from a file or stdin (@), or holding what the shell fills in.
+
+    A query's own variables are `$name` too, but the query declares each one (`$name:`): any other `$` is the
+    shell's, as are a substitution and backticks.
+    """
+    if query[:1] == "@" or "`" in query or re.search(r"\$(?![A-Za-z_])", query):
+        return True
+    return bool(set(re.findall(r"\$(\w+)", query)) - set(re.findall(r"\$(\w+)\s*:", query)))
+
+
+def graphql_refused(head, words):
+    """Why a command sends GitHub's GraphQL API a mutation typed by hand, or a query the guard cannot read."""
+    rest = gh_words(words[1:])[0] if head == "gh" else []
+    if rest[:1] == ["api"] and any(GRAPHQL.match(w) for w in rest[1:]):
+        if any(MUTATION.search(w) for w in rest):
+            return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
+        unread = [w for w in rest if w == "--input" or w.startswith("--input=")]
+        unread += [w for w in rest if "query=" in w and unreadable_query(w.split("query=", 1)[1])]
+        if unread:
+            return f"the GraphQL query comes from where the guard cannot read it ({unread[0]}): type it in the command"
+        return None
+    if any("graphql" in w.lower() for w in words) and any(MUTATION.search(w) for w in words):
+        return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
+    return None
 
 
 # Here-documents are data: their bodies go before anything is parsed.
@@ -275,7 +319,7 @@ for words in segments:
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))
         continue
 
-    why = elsewhere_refused(head, words, assigns)
+    why = elsewhere_refused(head, words, assigns) or graphql_refused(head, words)
     if why:
         refuse(why)
 

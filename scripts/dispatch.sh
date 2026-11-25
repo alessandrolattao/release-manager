@@ -6,7 +6,8 @@
 #      `<!-- team · tech lead of <owner/name> -->`) to this repository's tech lead;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      repository's tech lead;
-#   3. marks dead sessions stuck (red, in the agent list too) and removes finished ones with their worktree;
+#   3. marks dead sessions stuck (red, in the agent list too), or done when they are developers or QA agents
+#      whose issue is closed, and removes finished ones with their worktree;
 #   4. resumes dead developer and QA agents, and starts the QA agents asked for;
 #   5. starts a developer for the next workable issue (no cap: the user decides what is ready);
 #   6. writes the board's summary: checkout, queue, main CI, how long the plan usage lasts.
@@ -208,16 +209,35 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	}
 done
 
-# 3. Dead sessions turn red; finished ones go away, with a developer's worktree.
+# 3. Dead sessions turn red, or are done when their issue is closed; finished ones go away, with a
+# developer's worktree.
 for f in "$sessions_dir"/*/status; do
 	[ -f "$f" ] || continue
 	[ "$(jq -r '.repo // ""' "$f")" = "$repo_full" ] || continue
 	id=$(basename "$(dirname "$f")")
 	state=$(jq -r '.state // ""' "$f")
 	job=$(job_of "$id")
+	dead=false
+	alive "$id" || running "$id" || dead=true
+	# A dead developer or QA agent whose issue is closed is done, even when it died before done.sh, and goes
+	# at once: no turn of its own is left to end. A live one is left alone: it may still follow its merge's CI
+	# and deploy. An issue whose state cannot be read is not closed.
+	closed=false
+	if [ "$state" != done ] && [ "$dead" = true ]; then
+		case "$(jq -r '.role // ""' "$f")" in
+		dev | qa)
+			issue=$(jq -r '.issue // ""' "$f")
+			[ -z "$issue" ] || [ "$(gh issue view "$issue" --json state --jq .state 2>/dev/null)" != CLOSED ] || closed=true
+			;;
+		esac
+	fi
+	if [ "$closed" = true ]; then
+		state_set "$id" done "its issue is closed"
+		state=done
+	fi
 	if [ "$state" = done ]; then
 		since=$(jq -r '.since // 0' "$f")
-		[ $((now - since)) -ge 120 ] || continue
+		[ "$closed" = true ] || [ $((now - since)) -ge 120 ] || continue
 		if [ -n "$job" ]; then
 			claude stop "$job" >/dev/null 2>&1 || true
 			claude rm "$job" >/dev/null 2>&1 || true
@@ -235,7 +255,7 @@ for f in "$sessions_dir"/*/status; do
 		rm -rf "${sessions_dir:?}/$id"
 		continue
 	fi
-	if ! alive "$id" && ! running "$id" && [ "$state" != stuck ]; then
+	if [ "$dead" = true ] && [ "$state" != stuck ]; then
 		state_set "$id" stuck "session stopped"
 		state_json="$jobs_dir/$job/state.json"
 		if [ -n "$job" ] && [ -f "$state_json" ] && jq '.color = "red"' "$state_json" >"$state_json.team" 2>/dev/null; then

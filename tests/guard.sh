@@ -102,12 +102,39 @@ check deny tech-lead 'command gh api repos/someone/else/issues'
 check deny tech-lead 'nice -n 5 gh api repos/someone/else/issues'
 check deny tech-lead 'echo 1 | xargs -I{} gh api repos/someone/else/issues/{}'
 check deny tech-lead 'timeout 5 curl -s https://api.github.com/repos/someone/else/issues'
+check deny tech-lead "timeout 10 bash -c 'gh api repos/someone/else/issues'"
+check deny tech-lead "echo 1 | xargs sh -c 'gh api repos/someone/else/issues'"
+# A line ending in a backslash goes on in the next one; a here-document's body stays data.
+check deny tech-lead 'gh api -X POST \
+  repos/someone/else/issues \
+  -f title=x'
+check deny tech-lead 'git commit \
+  -m x'
+check allow tech-lead "cat > $T/x.txt <<'EOF'
+a line that ends in a backslash \\
+EOF
+echo done"
+check deny tech-lead "cat > $T/x.txt <<'EOF'
+a line that ends in a backslash \\
+EOF
+git push"
+# A # inside a word is no comment; one that starts a word is.
+check deny tech-lead 'git log --grep=#93 && gh api repos/someone/else/issues'
+check deny tech-lead 'echo a#b; gh api repos/someone/else/issues'
+check deny tech-lead 'echo a#b; git push'
+check allow tech-lead 'gh issue view 93 # then gh api repos/someone/else/issues'
+# An escaped backslash before $( leaves the substitution to the shell.
+check deny tech-lead 'echo "\\$(gh api repos/someone/else/issues)"'
+check allow tech-lead 'gh issue comment 3 --body "run \$(gh api repos/a/b) by hand"'
 check allow tech-lead 'curl -s https://api.github.com/repos/test/repo/issues'
 check deny tech-lead 'curl -s -X POST https://api.github.com/repos/someone/else/issues -d "{}"'
 check deny tech-lead 'wget -qO- api.github.com/repos/someone/else/issues'
 check allow tech-lead 'curl -s https://example.com/repos/a/b'
 check deny tech-lead 'curl -s https://API.github.com/repos/someone/else/issues'
 check allow tech-lead 'curl -s https://API.github.com/repos/test/repo/issues'
+check deny tech-lead 'curl -s https://api.github.com:443/repos/someone/else/issues'
+check deny tech-lead 'gh api https://api.github.com:443/repos/someone/else/issues'
+check allow tech-lead 'curl -s https://api.github.com:443/repos/test/repo/issues'
 # The link check: a URL or an ssh remote to GitHub, never a folder of a local path.
 check allow tech-lead 'ls ~/go/pkg/mod/github.com/foo/bar@v1'
 check allow tech-lead 'cat /home/x/src/github.com/foo/bar/README.md'

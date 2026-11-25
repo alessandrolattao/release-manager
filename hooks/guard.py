@@ -32,11 +32,14 @@ BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
 # The API of a repository: a gh api endpoint (repos/..., /repos/..., https://api.github.com/repos/...) or a curl or
 # wget URL to api.github.com. GraphQL names no repository: it is not judged.
-GH_API_ENDPOINT = re.compile(r"^(?:(?i:(?:https?://)?api\.github\.com))?/?repos/([\w.-]+/[\w.-]+)")
-API_URL = re.compile(r"(?<![\w.-])(?i:api\.github\.com)/repos/([\w.-]+/[\w.-]+)")
+GH_API_ENDPOINT = re.compile(r"^(?:(?i:(?:https?://)?api\.github\.com)(?::\d+)?)?/?repos/([\w.-]+/[\w.-]+)")
+API_URL = re.compile(r"(?<![\w.-])(?i:api\.github\.com)(?::\d+)?/repos/([\w.-]+/[\w.-]+)")
 # A command substitution runs as a command of its own, also where it is double-quoted ("$(...)") and so one
-# word; inside single quotes, or escaped (\` or \$( in a string), it is text.
-SUBSTITUTION = re.compile(r"(?<!\\)\$\(([^)]*)|(?<!\\)`([^`]*)`")
+# word; inside single quotes, or escaped (\` or \$( in a string, an odd number of backslashes), it is text.
+SUBSTITUTION = re.compile(r"(?<!\\)(?:\\\\)*\$\(([^)]*)|(?<!\\)(?:\\\\)*`([^`]*)`")
+# The option that gives a shell its command: -c, alone or in a cluster (bash -lc, sh -ec).
+SHELLS = ("sh", "bash", "zsh", "dash")
+SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
 # API rule's.
@@ -69,10 +72,12 @@ def inside_repo(path):
 
 
 def segments_of(text):
-    """The commands of a shell text, each as its words: the words of a quoted string stay one word."""
+    """The commands of a shell text, each as its words: the words of a quoted string stay one word. A comment
+    starts only where a word does, as in the shell (shlex would also start one inside a word: a#b)."""
     try:
-        lexer = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
+        lexer = shlex.shlex(unquoted(text, strings=False), posix=True, punctuation_chars=";&|()<>")
         lexer.whitespace_split = True
+        lexer.commenters = ""
         tokens = list(lexer)
     except ValueError:
         tokens = text.split()
@@ -96,27 +101,43 @@ def bare(words):
     return words
 
 
+def api_calls(text):
+    """The repositories whose API a shell text calls, as written in it: in its commands and in the command
+    substitutions the shell runs."""
+    found = []
+    for match in SUBSTITUTION.finditer(unquoted(text)):
+        k = 1 if match.group(1) is not None else 2
+        found += api_calls(text[match.start(k):match.end(k)])
+    for words in segments_of(text):
+        found += api_repos(words)
+    return found
+
+
 def api_repos(words):
     """The repositories whose API a command calls, as written in it: gh api, curl or wget, also when another
-    command runs them (X=1, env, timeout, nice, xargs, ...)."""
+    command runs them (X=1, env, timeout, nice, xargs, sh -c '...', ...)."""
     for i, word in enumerate(words):
         head = os.path.basename(word)
         if head == "gh" and words[i + 1:i + 2] == ["api"]:
             return [m.group(1) for w in words[i + 2:] if (m := GH_API_ENDPOINT.match(w))]
         if head in ("curl", "wget"):
             return [m.group(1) for w in words[i + 1:] for m in API_URL.finditer(w)]
+        if head in SHELLS:
+            k = next((k for k in range(i + 1, len(words)) if SHELL_COMMAND.fullmatch(words[k])), None)
+            if k is not None:
+                return api_calls(words[k + 1]) if k + 1 < len(words) else []
     return []
 
 
-def unquoted(text):
-    """The text, as long as it was, with the inside of its single-quoted strings and of its comments blanked:
-    the shell runs nothing there."""
+def unquoted(text, strings=True):
+    """The text, as long as it was, with its comments blanked, and the inside of its single-quoted strings too
+    unless strings is False: the shell runs nothing there."""
     out, quote, i = [], None, 0
     while i < len(text):
         c = text[i]
         if quote == "'":
             quote = None if c == "'" else quote
-            out.append(c if c == "'" else " ")
+            out.append(" " if strings and c != "'" else c)
         elif quote == "#":
             quote = None if c == "\n" else quote
             out.append(c if c == "\n" else " ")
@@ -133,14 +154,19 @@ def unquoted(text):
     return "".join(out)
 
 
-# Here-documents are data: their bodies go before anything is parsed.
-lines, skipping = [], None
+# Here-documents are data: their bodies go before anything is parsed. A line ending in an odd number of
+# backslashes goes on in the next one, as in the shell.
+lines, skipping, goes_on = [], None, False
 for line in command.split("\n"):
     if skipping is not None:
         if line.strip() == skipping:
             skipping = None
         continue
-    lines.append(line)
+    if goes_on:
+        lines[-1] = lines[-1][:-1] + line
+    else:
+        lines.append(line)
+    goes_on = (len(line) - len(line.rstrip("\\"))) % 2 == 1
     # `<<<word` is a here-string, on its own line: nothing after it is skipped.
     match = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
     if match:
@@ -151,14 +177,9 @@ segments = segments_of(script)
 
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
-substituted = []
-for match in SUBSTITUTION.finditer(unquoted(script)):
-    k = 1 if match.group(1) is not None else 2
-    substituted += segments_of(script[match.start(k):match.end(k)])
-for words in segments + substituted:
-    for repo in api_repos(words):
-        if repo.lower() != own:
-            refuse(f"it calls the API of {repo}")
+for repo in api_calls(script):
+    if repo.lower() != own:
+        refuse(f"it calls the API of {repo}")
 for match in LINK.finditer(script):
     if repo_of(match.group(1)) not in (None, own):
         refuse(f"it links {match.group(1)}")
@@ -180,9 +201,8 @@ for words in segments:
 
     # A command inside a command (sh -c '...', bash -lc '...', eval ...) is checked as one of its own.
     inner = None
-    if head in ("sh", "bash", "zsh", "dash"):
-        # -c alone or in a cluster: bash -lc, sh -ec.
-        k = next((k for k, w in enumerate(words) if k and re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", w)), None)
+    if head in SHELLS:
+        k = next((k for k, w in enumerate(words) if k and SHELL_COMMAND.fullmatch(w)), None)
         if k is not None:
             inner = words[k + 1] if k + 1 < len(words) else ""
     elif head == "eval":

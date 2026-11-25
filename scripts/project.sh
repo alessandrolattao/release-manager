@@ -112,14 +112,21 @@ add_status() {
 		echo "board $number \"$title\" already has \"$status\""
 		return 0
 	fi
-	# The whole list goes back: the existing options with their ids (so no card loses its value), then the
-	# new one.
+	# The whole list goes back: the existing options with their ids (so no card loses its value), and the new
+	# one before the first existing one that comes after it in the plugin's order (Todo, In Progress, In
+	# Review, Done), otherwise at the end. GitHub shows a board's columns in this order.
 	# shellcheck disable=SC2016 # GraphQL variables, not shell ones
 	query='mutation($f: ID!, $o: [ProjectV2SingleSelectFieldOptionInput!]) {
 		updateProjectV2Field(input: {fieldId: $f, singleSelectOptions: $o}) {
 			projectV2Field { ... on ProjectV2SingleSelectField { options { id name } } } } }'
-	sent=$(printf '%s' "$board" | jq -c --arg s "$status" --arg q "$query" '{query: $q, variables: {f: .field.id,
-		o: ([.field.options[] | {id, name, color, description}] + [{name: $s, color: "GRAY", description: ""}])}}')
+	sent=$(printf '%s' "$board" | jq -c --arg s "$status" --arg q "$query" '
+		[.field.options[] | {id, name, color, description}] as $old
+		| ["todo", "in progress", "in review", "done"] as $order
+		| ($order | index($s | ascii_downcase)) as $r
+		| ([range(0; $old | length) as $i | ($order | index($old[$i].name | ascii_downcase)) as $k
+			| select($r != null and $k != null and $k > $r) | $i][0] // ($old | length)) as $at
+		| {query: $q, variables: {f: .field.id,
+			o: ($old[0:$at] + [{name: $s, color: "GRAY", description: ""}] + $old[$at:])}}')
 	after=$(printf '%s' "$sent" | gh api graphql --input - --jq '.data.updateProjectV2Field.projectV2Field.options')
 	# Every option it had keeps its id, and the new one is there.
 	printf '%s' "$board" | jq -e --argjson after "$after" --arg s "$status" \

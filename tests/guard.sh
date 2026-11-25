@@ -92,6 +92,27 @@ check deny tech-lead "timeout 10 bash -c 'git push'"
 check deny tech-lead "echo 1 | xargs sh -c 'git commit -m x'"
 check deny tech-lead "echo 'git push' | sudo -u me sh"
 check allow tech-lead "timeout 10 bash -c 'git log -1'"
+# After a wrapper, the command is the first word past the wrapper's options; a later word naming eval, ssh or
+# a shell is an argument (sudo git commit -m eval is git commit).
+check deny tech-lead 'sudo git commit -m eval'
+check deny tech-lead 'env git commit -m "eval"'
+check deny tech-lead 'time git commit -m eval'
+check deny tech-lead 'nohup git push origin eval'
+check allow tech-lead "sudo grep sh <<< 'git push'"
+check allow tech-lead "echo 'git push' | xargs grep -l sh"
+check allow tech-lead "echo 'git push' | sudo grep -c sh"
+check deny tech-lead "echo 'git push' | timeout -s KILL 5 sh"
+check deny tech-lead "echo 1 | xargs -I {} sh -c 'git push'"
+check deny tech-lead "echo 'git push' | nice -n 5 sh"
+# ssh reads options after the host too, and -- ends them.
+check deny tech-lead "ssh host -- 'git push'"
+check deny tech-lead "ssh host -t 'git push'"
+check deny tech-lead "ssh host -o ConnectTimeout=5 'git push'"
+check allow tech-lead "ssh host -t 'git log -1'"
+# A here-document stays data, also into a shell, as on main.
+check allow tech-lead "bash <<'EOF'
+git push
+EOF"
 check deny tech-lead 'cat <<< hello
 git push'
 # git symbolic-ref only reads with one argument; with two, or --delete, it changes the repository.

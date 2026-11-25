@@ -13,7 +13,8 @@ Refused:
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 A string that becomes code is judged as a command of its own: sh -c and bash -lc, eval, ssh's remote command,
 what echo, printf or cat <<< prints into a shell (a pipe, a <(...)), a shell's <<< string, what source or .
-reads from a <(...). A here-document is data, also into a shell.
+reads from a <(...); also after a wrapper (timeout 5, xargs -I {}, sudo -u me), and a shell's -c string among
+a command's arguments (find -exec sh -c). A here-document is data, also into a shell.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
 """
@@ -48,9 +49,26 @@ SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 # The commands that run a string as code, and ssh's options that take a value.
 CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
 SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
-# Commands that run the command after them (timeout 5 sh, xargs -I{} sh -c, sudo -u me sh ...).
-WRAPPERS = {"sudo", "doas", "env", "time", "nohup", "exec", "timeout", "nice", "ionice", "command", "builtin", "xargs",
-            "stdbuf", "setsid"}
+# Commands that run the command after them (timeout 5 sh, xargs -I {} sh -c, sudo -u me sh ...), with their
+# options that take a value.
+WRAPPERS = {
+    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-T", "-U", "--user", "--group", "--chdir", "--prompt",
+             "--role", "--type", "--other-user", "--close-from", "--host", "--command-timeout"},
+    "doas": {"-u", "-C"},
+    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"},
+    "time": {"-f", "-o", "--format", "--output"},
+    "nohup": set(),
+    "exec": {"-a"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"},
+    "command": set(),
+    "builtin": set(),
+    "xargs": {"-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a", "--max-args", "--max-procs", "--replace", "--delimiter",
+              "--arg-file", "--max-lines", "--max-chars", "--eof"},
+    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
+    "setsid": set(),
+}
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
 # API rule's.
@@ -133,45 +151,79 @@ def printed(words):
     return " ".join(rest[1:] if rest[:1] == ["--"] else rest).replace("\\n", "\n")
 
 
-def code_of(words, piped_from=None):
-    """The text the command in these words runs as code: a shell's -c string (bash -lc too) or <<< string; what
-    echo, printf or cat <<< prints into a shell, or into source or ., through a pipe or a <(...); eval's words;
-    ssh's remote command. The command is the first word, or a later one when the first is a wrapper (timeout,
-    xargs, ...); a shell with -c counts anywhere (find -exec sh -c). A word that only names one (grep -c sh,
-    jq .) runs nothing. None when the command runs no code."""
-    while words and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]):
-        words = words[1:]
-    wrapped = bool(words) and os.path.basename(words[0]) in WRAPPERS
-    for i, word in enumerate(words):
-        head, rest, code = os.path.basename(word), words[i + 1:], None
-        if head not in CODE_RUNNERS or (i and not wrapped and not (
-                head in SHELLS and any(SHELL_COMMAND.fullmatch(w) for w in rest))):
-            continue
-        if head == "eval":
-            code = " ".join(rest)
-        elif head == "ssh":
-            code = remote_command(rest)
+def command_at(words):
+    """Where the command is among a command's words: the first one past assignments and wrappers with their
+    options (sudo -u me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1); len(words) when none is."""
+    j, wrapper = 0, None
+    while j < len(words):
+        word = words[j]
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
+            j += 1
+        elif os.path.basename(word) in WRAPPERS:
+            wrapper, j = os.path.basename(word), j + 1
+        elif wrapper and word.startswith("-"):
+            j += 2 if word in WRAPPERS[wrapper] else 1
+        elif wrapper == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", word):
+            j += 1
         else:
-            k = next((k for k, w in enumerate(rest)
-                      if w in ("<<<", "<(") or (head in SHELLS and SHELL_COMMAND.fullmatch(w))), None)
-            if k is None:
-                code = printed(piped_from) if piped_from else None
-            elif rest[k] == "<(":
-                code = printed(rest[k + 1:])
-            else:
-                code = rest[k + 1] if k + 1 < len(rest) else ""
-        if code is not None:
-            return code
+            break
+    return j
+
+
+def code_of(words, piped_from=None):
+    """The text a command runs as code: a shell's -c string (bash -lc too) or <<< string; what echo, printf or
+    cat <<< prints into a shell, or into source or ., through a pipe or a <(...); eval's words; ssh's remote
+    command. The command is the word command_at finds: a later word that only names one is an argument
+    (sudo git commit -m eval, grep -c sh, jq .). None when the command runs no code."""
+    j = command_at(words)
+    if j >= len(words):
+        return None
+    head, rest = os.path.basename(words[j]), words[j + 1:]
+    if head == "eval":
+        return " ".join(rest)
+    if head == "ssh":
+        return remote_command(rest)
+    if head not in CODE_RUNNERS:
+        return None
+    k = next((k for k, w in enumerate(rest) if w in ("<<<", "<(") or (head in SHELLS and SHELL_COMMAND.fullmatch(w))), None)
+    if k is None:
+        return printed(piped_from) if piped_from else None
+    if rest[k] == "<(":
+        return printed(rest[k + 1:])
+    return rest[k + 1] if k + 1 < len(rest) else ""
+
+
+def shell_inside(words):
+    """The -c string of a shell among a command's arguments (find -exec sh -c '...', parallel bash -lc '...');
+    None when there is none."""
+    for i, word in enumerate(words):
+        if os.path.basename(word) in SHELLS:
+            for k in range(i + 1, len(words)):
+                if not words[k].startswith("-"):
+                    break
+                if SHELL_COMMAND.fullmatch(words[k]):
+                    return words[k + 1] if k + 1 < len(words) else ""
     return None
 
 
 def remote_command(args):
-    """ssh's remote command: the words after its options and its host, joined as ssh joins them; None when there
-    is none."""
-    j = 0
-    while j < len(args) and args[j].startswith("-"):
-        j += 2 if len(args[j]) == 2 and args[j][1] in SSH_VALUE_FLAGS else 1
-    return " ".join(args[j + 1:]) if j + 1 < len(args) else None
+    """ssh's remote command: the words after its host and its options, which may come before or after the host
+    (-- ends them), joined as ssh joins them; None when there is none."""
+    j, host = 0, None
+    while j < len(args):
+        word = args[j]
+        if word == "--":
+            j += 1
+            if host is None and j < len(args):
+                host, j = args[j], j + 1
+            break
+        if word.startswith("-") and len(word) > 1:
+            j += 2 if len(word) == 2 and word[1] in SSH_VALUE_FLAGS else 1
+        elif host is None:
+            host, j = word, j + 1
+        else:
+            break
+    return " ".join(args[j:]) if host is not None and j < len(args) else None
 
 
 def bare(words):
@@ -189,8 +241,8 @@ def api_calls(text):
     found = [repo for inner in inners for repo in api_calls(inner)]
     previous = None
     for words, separator in commands_of(text):
-        inner = code_of(words, previous if piped(separator) else None)
-        found += api_calls(inner) if inner is not None else []
+        for inner in {code_of(words, previous if piped(separator) else None), shell_inside(words)} - {None}:
+            found += api_calls(inner)
         previous = words
     return found + [m.group(1) for m in REPOS.finditer(plain) if is_call(plain, m.start(), strings)]
 
@@ -341,15 +393,17 @@ for n, (words, separator) in enumerate(commands):
         continue
 
     # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...') is
-    # checked as a command of its own.
+    # checked as a command of its own; when it is the command's own, the command is that and nothing more. A
+    # shell's -c string among the arguments (find -exec sh -c '...') leaves the command to its own rules.
     inner = code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None)
-    if inner is not None:
+    for code in {inner, shell_inside(commands[n][0])} - {None}:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
-                                input=f"cd {shlex.quote(where)}\n{inner}", capture_output=True, text=True)
+                                input=f"cd {shlex.quote(where)}\n{code}", capture_output=True, text=True)
         if nested.returncode != 0:
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
+    if inner is not None:
         continue
 
     if head == "cd" and len(words) > 1:

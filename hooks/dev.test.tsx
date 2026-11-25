@@ -217,6 +217,30 @@ test('GitHub is read at most every 5 minutes, and a pull request opened since sh
   await ui.unmount()
 })
 
+test('a checkout taken as it is shows as-is after its holder', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const files = seeded(on, {
+    'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In progress', qa: false, pr: null }),
+    'repos/acme_shop/checkout': `other-1\n${NOW / 1000 - 600}\nmain\nas-is\n`,
+  })
+  engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /║ checkout/ }))?.text).toMatch(/║ checkout +held by dev #7 as-is · you are 2 of 2 in the queue +║▓$/)
+  await ui.unmount()
+
+  // This session holds it as it is.
+  files.set('repos/acme_shop/checkout', `abc-123\n${NOW / 1000}\nmain\nas-is\n`)
+  files.set('repos/acme_shop/checkout.queue', '')
+  await clock.advance(4000)
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /║ checkout/ }))?.text).toMatch(/║ checkout +held by you as-is +║▓$/)
+  await ui.unmount()
+})
+
 test('a review or a QA outcome counts for the worktree HEAD only', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })

@@ -32,6 +32,8 @@ done
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "the comment comes on stdin" >&2
@@ -40,8 +42,10 @@ body=$(cat)
 me=${CLAUDE_CODE_SESSION_ID:-}
 if [ -n "$elsewhere" ]; then
 	may_write_elsewhere "$me" "$elsewhere"
-	printf '%s\n\n<!-- team · %s -->\n' "$body" "$signer_elsewhere" | gh issue comment "$target" -R "$elsewhere" --body-file -
+	printf '%s\n\n<!-- team · %s -->\n' "$body" "$signer_elsewhere" |
+		rest_body "repos/$elsewhere/issues/$target/comments" --jq .html_url
 	exit 0
 fi
-printf '%s\n\n<!-- team · %s -->\n' "$body" "$(address_of "$me")" | gh issue comment "$target" --body-file -
+printf '%s\n\n<!-- team · %s -->\n' "$body" "$(address_of "$me")" |
+	rest_body "repos/$repo_full/issues/$target/comments" --jq .html_url
 commented_on "$me" "$(thread_of "$target")"

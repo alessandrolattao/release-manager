@@ -17,6 +17,8 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 lock="$repo_dir/dispatch.lock"
 if ! mkdir "$lock" 2>/dev/null; then
 	# A run that died leaves its lock behind: it expires after 10 minutes.
@@ -204,7 +206,7 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	[ $((now - at)) -ge 30 ] || continue
 	issue=$(jq -r .issue "$sessions_dir/$id/status")
 	printf '**%s → tech lead**\n\nAsked in its own chat:\n\n%s\n' "$(address_of "$id")" "$(sed -n '4,$p' "$asked")" |
-		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
+		rest_body "repos/$repo_full/issues/$issue/comments" >/dev/null 2>&1 && {
 		touch "$asked.told"
 		state_set "$id" others "waits for tech lead: $(sed -n 4p "$asked")"
 		# The same wait as comment.sh's: the tech lead's answer ends it (hooks/sessions.tsx).

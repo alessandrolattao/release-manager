@@ -27,19 +27,22 @@ while [ $# -gt 0 ]; do
 	esac
 done
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=scripts/repo.sh
+. "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "the body comes on stdin" >&2
 	exit 2
 }
+# The REST API takes a login: @me is the team's GitHub account.
+[ "$assignee" != @me ] || assignee=$(gh api user --jq .login)
 if [ -n "$elsewhere" ]; then
-	# shellcheck source=scripts/repo.sh
-	. "$here/repo.sh"
 	may_write_elsewhere "${CLAUDE_CODE_SESSION_ID:-}" "$elsewhere"
 	url=$(printf '%s\n\n<!-- team · %s -->\n' "$body" "$signer_elsewhere" |
-		gh issue create -R "$elsewhere" --title "$title" --assignee "$assignee" --body-file -)
-	echo "$url"
-	exit 0
+		rest_body "repos/$elsewhere/issues" -f title="$title" -f "assignees[]=$assignee" --jq .html_url)
+else
+	url=$(printf '%s\n' "$body" | rest_body "repos/$repo_full/issues" -f title="$title" -f "assignees[]=$assignee" --jq .html_url)
 fi
-url=$(printf '%s\n' "$body" | gh issue create --title "$title" --assignee "$assignee" --body-file -)
 echo "$url"

@@ -4,6 +4,11 @@
 #   ready.sh --remove <issue-number>  back to the backlog
 set -eu
 
+here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=scripts/repo.sh
+. "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 label="ready for development"
 action=add
 if [ "${1:-}" = --remove ]; then
@@ -19,10 +24,16 @@ if [ "$action" = add ]; then
 		exit 1
 	}
 	gh label list --limit 200 --json name --jq '.[].name' | grep -qxF "$label" ||
-		gh label create "$label" --color 0E8A16 --description "Technical decisions taken: a developer may build it" >/dev/null
-	gh issue edit "$issue" --add-label "$label" >/dev/null
+		rest "repos/$repo_full/labels" -f name="$label" -f color=0E8A16 -f description="Technical decisions taken: a developer may build it" >/dev/null
+	rest "repos/$repo_full/issues/$issue/labels" -f "labels[]=$label" >/dev/null
 	echo "issue $issue: ready for development"
 else
-	gh issue edit "$issue" --remove-label "$label" >/dev/null
+	# An issue without the label is already in the backlog: GitHub answers "Label does not exist" (404).
+	err=$(rest -X DELETE "repos/$repo_full/issues/$issue/labels/$(printf '%s' "$label" | jq -sRr @uri)" 2>&1 >/dev/null) ||
+		case "$err" in *"Label does not exist"*) ;; *)
+			printf '%s\n' "$err" >&2
+			exit 1
+			;;
+		esac
 	echo "issue $issue: back to the backlog"
 fi

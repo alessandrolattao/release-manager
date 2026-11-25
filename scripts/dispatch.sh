@@ -1,7 +1,8 @@
 #!/bin/sh
 # One cycle of the team's dispatcher. dispatcher.sh, a process of its own, runs it every minute; one
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
-#   1. hands each new GitHub comment of the repository to the session it is written to;
+#   1. hands each new GitHub comment of the repository (not an edit of an older one) to the session it is
+#      written to;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      repository's tech lead;
 #   3. marks dead sessions stuck (red, in the agent list too) and removes finished ones with their worktree;
@@ -70,8 +71,10 @@ touch "$seen"
 since=$(cat "$cursor" 2>/dev/null || date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
 date -u +%Y-%m-%dT%H:%M:%SZ >"$cursor.next"
 # Each comment: id, author, issue, link, who signed it (note.sh's hidden last line, "-" when none), its first
-# two non-empty lines.
-if comments=$(gh api --paginate "repos/$repo_full/issues/comments?since=$since&per_page=100" --jq '.[] | [
+# two non-empty lines. The listing also returns the comments edited since the cursor: one written before it
+# is an edit, and wakes nobody, whoever wrote it.
+if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?since=$since&per_page=100" --jq '.[]
+	| select(.created_at >= env.since) | [
 		(.id | tostring), .user.login, (.issue_url | split("/") | last), .html_url,
 		([.body | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"),
 		((.body | gsub("\r"; "") | split("\n") | map(select(length > 0))) as $l | ($l[0] // ""), ($l[1] // ""))

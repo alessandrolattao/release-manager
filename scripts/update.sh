@@ -103,7 +103,7 @@ for id in $list; do
 	case "$role" in
 	tech-lead)
 		told="$plugin/skills/tech-lead/SKILL.md"
-		waiting="If you were waiting for the user's answer, end your turn with that question again in its last line."
+		waiting="If you were waiting for the user's answer, end your turn with that question again, whole, with its options, in its last line."
 		;;
 	spike)
 		told="$plugin/briefs/spike.md"

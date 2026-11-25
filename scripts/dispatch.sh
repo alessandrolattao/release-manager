@@ -274,6 +274,9 @@ fi
 # 6. A free checkout with someone waiting wakes the first of them; then the board's summary.
 sh "$here/checkout.sh" next >/dev/null 2>&1 || true
 holder=$(sed -n 1p "$repo_dir/checkout" 2>/dev/null || true)
+# One that took it as it is (checkout.sh take --as-is) shows with as-is after its name.
+held_as=""
+[ "$(sed -n 4p "$repo_dir/checkout" 2>/dev/null)" != as-is ] || held_as=" as-is"
 base=$(base_branch)
 # The default branch's CI, asked at most every 5 minutes: every machine shares one GitHub account and its
 # hourly API allowance.
@@ -305,7 +308,7 @@ elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {numb
 				detail: (if $quiet > 3600 then "quiet \($quiet / 3600 | floor)h, on \(.host)"
 					elif $asks then "waits for \(.to), on \(.host)" else "on \(.host)" end)}' "$f"
 	done | jq -s -c '.')
-jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && address_of "$holder")" \
+jq -n --argjson now "$now" --arg holder "$( [ -n "$holder" ] && echo "$(address_of "$holder")$held_as")" \
 	--arg held_since "$(sed -n 2p "$repo_dir/checkout" 2>/dev/null)" \
 	--arg waiting "$(while read -r w; do [ -n "$w" ] && address_of "$w"; done <"$repo_dir/checkout.queue" 2>/dev/null | paste -sd, -)" \
 	--argjson ready "$(printf '%s\n' "$workable" | grep -c . || true)" --arg next "${next:+#$next}" \

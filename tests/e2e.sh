@@ -283,6 +283,37 @@ ok "given back, the checkout is on main" "$(git -C "$ROOT" rev-parse --abbrev-re
 ok "the next in the queue is woken" "$(grep -c 'checkout is free' "$S/$DEV2/wake")" "1"
 ok "the giver is back in its worktree" "$(st "$DEV" place)" "worktree 42"
 
+echo "== checkout.sh take --as-is"
+held() { [ -f "$R/checkout" ] && echo held || echo free; }
+cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+head_before=$(git -C "$ROOT" rev-parse HEAD)
+echo staged >"$ROOT/staged.txt" && git -C "$ROOT" add staged.txt
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --as-is >/dev/null 2>&1; code=$?
+ok "take --as-is refuses a main checkout with local changes, as take does" "$code $(held)" "1 free"
+git -C "$ROOT" rm -q --cached staged.txt && rm -f "$ROOT/staged.txt"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --asis >/dev/null 2>&1; code=$?
+ok "a mistyped option is refused and moves nothing" "$code $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(held)" "2 main free"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take --as-is >/dev/null; code=$?
+ok "take --as-is holds the checkout" "$code $(sed -n 1p "$R/checkout")" "0 $DEV"
+ok "and leaves HEAD where it was" "$(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(git -C "$ROOT" rev-parse HEAD)" "main $head_before"
+ok "its place is the checkout" "$(st "$DEV" place)" "checkout"
+ok "who shows as-is after the holder's name" "$(cd "$ROOT" && sh "$SC/checkout.sh" who | head -1 | sed 's/ since [^,]*,/,/')" "held by dev #42 as-is, on main"
+(cd "$ROOT" && sh "$SC/dispatch.sh" >/dev/null 2>&1)
+ok "and so does the board's summary" "$(jq -r '.checkout.holder' "$R/board.json")" "dev #42 as-is"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null; code=$?
+ok "a second agent queues as it does with take" "$code $(st "$DEV2" state)" "3 others"
+woken=$(grep -c 'checkout is free' "$S/$DEV2/wake")
+cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" give >/dev/null; code=$?
+ok "give frees it, on main" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD)" "0 free main"
+ok "and wakes the next in the queue" "$(grep -c 'checkout is free' "$S/$DEV2/wake")" "$((woken + 1))"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null
+(cd "$ROOT" && sh "$SC/dispatch.sh" >/dev/null 2>&1)
+ok "a take after it holds without as-is" "$(jq -r '.checkout.holder' "$R/board.json") $(cd "$ROOT" && sh "$SC/checkout.sh" who | head -1 | sed 's/ since [^,]*,/,/')" "dev #43 held by dev #43, on 43-other"
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+
 echo "== review, QA and merge: on the branch, before the pull request"
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?

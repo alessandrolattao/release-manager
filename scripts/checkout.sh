@@ -3,13 +3,25 @@
 # test takes it here, the others wait their turn.
 #   checkout.sh take   puts the main checkout on your pushed branch (detached) and holds it for you. When
 #                      another agent holds it you join the queue (exit 3): the plugin wakes you when it is free.
+#   checkout.sh take --as-is   holds it the same way, without changing what is checked out there: to try what
+#                      already runs in it (your change, merged, on a stack running on the default branch)
 #   checkout.sh give   stop what you started there first: the checkout goes back to the default branch and
 #                      the next in the queue is woken
-#   checkout.sh who    who holds it, since when, who waits
+#   checkout.sh who    who holds it (with as-is after its name when it took it as-is), since when, who waits
 #   checkout.sh next   the dispatcher: when the checkout is free and someone waits, wakes the first of them
 set -eu
 
 action=${1:?take, give, who or next}
+# take --as-is: hold the checkout as it is. Anything else after take is refused, so a mistyped option never
+# moves the checkout.
+as_is=""
+if [ "$action" = take ] && [ $# -gt 1 ]; then
+	[ "$2" = --as-is ] && [ $# -eq 2 ] || {
+		echo "usage: checkout.sh take [--as-is]" >&2
+		exit 2
+	}
+	as_is=1
+fi
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
@@ -73,7 +85,9 @@ fi
 case "$action" in
 who)
 	if [ -n "$holder" ]; then
-		echo "held by $(address_of "$holder") since $(date -d "@$(sed -n 2p "$lock")" +%H:%M 2>/dev/null || sed -n 2p "$lock"), on $(sed -n 3p "$lock")"
+		how=""
+		[ "$(sed -n 4p "$lock")" != as-is ] || how=" as-is"
+		echo "held by $(address_of "$holder")$how since $(date -d "@$(sed -n 2p "$lock")" +%H:%M 2>/dev/null || sed -n 2p "$lock"), on $(sed -n 3p "$lock")"
 	else
 		echo "free, on $(git -C "$root" rev-parse --abbrev-ref HEAD)"
 	fi
@@ -101,25 +115,39 @@ take)
 		echo "QUEUED: $(address_of "$holder") holds the checkout; you are in the queue and the plugin wakes you when it is yours"
 		exit 3
 	fi
-	branch=$(jq -r '.branch // ""' "$sessions_dir/$me/status")
-	[ -n "$branch" ] || {
-		echo "no branch recorded for this session" >&2
-		exit 1
-	}
+	if [ -z "$as_is" ]; then
+		branch=$(jq -r '.branch // ""' "$sessions_dir/$me/status")
+		[ -n "$branch" ] || {
+			echo "no branch recorded for this session" >&2
+			exit 1
+		}
+	fi
 	if [ "$holder" != "$me" ] && [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
 		echo "the main checkout has local changes: they are not yours, ask the tech lead (comment.sh <issue> \"tech lead\")" >&2
 		exit 1
 	fi
-	git -C "$root" fetch -q origin "$branch"
-	git -C "$root" switch -q --detach FETCH_HEAD
+	if [ -z "$as_is" ]; then
+		git -C "$root" fetch -q origin "$branch"
+		git -C "$root" switch -q --detach FETCH_HEAD
+	else
+		# As it is: what is checked out there stays, and the lock says so on its fourth line.
+		branch=$(git -C "$root" rev-parse --abbrev-ref HEAD)
+	fi
 	tested=$(git -C "$root" rev-parse HEAD)
-	printf '%s\n%s\n%s\n' "$me" "$(date +%s)" "$branch" >"$lock"
+	{
+		printf '%s\n%s\n%s\n' "$me" "$(date +%s)" "$branch"
+		[ -z "$as_is" ] || echo as-is
+	} >"$lock"
 	grep -vx "$me" "$queue" >"$queue.tmp" || true
 	mv "$queue.tmp" "$queue"
 	# What QA passes or fails is the head tested here (qa.sh), not whatever the branch has by then.
 	status_set "$me" --arg p checkout --arg h "$tested" '.place = $p | .tested_head = $h'
 	state_set "$me" working "testing in the checkout"
-	echo "TAKEN: the main checkout $root is on $branch at $(git -C "$root" rev-parse --short HEAD), detached; test there, then checkout.sh give"
+	if [ -z "$as_is" ]; then
+		echo "TAKEN: the main checkout $root is on $branch at $(git -C "$root" rev-parse --short HEAD), detached; test there, then checkout.sh give"
+	else
+		echo "TAKEN as-is: the main checkout $root stays on $branch at $(git -C "$root" rev-parse --short HEAD); test there, then checkout.sh give"
+	fi
 	;;
 give)
 	[ -n "$me" ] && [ "$holder" = "$me" ] || {
@@ -145,7 +173,7 @@ give)
 	echo "given back: the checkout is on $base${next:+, $(address_of "$next") is next}"
 	;;
 *)
-	echo "usage: checkout.sh take|give|who|next" >&2
+	echo "usage: checkout.sh take [--as-is]|give|who|next" >&2
 	exit 2
 	;;
 esac

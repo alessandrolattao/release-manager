@@ -62,23 +62,6 @@ open_of() {
 		[ "$(jq -r .state "$sessions_dir/$id/status")" != done ] && echo "$id"
 	done
 }
-# issue_of <number> <link>: the issue a comment belongs to. A comment on a pull request carries the pull
-# request's number: the issue is the one it closes (remembered).
-issue_of() {
-	case "$2" in */pull/*) ;; *)
-		echo "$1"
-		return
-		;;
-	esac
-	known="$repo_dir/pr-issue/$1"
-	if [ ! -s "$known" ]; then
-		mkdir -p "$repo_dir/pr-issue"
-		n=$(gh pr view "$1" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty' 2>/dev/null || true)
-		case "$n" in "" | *[!0-9]*) n="" ;; esac
-		[ -z "$n" ] || echo "$n" >"$known"
-	fi
-	cat "$known" 2>/dev/null || echo "$1"
-}
 
 # 1. GitHub comments to sessions.
 cursor="$repo_dir/comments.since"

@@ -76,7 +76,7 @@ That is all an issue needs to exist. An issue already clear gets its technical d
 
 ### The technical analysis: at once for a clear issue, when the user asks for the others
 
-For an issue already clear, write down what was settled. For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only spike sessions you start with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh"`, as "Technical analysis and opinions: spikes" below says: never by a developer, never through an issue or a message. What comes out:
+For an issue already clear, write down what was settled. For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only spike sessions you start with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh"`, as "Technical analysis and opinions: spikes" below says: never by a developer, never through an issue or a message. Every analysis or opinion you bring the user, from a spike or your own, reaches them as an artifact page, as that section says. What comes out:
 
 - **Technical decisions in a comment that starts with `## Technical decisions`**, posted with `note.sh`, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the developers tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
 - **Every architectural choice you take on your own goes in that comment too**, under a section `### Decided autonomously`, one line each, always in this format:
@@ -100,7 +100,16 @@ sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh" "<topic, a few words>" <<'EOF'
 EOF
 ```
 
-Run it with the Bash tool in the background, one per question, several at once when they are independent: its end wakes you with the report. A spike runs on the account's default model, as developers and QA agents do; `spike.sh --fable "<topic>"` runs it on Fable, only when the user chose that for this analysis: never on your own, and never for developers or QA agents. Bring each report to the user in plain words, with its options and its recommendation; the user decides, one decision at a time, and the decisions go on the issue as "Preparing the work" says.
+Run it with the Bash tool in the background, one per question, several at once when they are independent: its end wakes you with the report. A spike runs on the account's default model, as developers and QA agents do; `spike.sh --fable "<topic>"` runs it on Fable, only when the user chose that for this analysis: never on your own, and never for developers or QA agents.
+
+**Every analysis or opinion reaches the user as an artifact page**, never only as chat text, whether it comes from a spike or from you. Build it from the spike's report (the spike writes its report file as always) and publish it with the Artifact tool, its quickstart first, as that tool says. The page, in the language of the conversation:
+
+- the question and the answer, first;
+- the diagrams that show how it works: flows, events, data, as the topic needs;
+- a table of the options, with what each costs and risks, and your recommendation;
+- what is already decided and what is still open.
+
+In the chat, a few lines and the link. The link goes on the issue the analysis is about, so the user and the developers find it again: in the issue's body, or in the `## Technical decisions` comment once the decisions follow. A new round on the same analysis updates the same page (the same file, published again to the same link), never a new one. The user decides, one decision at a time, and the decisions go on the issue as "Preparing the work" says.
 
 ## Recurring checks with Pulse
 

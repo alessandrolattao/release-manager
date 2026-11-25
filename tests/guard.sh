@@ -86,10 +86,23 @@ check deny tech-lead 'body=$(gh api repos/someone/else/issues/1 --jq .body)'
 check deny tech-lead 'echo "$(gh api repos/someone/else/issues/1 --jq ".labels[] | select(.name)")"'
 check deny tech-lead 'echo `gh api repos/someone/else/issues`'
 check deny tech-lead "sh -c 'gh api repos/someone/else/issues'"
+# A substitution the shell runs counts, quoted or not; one inside single quotes is text.
+check allow tech-lead "gh issue comment 3 --body 'it ran \`gh api repos/a/b\` by hand'"
+check allow tech-lead "gh issue comment 3 --body 'see \$(gh api repos/a/b) here'"
+check deny tech-lead "body=\$(gh api 'repos/someone/else/issues/1')"
+check deny tech-lead "echo \"\$(gh api 'repos/someone/else/issues')\""
+# gh api, curl or wget after another command that runs it.
+check deny tech-lead 'timeout 10 gh api repos/someone/else/issues'
+check deny tech-lead 'command gh api repos/someone/else/issues'
+check deny tech-lead 'nice -n 5 gh api repos/someone/else/issues'
+check deny tech-lead 'echo 1 | xargs -I{} gh api repos/someone/else/issues/{}'
+check deny tech-lead 'timeout 5 curl -s https://api.github.com/repos/someone/else/issues'
 check allow tech-lead 'curl -s https://api.github.com/repos/test/repo/issues'
 check deny tech-lead 'curl -s -X POST https://api.github.com/repos/someone/else/issues -d "{}"'
 check deny tech-lead 'wget -qO- api.github.com/repos/someone/else/issues'
 check allow tech-lead 'curl -s https://example.com/repos/a/b'
+check deny tech-lead 'curl -s https://API.github.com/repos/someone/else/issues'
+check allow tech-lead 'curl -s https://API.github.com/repos/test/repo/issues'
 # The link check: a URL or an ssh remote to GitHub, never a folder of a local path.
 check allow tech-lead 'ls ~/go/pkg/mod/github.com/foo/bar@v1'
 check allow tech-lead 'cat /home/x/src/github.com/foo/bar/README.md'
@@ -98,5 +111,10 @@ check deny tech-lead 'git clone https://github.com/someone/else'
 check deny tech-lead 'curl -sL https://www.github.com/someone/else/archive/main.zip'
 check deny tech-lead 'git remote add x git@github.com:someone/else.git'
 check deny tech-lead 'open github.com/someone/else'
+# Every other subdomain of github.com stays the link check's.
+check deny tech-lead 'curl -sL https://codeload.github.com/someone/else/tar.gz/main'
+check deny tech-lead 'curl -s https://gist.github.com/someone/abc123'
+check deny tech-lead 'curl -s https://uploads.github.com/repos/someone/else/releases/1/assets'
+check allow tech-lead 'ls ~/src/gist.github.com/foo/bar'
 echo "passed=$pass failed=$fail"
 [ "$fail" = 0 ]

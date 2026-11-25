@@ -31,14 +31,15 @@ BUILD = {"rm", "mv", "cp", "touch", "mkdir", "rmdir", "tee", "chmod", "chown", "
 SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh", "checkout.sh"}
 # The API of a repository: a gh api endpoint (repos/..., /repos/..., https://api.github.com/repos/...) or a curl or
 # wget URL to api.github.com. GraphQL names no repository: it is not judged.
-GH_API_ENDPOINT = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)")
-API_URL = re.compile(r"(?<![\w.-])api\.github\.com/repos/([\w.-]+/[\w.-]+)")
-# A command substitution runs as a command of its own, also where it is quoted ("$(...)") and so one word;
-# an escaped one (\` or \$( in a string) is text.
+GH_API_ENDPOINT = re.compile(r"^(?:(?i:(?:https?://)?api\.github\.com))?/?repos/([\w.-]+/[\w.-]+)")
+API_URL = re.compile(r"(?<![\w.-])(?i:api\.github\.com)/repos/([\w.-]+/[\w.-]+)")
+# A command substitution runs as a command of its own, also where it is double-quoted ("$(...)") and so one
+# word; inside single quotes, or escaped (\` or \$( in a string), it is text.
 SUBSTITUTION = re.compile(r"(?<!\\)\$\(([^)]*)|(?<!\\)`([^`]*)`")
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
-# word), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the API rule's.
-LINK = re.compile(r"(?:(?<=://)|(?<=@)|(?<![\w./-]))(?:www\.)?github\.com[:/]([\w.-]+/[\w.-]+)")
+# word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
+# API rule's.
+LINK = re.compile(r"(?:(?<=://)|(?<=@)|(?<![\w./-]))(?!(?i:api)\.)(?:[\w-]+\.)*github\.com[:/]([\w.-]+/[\w.-]+)")
 
 
 def refuse(reason):
@@ -95,14 +96,40 @@ def bare(words):
 
 
 def api_repos(words):
-    """The repositories whose API a command calls, as written in it."""
-    words = bare(words)
-    head = os.path.basename(words[0]) if words else ""
-    if head == "gh" and words[1:2] == ["api"]:
-        return [m.group(1) for w in words[2:] if (m := GH_API_ENDPOINT.match(w))]
-    if head in ("curl", "wget"):
-        return [m.group(1) for w in words[1:] for m in API_URL.finditer(w)]
+    """The repositories whose API a command calls, as written in it: gh api, curl or wget, also when another
+    command runs them (X=1, env, timeout, nice, xargs, ...)."""
+    for i, word in enumerate(words):
+        head = os.path.basename(word)
+        if head == "gh" and words[i + 1:i + 2] == ["api"]:
+            return [m.group(1) for w in words[i + 2:] if (m := GH_API_ENDPOINT.match(w))]
+        if head in ("curl", "wget"):
+            return [m.group(1) for w in words[i + 1:] for m in API_URL.finditer(w)]
     return []
+
+
+def unquoted(text):
+    """The text, as long as it was, with the inside of its single-quoted strings and of its comments blanked:
+    the shell runs nothing there."""
+    out, quote, i = [], None, 0
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            quote = None if c == "'" else quote
+            out.append(c if c == "'" else " ")
+        elif quote == "#":
+            quote = None if c == "\n" else quote
+            out.append(c if c == "\n" else " ")
+        elif c == "\\":
+            out.append(text[i:i + 2])
+            i += 1
+        else:
+            if c == '"':
+                quote = None if quote == '"' else '"'
+            elif quote is None and (c == "'" or (c == "#" and (i == 0 or text[i - 1] in " \t\n;&|()"))):
+                quote = c
+            out.append(" " if quote == "#" else c)
+        i += 1
+    return "".join(out)
 
 
 # Here-documents are data: their bodies go before anything is parsed.
@@ -123,7 +150,10 @@ segments = segments_of(script)
 
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
-substituted = [s for m in SUBSTITUTION.finditer(script) for s in segments_of(m.group(1) or m.group(2) or "")]
+substituted = []
+for match in SUBSTITUTION.finditer(unquoted(script)):
+    k = 1 if match.group(1) is not None else 2
+    substituted += segments_of(script[match.start(k):match.end(k)])
 for words in segments + substituted:
     for repo in api_repos(words):
         if repo.lower() != own:

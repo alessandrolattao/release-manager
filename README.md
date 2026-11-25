@@ -37,7 +37,7 @@ A color changes between turns: during a long turn the list shows the state of th
 
 ## Rules
 
-A rule holds for everyone, on every machine. A general one lives in this plugin, in what each role is told; one about a project lives in that repository's own instructions (its `CLAUDE.md` and skills), which the developers read before they work. When you give the tech lead a rule that holds from now on, it opens an issue for it in the right place.
+A rule holds for everyone, on every machine. A general one lives in this plugin, in what each role is told; one about a project lives in that repository's own instructions (its `CLAUDE.md` and skills), which the developers read before they work. When you give the tech lead a rule that holds from now on, it takes it to the right place: a general one as an issue on this plugin's repository; one about a project, when it fits in one commit, as one more commit in an open pull request on the same files or a line of that repository's `Small fixes` issue, and as an issue of its own only when it does not fit.
 
 ## Several machines
 

@@ -42,8 +42,9 @@ jobs_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/jobs"
 job_of() { printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId == $s) | .id][0] // empty'; }
 # running <session-id>: the agent list shows a process behind the session.
 running() { [ "$(printf '%s' "$listing" | jq -r --arg s "$1" '[.[] | select(.sessionId == $s and .status != null)] | length')" != 0 ]; }
-# wake <session-id> <from> <text> <link>: the hooks module of that session wakes it between turns.
-wake() { printf '%s\t%s\t%s\t%s\n' "$(date +%s)" "$2" "$(printf '%s' "$3" | tr '\t\n' '  ' | cut -c1-200)" "$4" >>"$sessions_dir/$1/wake"; }
+# wake <session-id> <time> <from> <text> <link>: the hooks module of that session wakes it between turns.
+# The time is the comment's (epoch seconds): a session that answered on its thread after it is not woken.
+wake() { printf '%s\t%s\t%s\t%s\n' "$2" "$3" "$(printf '%s' "$4" | tr '\t\n' '  ' | cut -c1-200)" "$5" >>"$sessions_dir/$1/wake"; }
 # note <issue> <jq filter> [jq args]: what last happened on an issue, from the comments read here (which
 # machine took it, the last team message and when), for the board's agents of other machines.
 note() {
@@ -83,17 +84,17 @@ seen="$repo_dir/comments.seen"
 touch "$seen"
 since=$(cat "$cursor" 2>/dev/null || date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
 date -u +%Y-%m-%dT%H:%M:%SZ >"$cursor.next"
-# Each comment: id, author, issue, link, who signed it (note.sh's hidden last line, "-" when none), its first
-# two non-empty lines. The listing also returns the comments edited since the cursor: one written before it
+# Each comment: id, when it was written (epoch seconds), author, issue, link, who signed it (note.sh's hidden
+# last line, "-" when none), its first two non-empty lines. The listing also returns the comments edited since the cursor: one written before it
 # is an edit, and wakes nobody, whoever wrote it.
 if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?since=$since&per_page=100" --jq '.[]
 	| select(.created_at >= env.since) | [
-		(.id | tostring), .user.login, (.issue_url | split("/") | last), .html_url,
+		(.id | tostring), (.created_at | fromdateiso8601 | tostring), .user.login, (.issue_url | split("/") | last), .html_url,
 		([.body | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"),
 		((.body | gsub("\r"; "") | split("\n") | map(select(length > 0))) as $l | ($l[0] // ""), ($l[1] // ""))
 	] | map(gsub("\t"; " ")) | @tsv' 2>/dev/null); then
 	mv "$cursor.next" "$cursor"
-	printf '%s\n' "$comments" | while IFS="$tab" read -r cid author issue link signed first second; do
+	printf '%s\n' "$comments" | while IFS="$tab" read -r cid created author issue link signed first second; do
 		[ -n "$cid" ] || continue
 		grep -qx "$cid" "$seen" && continue
 		echo "$cid" >>"$seen"
@@ -154,7 +155,7 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 		esac
 		for id in $targets; do
 			[ "$(address_of "$id")" != "$from" ] || continue
-			wake "$id" "$from on #$issue" "$text" "$link"
+			wake "$id" "$created" "$from on #$issue" "$text" "$link"
 		done
 	done
 	tail -n 2000 "$seen" >"$seen.tmp" && mv "$seen.tmp" "$seen"
@@ -169,13 +170,15 @@ iseen="$repo_dir/issues.seen"
 touch "$iseen"
 isince=$(cat "$icursor" 2>/dev/null || date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
 date -u +%Y-%m-%dT%H:%M:%SZ >"$icursor.next"
-# Each issue opened since the cursor (pull requests left out): number, author, link, who signed it, title.
+# Each issue opened since the cursor (pull requests left out): number, when it was opened (epoch seconds),
+# author, link, who signed it, title.
 if issues=$(isince=$isince gh api --paginate "repos/$repo_full/issues?state=all&since=$isince&per_page=100" --jq '.[]
 	| select(.pull_request == null and .created_at >= env.isince) | [
-		(.number | tostring), .user.login, .html_url, ([(.body // "") | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"), .title
+		(.number | tostring), (.created_at | fromdateiso8601 | tostring), .user.login, .html_url,
+		([(.body // "") | capture("<!-- team · (?<f>[^<>]+) -->") | .f][0] // "-"), .title
 	] | map(gsub("[\t\n]"; " ")) | @tsv' 2>/dev/null); then
 	mv "$icursor.next" "$icursor"
-	printf '%s\n' "$issues" | while IFS="$tab" read -r number author link signed title; do
+	printf '%s\n' "$issues" | while IFS="$tab" read -r number created author link signed title; do
 		[ -n "$number" ] || continue
 		grep -qx "$number" "$iseen" && continue
 		echo "$number" >>"$iseen"
@@ -183,7 +186,7 @@ if issues=$(isince=$isince gh api --paginate "repos/$repo_full/issues?state=all&
 		[ "$author" = "$login" ] || continue
 		from_elsewhere "$signed" || continue
 		for id in $(tech_lead_here); do
-			wake "$id" "$signed on #$number" "$title" "$link"
+			wake "$id" "$created" "$signed on #$number" "$title" "$link"
 		done
 	done
 	tail -n 2000 "$iseen" >"$iseen.tmp" && mv "$iseen.tmp" "$iseen"

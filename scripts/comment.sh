@@ -21,6 +21,8 @@
 #                (`<!-- team · tech lead of <this repository> -->`), so its dispatcher wakes its tech lead. Your
 #                state does not change, as with --fyi: the answer comes on a repository this one's dispatcher
 #                does not read.
+# The session's `commented` records it (session-dir.sh commented_on): a wake for a comment written to it
+# before, by the one it writes to or by the user, is not delivered.
 # Prints the comment's link.
 set -eu
 
@@ -76,11 +78,7 @@ if [ -n "$elsewhere" ]; then
 fi
 
 # The issue the target belongs to: the number itself, or the issue a pull request closes.
-issue=$target
-if gh pr view "$target" --json number >/dev/null 2>&1; then
-	issue=$(gh pr view "$target" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty' 2>/dev/null || true)
-	[ -n "$issue" ] || issue=$target
-fi
+issue=$(thread_of "$target")
 
 login=$(gh api user --jq .login)
 case "$to" in
@@ -94,6 +92,8 @@ marker=""
 [ "$fyi" != --fyi ] || marker=" · fyi"
 link=$(printf '**%s → %s**%s\n\n%s\n' "$from" "$address" "$marker" "$body" | gh issue comment "$target" --body-file -)
 echo "$link"
+# Written on the thread, to them: a wake for what they wrote before it is not delivered.
+commented_on "$me" "$issue" "$address"
 
 first=$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1)
 if [ "$to" = you ]; then

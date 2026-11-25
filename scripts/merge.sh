@@ -2,6 +2,7 @@
 # The developer merges its own pull request, once everything holds for its current head:
 #   - the decision review passed (review.sh);
 #   - the QA passed, when the issue carries the label qa (qa.sh);
+#   - neither was recorded before the issue's latest `## Technical decisions` comment;
 #   - every check of the pull request is green.
 # A red default branch stops nobody: it is red for many reasons, most of them someone else's.
 # The method is the one the repository's own instructions ask for (--rebase, --squash); without one, a merge
@@ -45,11 +46,32 @@ issue=$(printf '%s' "$info" | jq -r '.closingIssuesReferences[0].number // empty
 
 [ "$(cut -f1 "$repo_dir/review/$pr" 2>/dev/null || true)" = "$head" ] ||
 	refuse "no decision review for the current head: run the reviewer (briefs/reviewer.md), then review.sh pass $pr \"...\""
+# A review or a QA pass recorded before the issue's latest `## Technical decisions` checked older decisions. The
+# times are UTC in GitHub's own format, so they compare as text; a record of an older version, with no time,
+# is older than any decision.
+decided=$(gh issue view "$issue" --json comments \
+	--jq '[.comments[] | select(.body | startswith("## Technical decisions")) | .createdAt] | max // empty' 2>/dev/null) ||
+	refuse "could not read the comments of #$issue: try again"
+# before_decisions <recorded time>: succeeds when the latest decisions are newer than it.
+before_decisions() {
+	[ -n "$decided" ] || return 1
+	case "$1" in
+	[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+	*) return 0 ;;
+	esac
+	jq -n -e --arg at "$1" --arg decided "$decided" '$decided > $at' >/dev/null
+}
+if before_decisions "$(cut -f2 "$repo_dir/review/$pr")"; then
+	refuse "the decisions changed after the review: run the decision review again"
+fi
 needed=$(sh "$here/qa.sh" needed "$issue" 2>/dev/null || true)
 case "$needed" in
 yes)
 	[ "$(cut -f1,2 "$repo_dir/qa/$pr" 2>/dev/null || true)" = "pass	$head" ] ||
 		refuse "issue #$issue carries the label qa and the QA has not passed this head: qa.sh request $pr"
+	if before_decisions "$(cut -f3 "$repo_dir/qa/$pr")"; then
+		refuse "the decisions changed after the QA: qa.sh request $pr"
+	fi
 	;;
 no) ;;
 *) refuse "could not read the labels of #$issue: try again" ;;

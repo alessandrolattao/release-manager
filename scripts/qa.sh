@@ -2,9 +2,11 @@
 # QA for a delicate task: an issue with the label `qa` is tested by a separate agent before its merge.
 #   qa.sh request <pr>        the developer: asks for it once the pull request is ready; you wait (purple)
 #                             and the plugin starts a QA agent, which writes its outcome on the pull request
-#   qa.sh pass <pr> | fail <pr>   the QA agent: records the outcome for the pull request's current head
+#   qa.sh pass <pr> | fail <pr>   the QA agent: records the outcome for the pull request's current head, with
+#                             its time (UTC)
 #   qa.sh needed <issue>      prints yes when the issue carries the label qa
-# merge.sh refuses a pull request of a `qa` issue that has no pass for its head.
+# merge.sh refuses a pull request of a `qa` issue that has no pass for its head, or a pass recorded before the
+# issue's latest `## Technical decisions`.
 set -eu
 
 action=${1:?request, pass, fail or needed}
@@ -31,7 +33,7 @@ pass | fail)
 	# tested is not passed with it.
 	head=$(jq -r '.tested_head // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 	[ -n "$head" ] || head=$(gh pr view "$number" --json headRefOid --jq .headRefOid)
-	printf '%s\t%s\n' "$action" "$head" >"$repo_dir/qa/$number"
+	printf '%s\t%s\t%s\n' "$action" "$head" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$repo_dir/qa/$number"
 	echo "QA $action recorded for #$number at ${head%"${head#???????}"}"
 	;;
 *)

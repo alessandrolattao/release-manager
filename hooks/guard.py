@@ -448,11 +448,13 @@ def scan(text):
                 strings.append((opened, i))
                 quote = None
             else:
-                # $'...' only after an odd run of $ (one $$ is a parameter), the last of them not escaped.
-                run = len(text[:i]) - len(text[:i].rstrip("$"))
-                quote = "$'" if c == "'" and run % 2 and i != after else c
-                opened = i + 1
+                quote, opened = c, i + 1
             i += 1
+        elif c == "$" and quote is None and text[i + 1:i + 2] in ("$", "'"):
+            # Read forward: $$ is a parameter (the shell's pid), $' opens $'...'; an escaped $ never comes here.
+            if text[i + 1] == "'":
+                quote, opened = "$'", i + 2
+            i += 2
         elif c == "\n" and quote is None:
             out[i] = ";"
             i += 1

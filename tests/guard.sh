@@ -375,6 +375,8 @@ check allow tech-lead "gh issue comment 3 --body \$'see repos/a/b'"
 # $$ is a parameter: the quote after it is a plain one, where \ is text.
 check deny tech-lead "echo \$\$'\\' ; gh api repos/someone/else/issues ; echo '\\'"
 check deny tech-lead "echo \$\$\$'\\'' ; gh api repos/someone/else/issues #'"
+check deny tech-lead "echo \\\$\$'\\'' ; gh api repos/someone/else/issues #'"
+check deny tech-lead "echo \\\$'\\' ; gh api repos/someone/else/issues ; echo '\\'"
 check allow tech-lead 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/repos/someone_else/dispatcher.log"; cat ~/../repos/a/b'
 # Only spaces before repos/ in a quoted string are no other text: it still starts with the endpoint.
 check deny tech-lead "echo ' repos/someone/else/issues' | xargs gh api"

@@ -144,6 +144,15 @@ check deny tech-lead "echo 'git push' | sudo -u '>' sh"
 check allow tech-lead "grep -c '>' README.md"
 # As on main, the check on writing a file in another repository takes a quoted '>' for one.
 check deny tech-lead "cd $S && echo '>' x"
+# A redirection with no command left, after a ) or alone, still writes a file there, as main refuses.
+check deny tech-lead "cd $S && source <(echo ls) > out.txt"
+check deny tech-lead "cd $S && bash <(echo ls) > out.txt"
+check deny tech-lead "cd $S && (ls) > out.txt"
+check deny tech-lead "cd $S && \$(echo ls) > out.txt"
+check deny tech-lead "cd $S && > out.txt"
+check deny tech-lead "cd $S && 2> out.txt"
+# >| is one operator, no pipe; main's write check does not know it, and passes it.
+check allow tech-lead "cd $S && echo hi >| out.txt"
 check deny tech-lead "echo 'git push' | sudo -u \\> sh"
 check deny tech-lead "echo 'git push' | sudo -u '>'\"\" sh"
 check deny tech-lead "sh -c 'echo x; git push'"
@@ -368,5 +377,13 @@ check deny tech-lead 'curl -sL https://codeload.github.com/someone/else/tar.gz/m
 check deny tech-lead 'curl -s https://gist.github.com/someone/abc123'
 check deny tech-lead 'curl -s https://uploads.github.com/repos/someone/else/releases/1/assets'
 check allow tech-lead 'ls ~/src/gist.github.com/foo/bar'
+# The guard compiles with no warning: a later Python turns one into an error, and every command is refused.
+if python3 -W error -c 'import pathlib, sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], "exec")' \
+	"$P/hooks/guard.py" >"$T/out" 2>&1; then
+	pass=$((pass + 1))
+else
+	fail=$((fail + 1))
+	echo "FAIL (the guard compiles with a warning): $(cat "$T/out")" | cut -c1-220
+fi
 echo "passed=$pass failed=$fail"
 [ "$fail" = 0 ]

@@ -125,9 +125,9 @@ def commands_of(text):
         tokens = list(lexer)
     except ValueError:
         tokens = text.split()
-    # shlex runs punctuation together (;>, ;;>): separators and redirections come apart, <( stays one word.
+    # shlex runs punctuation together (;>, ;;>): separators and redirections come apart, <( and >| stay one word.
     tokens = [part for token in tokens
-              for part in (re.findall(r"<\(|[;|()]+|[<>&]+", token) if token and set(token) <= set(";&|()<>") else [token])]
+              for part in (re.findall(r"<\(|>\||[;|()]+|[<>&]+", token) if token and set(token) <= set(";&|()<>") else [token])]
     commands, current, separator = [], [], ""
     for token in tokens:
         if token and set(token) <= set(";&|()"):
@@ -454,7 +454,7 @@ def folded(word):
 
 def marked(c):
     """An operator character as the tokenizer must see it when quoted or escaped: a word's, not an operator
-    ('>', \>, "a;b"). restored() gives it back where the text becomes code."""
+    ('>', a backslash before >, "a;b"). restored() gives it back where the text becomes code."""
     return chr(0xE000 + ord(c)) if c in ";&|()<>" else c
 
 
@@ -530,6 +530,12 @@ where = cwd
 for n, (written, _) in enumerate(commands):
     words = bare(unredirected(bare(written)))
     if not words:
+        # Nothing but a redirection (> out.txt, (ls) > out.txt): main took it for the command and refused it in
+        # another repository; so does this.
+        top = toplevel(where)
+        if (top and top != root and not top.startswith(root + os.sep)
+                and any(re.match(r"^\d*>>?$", restored(w)) for w in written)):
+            refuse(f"it writes a file while in another repository ({top})")
         continue
     head = os.path.basename(words[0])
 

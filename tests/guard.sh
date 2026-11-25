@@ -262,6 +262,23 @@ check allow tech-lead "git checkout main"
 check deny tech-lead "env -i -C $S gh issue close 3"
 check deny tech-lead "export GIT_DIR=$S/.git; gh issue close 3"
 check allow tech-lead "GIT_DIR=$R/.git git log --oneline -1"
+# A repository held in a shell variable counts as another one: only what passes there passes.
+check deny tech-lead 'R=someone/else; gh release create v1 -R "$R"'
+check deny tech-lead 'gh issue close 3 -R $R'
+check deny tech-lead 'GH_REPO=$R gh release create v1'
+check deny tech-lead "GH_REPO=\$R sh $P/scripts/note.sh 5"
+check deny tech-lead 'gh api -X PUT "repos/$R/pulls/5/merge"'
+check deny tech-lead 'gh api "repos/$R/issues/3"'
+check deny tech-lead 'curl -s "https://api.github.com/repos/$R/issues"'
+check deny tech-lead 'gh api "repos/test/repo/actions/runs/$ID"'
+check deny tech-lead 'gh api "repos/test/repo/issues/$N" -f state=closed'
+check allow tech-lead 'gh issue comment 3 -R "$R" --body x'
+check allow tech-lead 'gh api "repos/test/repo/issues/$N"'
+check deny spike 'gh issue comment 3 -R $R --body x'
+# An alias hides the command the guard would judge.
+check deny tech-lead "gh alias set m 'pr merge 5 -R someone/else'"
+check deny spike "gh alias import aliases.yml"
+check allow tech-lead 'gh alias list'
 # A spike only reads, and still not another repository through GitHub.
 check deny spike 'gh issue view 3 -R someone/else'
 check deny spike 'gh api repos/someone/else/issues'

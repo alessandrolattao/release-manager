@@ -15,7 +15,10 @@ Refused:
   - in another repository's checkout (reached by cd, pushd, env -C, or GIT_DIR / GIT_WORK_TREE), where gh takes
     the repository from the folder, gh as if that repository came with -R ({owner}/{repo} and :owner/:repo
     placeholders refused there), and the plugin's scripts;
+  - a repository named through a shell variable (-R "$R", GH_REPO=$R, repos/$R/...) counts as another one,
+    since the guard cannot tell which: only what passes there passes;
   - a repository reached by its id (repositories/<id>), whose it is the guard cannot tell;
+  - gh alias set and import, since an alias hides the command the guard would judge;
   - a GraphQL mutation typed by hand (gh api graphql, curl), or a query the guard cannot read (a file, stdin, a
     variable); the plugin's scripts run theirs;
   - any gh repo subcommand but view, clone, gitignore and license, on any repository (view and clone pass
@@ -50,6 +53,8 @@ GH_API_LONG_VALUES = {"--cache", "--field", "--header", "--hostname", "--input",
 # The gh repo subcommands a tech lead or a spike may run, on any repository: they only read, or copy one to read it.
 GH_REPO_READS = {"view", "clone", "gitignore", "license"}
 API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
+# A repos/ path holding a shell variable: which repository, or which path, the guard cannot tell.
+VAR_REF = re.compile(r"repos/[^\s?#]*\$")
 LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
 # A repository reached by its numeric id: whose it is the guard cannot tell.
 BY_ID = re.compile(r"(?:^|/)repositories/\d+", re.IGNORECASE)
@@ -145,13 +150,19 @@ def api_method(words):
     return (method or ("POST" if fields else "GET")).upper()
 
 
+def elsewhere_name(name):
+    """A repository named for gh is another one: not this one, or one held in a shell variable."""
+    return "$" in name or repo_of(name) not in (None, own)
+
+
 def elsewhere_named(words, assigns):
     """The other repositories a command reaches by its words: GH_REPO, which points gh at one before the
     command or for the next ones (export, declare -x, env); its API paths; its links; any repository by id."""
     text = assigns + words
     pointed = [w.split("=", 1)[1] for w in text if w.startswith("GH_REPO=")]
-    pointed = [n for n in pointed if repo_of(n) not in (None, own)]
+    pointed = [n for n in pointed if elsewhere_name(n)]
     called = [m.group(1) for w in text for m in API_REF.finditer(w) if m.group(1).lower() != own]
+    called += [m.group(0) for w in text for m in VAR_REF.finditer(w)]
     linked = [m.group(1) for w in text for m in LINK_REF.finditer(w) if repo_of(m.group(1)) not in (None, own)]
     by_id = [m.group(0).lstrip("/") for w in text for m in BY_ID.finditer(w)]
     return pointed, called, linked, by_id
@@ -182,7 +193,7 @@ def elsewhere_refused(head, words, assigns, checkout=None):
         rest, named = gh_words(rest)
     elif any(w in ("-R", "--repo") or w.startswith("--repo=") for w in rest):
         named = gh_words(rest)[1]
-    pointed += [n for n in named if repo_of(n) not in (None, own)]
+    pointed += [n for n in named if elsewhere_name(n)]
     if head == "gh" and checkout:
         # gh api fills {owner} and {repo} with the folder's repository: there it names its endpoint plainly.
         if any(re.search(r"\{(owner|repo|branch)\}|:(owner|repo)\b", w) for w in words):
@@ -206,11 +217,13 @@ def elsewhere_refused(head, words, assigns, checkout=None):
         # and has to be one the guard reads plainly: no port, no ./ before it, no . or .. in its path.
         method = api_method(rest)
         for w in rest[1:]:
-            if FIELD.match(w) or not any(r.lower() != own for r in API_REF.findall(w)):
+            # A path holding a variable counts as another repository's, this one's too.
+            varied = VAR_REF.search(w)
+            if FIELD.match(w) or not (varied or any(r.lower() != own for r in API_REF.findall(w))):
                 continue
             m = ENDPOINT.match(w)
             path = (m.group(2) or "") if m else ""
-            if not m or re.search(r"(^|/)\.\.?(/|$)", path) or m.group(1).lower() == own:
+            if not m or re.search(r"(^|/)\.\.?(/|$)", path) or (m.group(1).lower() == own and not varied):
                 return f"{w} reaches another repository's API in a form the guard does not read: write repos/<owner>/<name>/..."
 
             if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
@@ -410,6 +423,8 @@ for words in segments:
             refuse(f"gh pr {sub[1]} is a developer's work")
         if sub[:2] == ["issue", "develop"]:
             refuse("gh issue develop is a developer's work")
+        if sub[:1] == ["alias"] and sub[1:2] in (["set"], ["import"]):
+            refuse(f"gh alias {sub[1]} hides the command the guard would judge: type the command itself")
         if sub[:1] == ["repo"] and sub[1:2] and sub[1] not in GH_REPO_READS:
             refuse(f"gh repo {sub[1]} changes a repository; here a repository is only viewed or cloned")
         continue

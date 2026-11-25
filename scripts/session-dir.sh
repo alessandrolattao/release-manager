@@ -10,9 +10,10 @@
 #    "busy_until", "tested_head", "asked_on", "waits_on"}
 # asked_on: the issue where the session asked the user on GitHub (comment.sh); absent when it asked in its
 # own chat (hooks/asks.sh), where the user answers it directly.
-# waits_on: whom the session waits on since it wrote to them on GitHub (comment.sh): the address it wrote to
-# ("tech lead", "dev #42", "qa #42"), or "the user" for a tech lead's question to the user. A comment from
-# them ends the wait (hooks/sessions.tsx); every state_set removes it, and a new wait records its own.
+# waits_on: whom the session waits on since it wrote to them on GitHub (comment.sh, or dispatch.sh posting a
+# question it left in its chat): the address ("tech lead", "dev #42", "qa #42"), or "the user" for a tech
+# lead's question to the user. A comment from them ends the wait (hooks/sessions.tsx); every state_set
+# removes it, and a new wait records its own.
 # state: working (cyan), others (purple: waits on another agent or the checkout), you (yellow: waits on
 # the user), stuck (red: dead, failing or silent), idle (green: a tech lead waiting for work), done (no
 # color, then the session goes away).

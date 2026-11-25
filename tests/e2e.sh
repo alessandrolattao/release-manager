@@ -205,6 +205,7 @@ sh "$SC/dispatch.sh" >/dev/null 2>&1
 last=$(ls -t "$G/comments" | head -1)
 ok "posted to the tech lead" "$(head -1 "$G/comments/$last")" "**dev #43 → tech lead**"
 ok "and the agent waits on it" "$(st "$DEV2" state)" "others"
+ok "and records whom it waits on" "$(st "$DEV2" waits_on)" "tech lead"
 
 echo "== dispatch.sh: done sessions go, dead ones turn red"
 jq '.state = "done" | .since = 1' "$S/$SPK/status" >"$S/$SPK/status.t" && mv "$S/$SPK/status.t" "$S/$SPK/status"

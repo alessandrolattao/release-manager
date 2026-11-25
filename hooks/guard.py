@@ -298,10 +298,24 @@ def is_call(text, at, strings):
             return False
     else:
         word = re.search(r"[^\s'\"=;&|()<>`]*$", text[:at]).group()
-    word = folded(word)
-    if ENDPOINT_PREFIX.fullmatch(word) or VARIABLE_BEFORE.search(word):
-        return True
-    return string is None and "/" not in word
+    for made in expanded(word):
+        made = folded(made)
+        if ENDPOINT_PREFIX.fullmatch(made) or VARIABLE_BEFORE.search(made) or (string is None and "/" not in made):
+            return True
+    return False
+
+
+def expanded(word):
+    """The words the shell makes of a word: its backslashes gone, its braces expanded ({a,b} gives a and b; a
+    brace left open, one that goes on past repos/, goes), ${...} kept a variable ($V); 64 at most."""
+    words = [re.sub(r"\$\{[^}]*\}", "$V", word).replace("\\", "")]
+    while len(words) < 64 and any(re.search(r"\{[^{}]*,[^{}]*\}", w) for w in words):
+        made = []
+        for w in words:
+            group = re.search(r"\{([^{}]*,[^{}]*)\}", w)
+            made += [w[:group.start()] + alt + w[group.end():] for alt in group.group(1).split(",")] if group else [w]
+        words = made
+    return [w.replace("{", "").replace("}", "") for w in words]
 
 
 def scan(text):
@@ -430,19 +444,17 @@ for n, (words, separator) in enumerate(commands):
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
         continue
 
-    # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...') is
-    # checked as a command of its own; when it is the command's own, the command is that and nothing more. A
-    # shell's -c string among the arguments (find -exec sh -c '...') leaves the command to its own rules.
-    inner = code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None)
-    for code in {inner, shell_inside(commands[n][0])} - {None}:
+    # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...', find
+    # -exec sh -c '...') is checked as a command of its own; the command that runs it is still judged by its own
+    # rules below (in another repository, sh > file writes a file).
+    for code in {code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None),
+                 shell_inside(commands[n][0])} - {None}:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
                                 input=f"cd {shlex.quote(where)}\n{code}", capture_output=True, text=True)
         if nested.returncode != 0:
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
-    if inner is not None:
-        continue
 
     if head == "cd" and len(words) > 1:
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))

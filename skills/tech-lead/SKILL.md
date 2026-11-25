@@ -49,7 +49,7 @@ Your notes, what is worth keeping between one conversation and the next, go in `
 
 There is no fixed flow: follow the conversation with the user, whether it is a backlog review, the design of a new project, a batch of new issues or the technical analysis of one. **GitHub Issues is the center of development**: what you decide together ends up in issues and their comments, never only in this conversation.
 
-**Creating issues and analysing them are two separate moments.** An issue can be created with no technical analysis at all: it goes to the backlog, and that is normal. Never slip technical decisions into an issue because you are creating it.
+**An issue that is already clear is born ready.** When what to build and how is already settled as the user asks for the issue (they said it in this conversation, or it follows with no choice left from decisions already taken with them: a mechanical change, an instruction to write down, a fix whose way is obvious), create it with its `## Technical decisions` comment and the label `ready for development` at once: delaying it adds nothing. The text you show the user before publishing carries the decisions too, and their yes covers the issue, the decisions and the label. An issue with a technical choice still open goes to the backlog without decisions, and that is normal: it is analysed with the user when they ask. Never slip in a decision the user did not take to make an issue ready.
 
 ### Before you create or change anything on GitHub
 
@@ -71,11 +71,11 @@ There is no fixed flow: follow the conversation with the user, whether it is a b
 - **Priority and Effort**, when the repository has those fields: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/set-fields.sh" <n> <Urgent|High|Medium|Low> <High|Medium|Low>`. They only order the queue.
 - **Relationships**: an issue that needs another one first is blocked by it: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/block.sh" <n> <blocking>` (`--remove` to undo).
 
-That is all an issue needs to exist. Without technical decisions and the label it stays in the backlog until the user asks for its analysis.
+That is all an issue needs to exist. An issue already clear gets its technical decisions and the label right away, as the next section says; one with a choice still open stays in the backlog until the user asks for its analysis.
 
-### The technical analysis, when the user asks for it
+### The technical analysis: at once for a clear issue, when the user asks for the others
 
-For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only spike sessions you start with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh"`, as "Technical analysis and opinions: spikes" below says: never by a developer, never through an issue or a message. What comes out:
+For an issue already clear, write down what was settled. For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only spike sessions you start with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh"`, as "Technical analysis and opinions: spikes" below says: never by a developer, never through an issue or a message. What comes out:
 
 - **Technical decisions in a comment that starts with `## Technical decisions`**, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the developers tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
 - **Every architectural choice you take on your own goes in that comment too**, under a section `### Decided autonomously`, one line each, always in this format:
@@ -87,7 +87,7 @@ For the issue the user names, go through the technical choices with them, one at
 
 ### Before you finish a piece of preparation
 
-Read back each issue you created or touched (`gh issue view <n> --comments`, and `sh "${CLAUDE_PLUGIN_ROOT}/scripts/queue.sh"` for how the dispatcher sees it). Tell the user, one line per issue, where it stands: ready for a developer, or in the backlog and why (its technical analysis not done yet, a decision still open, blocked by #x, assigned to someone else). An issue just created without analysis is simply in the backlog: say so, do not offer to analyse it.
+Read back each issue you created or touched (`gh issue view <n> --comments`, and `sh "${CLAUDE_PLUGIN_ROOT}/scripts/queue.sh"` for how the dispatcher sees it). Tell the user, one line per issue, where it stands: ready for a developer, or in the backlog and why (its technical analysis not done yet, a decision still open, blocked by #x, assigned to someone else). An issue created in the backlog, with a choice still open, is simply there: say so and which choice, do not offer to analyse it.
 
 ## Technical analysis and opinions: spikes
 

@@ -124,6 +124,9 @@ test('a tech lead waiting on the user in its chat is left alone; one that asked 
   expect(seen[0]).toMatch(/^for you on GitHub: tester on #44: chiamalo pippo; 1 message\(s\) from other repositories: sh ".*\/scripts\/inbox\.sh" read$/)
 })
 
+// The plugin's manifest, which a tech lead's update check reads: the version published is the one running.
+const MANIFEST = '{"name":"team","version":"9.9.9","repository":"https://github.com/acme/team"}'
+
 // The engine beneath the turns the module hears, and one turn the wake started: it starts and ends on an
 // answer, with no script changing the state in between.
 function turns(on: On): void {
@@ -220,6 +223,123 @@ test('a tech lead that asked the user on GitHub, woken by the user\'s answer, no
   status = statusOf(files)
   expect(status.state).not.toBe('you')
   expect(status.resume_to).toBe(undefined)
+})
+
+test('a tech lead waiting on the user in its chat is woken by the user\'s GitHub comment, with every fresh line, and no longer waits', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'you', detail: 'Come lo chiamiamo?' }),
+    wake: `${at}\tdev #42 on #42\tQuale tabella?\thttps://x/42#c301\n${at + 30}\tthe user on #44\tchiamalo pippo\thttps://x/44#c302\n`,
+    'plugin.json': MANIFEST,
+  }, ['m1'])
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs)
+  turns(on)
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(logs).toEqual([])
+  expect(seen.length).toBe(1)
+  expect(seen[0]).toMatch(
+    /^for you on GitHub: dev #42 on #42: Quale tabella\? \(https:\/\/x\/42#c301\); the user on #44: chiamalo pippo \(https:\/\/x\/44#c302\); 1 message\(s\) from other repositories: sh ".*\/scripts\/inbox\.sh" read$/,
+  )
+  expect(files.get('wake-read')).toBe('2\n')
+  let status = statusOf(files)
+  expect(`${status.state} · ${status.detail}`).toBe('working · answered by the user')
+  expect(status.resume_to).toBe(undefined)
+
+  await wokenTurn($)
+  status = statusOf(files)
+  expect(status.state).toBe('idle')
+})
+
+test('a wake for a comment the session already answered on GitHub starts no turn', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
+    wake: `${at}\tthe user on #44\tchiamalo pippo\thttps://x/44#c302\n`,
+    // A note on the thread after the comment: the user's comment is answered.
+    commented: `${at + 60}\t44\t\n`,
+    'plugin.json': MANIFEST,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([])
+  expect(files.get('wake-read')).toBe('1\n')
+})
+
+test('an agent\'s comment is answered only by a later comment to that agent; the user\'s only on its thread', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
+    wake: [
+      `${at}\tdev #42 on #42\tQuale tabella?\thttps://x/42#c301`,
+      `${at}\tqa #42 on #42\tLa pagina non carica\thttps://x/50#c302`,
+      `${at}\tthe user on #45\taltro tema\thttps://x/45#c303`,
+      `${at}\tcheckout\tthe main checkout is free: take it now with checkout.sh take\t`,
+      '',
+    ].join('\n'),
+    commented: [
+      // Before the comments: nothing is answered by it.
+      `${at - 30}\t42\tdev #42`,
+      // A note on the thread, and a comment to someone else: not an answer to the developer.
+      `${at + 30}\t42\t`,
+      `${at + 40}\t42\tqa #42`,
+      // The user's comment on #45 is not answered on #44.
+      `${at + 50}\t44\t`,
+      '',
+    ].join('\n'),
+    'plugin.json': MANIFEST,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs)
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([
+    'for you on GitHub: dev #42 on #42: Quale tabella? (https://x/42#c301); the user on #45: altro tema (https://x/45#c303); checkout: the main checkout is free: take it now with checkout.sh take',
+  ])
+  expect(files.get('wake-read')).toBe('4\n')
+})
+
+test('a tech lead waiting in its chat is left alone for the user\'s comment it already answered', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'you', detail: 'Come lo chiamiamo?' }),
+    wake: `${at}\tthe user on #44\tchiamalo pippo\thttps://x/44#c302\n`,
+    commented: `${at + 60}\t44\tdev #44\n`,
+  })
+  const seen = prompts(on)
+  engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(seen).toEqual([])
+  expect(statusOf(files).state).toBe('you')
 })
 
 test('the user writing to a team session ends its wait; the plugin\'s own prompts do not', async ($, on) => {

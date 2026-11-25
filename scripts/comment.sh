@@ -26,6 +26,8 @@ fyi=${3:-}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "the message comes on stdin" >&2
@@ -52,7 +54,8 @@ esac
 
 marker=""
 [ "$fyi" != --fyi ] || marker=" · fyi"
-link=$(printf '**%s → %s**%s\n\n%s\n' "$from" "$address" "$marker" "$body" | gh issue comment "$target" --body-file -)
+link=$(printf '**%s → %s**%s\n\n%s\n' "$from" "$address" "$marker" "$body" |
+	rest_body "repos/$repo_full/issues/$target/comments" --jq .html_url)
 echo "$link"
 # Written on the thread, to them: a wake for what they wrote before it is not delivered.
 commented_on "$me" "$issue" "$address"
@@ -60,8 +63,8 @@ commented_on "$me" "$issue" "$address"
 first=$(printf '%s\n' "$body" | sed '/^[[:space:]]*$/d' | head -1)
 if [ "$to" = you ]; then
 	gh label list --limit 200 --json name --jq '.[].name' | grep -qx question ||
-		gh label create question --description "Waiting for an answer from the assignee" >/dev/null
-	gh issue edit "$issue" --add-label question >/dev/null 2>&1 || true
+		rest "repos/$repo_full/labels" -f name=question -f color=d876e3 -f description="Waiting for an answer from the assignee" >/dev/null
+	rest "repos/$repo_full/issues/$issue/labels" -f "labels[]=question" >/dev/null 2>&1 || true
 fi
 [ -z "$me" ] || [ "$fyi" = --fyi ] || {
 	if [ "$to" = you ]; then

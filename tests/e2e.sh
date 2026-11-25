@@ -134,15 +134,36 @@ case "$*" in
 *) echo "gh stub: unhandled: $*" >>"$G/unhandled"; exit 1 ;;
 esac
 EOF
-# A fake claude: the agent list comes from a file, stop and rm are recorded.
+# A fake claude: the agent list comes from a file, stop and rm are recorded. A plugin update installs, on
+# the account it runs on, each version `publish` lists for that account ("<account folder> <version>" per
+# line, the version's files in releases/<version>) and not installed there yet.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
 agents) cat "$TT/agents.json" 2>/dev/null || echo '[]' ;;
 --bg) echo "$*" >>"$TT/claude.log"; echo "backgrounded · abcd1234 · started" ;;
+plugin)
+	echo "$*" >>"$TT/claude.log"
+	[ "$2" = update ] || exit 0
+	home=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+	got=""
+	while read -r account version; do
+		[ "$account" = "$home" ] && [ ! -e "$home/plugins/cache/team/team/$version" ] || continue
+		mkdir -p "$home/plugins/cache/team/team"
+		ln -s "$TT/releases/$version" "$home/plugins/cache/team/team/$version"
+		got=$version
+	done <"$TT/publish"
+	if [ -n "$got" ]; then echo "Plugin \"team\" updated to $got"; else echo "Plugin \"team\" is already at the latest version"; fi ;;
 *) echo "$*" >>"$TT/claude.log" ;;
 esac
 EOF
+: >"$T/publish"
+# release <version>: the plugin's files as that version publishes them, in releases/<version>.
+release() {
+	mkdir -p "$T/releases/$1/.claude-plugin"
+	cp -R "$W/scripts" "$W/skills" "$W/briefs" "$W/hooks" "$T/releases/$1/"
+	printf '{"name": "team", "version": "%s"}\n' "$1" >"$T/releases/$1/.claude-plugin/plugin.json"
+}
 cat >"$T/bin/clessidra" <<'EOF'
 #!/bin/sh
 [ "${1:-}" = --json ] || { echo "5h  ██░░░░░░░░   20%  reset 23:00 · lasts"; exit 0; }
@@ -926,6 +947,7 @@ ok "a started issue is not workable" "$(jq -r '.queue.ready' "$R/board.json")" "
 echo "== main-ci.sh: the merge's CI and deploy"
 cd "$ROOT" || exit 1
 # within <seconds> <command...>: its output once it ends, or TIMEOUT, with it stopped, when it still runs then.
+# Its exit code, or TIMEOUT, goes in $T/within.code.
 within() {
 	secs=$1
 	shift
@@ -937,10 +959,12 @@ within() {
 		pkill -P "$wpid" 2>/dev/null
 		kill "$wpid" 2>/dev/null
 		wait "$wpid" 2>/dev/null
+		echo TIMEOUT >"$T/within.code"
 		echo TIMEOUT
 		return
 	fi
 	wait "$wpid" 2>/dev/null
+	echo $? >"$T/within.code"
 	cat "$T/within.out"
 }
 echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
@@ -948,16 +972,48 @@ printf 'name: ci\non:\n  push:\n    branches: [main]\n  pull_request:\n' >"$G/wo
 echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"},{"status":"completed","conclusion":"success","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "green: the change is deployed" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main deadbee: t"
 ok "and --wait ends on it" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main deadbee: t"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
 echo '[{"status":"completed","conclusion":"failure","workflowName":"deploy","url":"https://x/run/9"},{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
 out=$(sh "$SC/main-ci.sh" 50)
+code=$?
 ok "red: the failed runs, and whose it is to say" "$(printf '%s\n' "$out" | grep -c -e '^RED main deadbee' -e 'deploy: failure https://x/run/9' -e 'tell the tech lead')" "4"
+ok "with exit 1" "$code" "1"
 ok "and no bug issue opened" "$(ls "$G/comments" | grep -c 'CI')" "0"
 echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
+ok "a run still going at the limit of --wait: PENDING, and to run it again" "$(within 10 env MAIN_CI_WAIT=0 sh "$SC/main-ci.sh" 50 --wait)" "PENDING main deadbee: 1 run(s) still going after 0 minutes: run main-ci.sh 50 --wait again"
+ok "with exit 3" "$(cat "$T/within.code")" "3"
+# A TERM while it waits between two looks: it says so at once, not at the end of its pause.
+sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+n=0
+spid=""
+while [ -z "$spid" ] && kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 100 ]; do
+	spid=$(pgrep -P "$mpid" -x sleep 2>/dev/null | head -1)
+	[ -n "$spid" ] || sleep 0.1
+	n=$((n + 1))
+done
+kill -TERM "$mpid" 2>/dev/null
+n=0
+while kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+if kill -0 "$mpid" 2>/dev/null; then
+	pkill -P "$mpid" 2>/dev/null
+	kill -KILL "$mpid" 2>/dev/null
+	wait "$mpid" 2>/dev/null
+	code="still running"
+else
+	wait "$mpid" 2>/dev/null
+	code=$?
+fi
+ok "a TERM during the wait: INTERRUPTED, and to run it again" "$(cat "$T/main-ci.out")" "INTERRUPTED main deadbee: run main-ci.sh 50 --wait again"
+ok "with exit 4" "$code" "4"
+sleep 0.2
+ok "and its pause stopped with it" "$([ -n "$spid" ] && ! kill -0 "$spid" 2>/dev/null && echo stopped)" "stopped"
 echo '[]' >"$G/runs"
 ok "a workflow on push to the default branch and no run yet: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
 rm -f "$G/workflows"
 ok "no workflow: NO CI at once, without waiting" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow runs on main"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
 ok "and without --wait too" "$(sh "$SC/main-ci.sh" 50)" "NO CI main deadbee: no workflow runs on main"
 echo '[{"id":2,"name":"pr","path":".github/workflows/pr.yml","state":"active"},{"id":3,"name":"Dependabot Updates","path":"dynamic/dependabot/dependabot-updates","state":"active"},{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"disabled_manually"}]' >"$G/workflows"
 printf 'name: pr\non: [pull_request, workflow_dispatch]\n' >"$G/workflow-2.yml"
@@ -1002,8 +1058,10 @@ ok "a pull request with the title is no report: a new issue" "$(ls "$G/reports" 
 
 echo "== update.sh"
 cd "$ROOT" || exit 1
-mkdir -p "$T/config/plugins/cache/team/team"
-ln -s "$W" "$T/config/plugins/cache/team/team/9.9.9"
+# 9.9.9 published: the update installs it on the team's account. No session has recorded its version, as
+# when an older version started them: each one restarts.
+release 9.9.9
+echo "$T/config 9.9.9" >"$T/publish"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 date +%s >"$S/$NEW/alive"
@@ -1040,27 +1098,69 @@ new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"
 ok "before any session" "$(grep -e '^dispatcher ' -e ': backgrounded' "$T/update.out" | head -1 | cut -d: -f1)" "dispatcher test_repo"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+
+echo "== update.sh: a second run right after the first restarts nothing"
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+date +%s >"$S/$TL1/alive"
+date +%s >"$S/$DEV2/alive"
+date +%s >"$S/$NEW/alive"
+: >"$T/claude.log"
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+ok "the plugin is updated on each account, and none gets a new version" "$(grep -c 'plugin update team@team' "$T/claude.log") $(grep -c 'is already at the latest version$' "$T/update.out")" "2 2"
+ok "nothing to update" "$(grep -c '^nothing to update$' "$T/update.out")" "1"
+ok "no session restarts" "$(grep -c -- '--resume' "$T/claude.log")" "0"
+ok "nor the dispatcher" "$(cat "$R/dispatcher.pid" 2>/dev/null) $(grep -c '^dispatcher ' "$T/update.out")" "$pid 0"
+ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+
+echo "== update.sh: a new version on one account restarts only the sessions behind it"
+# The default account has 9.9.9 too, and 9.9.10 is published there alone. Its session runs 9.9.9; the team's
+# account stays on 9.9.9, where its sessions, restarted by the first run, and the dispatcher run it already.
+ACC=55555555-0000-0000-0000-000000000045
+mkdir -p "$T/home/.claude/plugins/cache/team/team" "$S/$ACC"
+ln -s "$T/releases/9.9.9" "$T/home/.claude/plugins/cache/team/team/9.9.9"
+release 9.9.10
+echo "$T/home/.claude 9.9.10" >>"$T/publish"
+echo dev >"$S/$ACC/role"
+echo '{"role":"dev","repo":"test/repo","name":"repo · dev #45 · in progress · Title 45","issue":45,"state":"working"}' >"$S/$ACC/status"
+echo >"$S/$ACC/config"
+echo "$ROOT" >"$S/$ACC/cwd"
+for id in $TL1 $DEV2 $NEW $ACC; do
+	date +%s >"$S/$id/alive"
+	echo 9.9.9 >"$S/$id/version"
+done
+ok "the dispatcher runs 9.9.9" "$(cat "$R/dispatcher.version")" "9.9.9"
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+: >"$T/claude.log"
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+ok "the default account gets 9.9.10" "$(grep -c '^account .*/home/.claude: Plugin "team" updated to 9.9.10$' "$T/update.out")" "1"
+ok "only its session restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$ACC "
+ok "on 9.9.10" "$(grep -c -- "--bg --resume $ACC The team plugin was updated to 9.9.10 " "$T/claude.log")" "1"
+ok "every session already on its account's newest version is left alone, with its line" "$(grep ': already on 9.9.9$' "$T/update.out" | grep -v '^dispatcher ' | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|repo · tech lead|"
+ok "and so is the dispatcher" "$(cat "$R/dispatcher.pid" 2>/dev/null) $(grep '^dispatcher ' "$T/update.out")" "$pid dispatcher test_repo: already on 9.9.9"
+ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
 sh "$SC/dispatcher.sh" stop >/dev/null
+rm -rf "${S:?}/$ACC" "$T/home/.claude/plugins"
+rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version"
+: >"$T/publish"
 
 echo "== update.sh: started by an older version, the newest one restarts the sessions"
-# An older version installed beside 9.9.9, whose restart prompt lacks a sentence of the newer one's.
+# An older version, whose restart prompt lacks a sentence of the newer one's.
 CACHE="$T/config/plugins/cache/team/team"
-OLD="$CACHE/0.0.1"
+release 0.0.1
+OLD="$T/releases/0.0.1"
 sentence='Commands you started in the background before the restart'
-mkdir -p "$OLD/.claude-plugin"
-cp -R "$W/scripts" "$W/skills" "$W/briefs" "$OLD/"
-echo '{"name": "team", "version": "0.0.1"}' >"$OLD/.claude-plugin/plugin.json"
 sed "s/ $sentence.*do not start them again\.//" "$W/scripts/update.sh" >"$OLD/scripts/update.sh"
 ok "the older version's prompt lacks the sentence" "$(grep -c "$sentence" "$OLD/scripts/update.sh")" "0"
-# The older version alone installed: it is the newest, it goes on by itself.
-mv "$CACHE/9.9.9" "$T/9.9.9"
+# The older version alone installed, by this run: it is the newest, it goes on by itself.
+rm "$CACHE/9.9.9"
+echo "$T/config 0.0.1" >"$T/publish"
 date +%s >"$S/$TL1/alive"
 : >"$T/claude.log"
 UPDATE_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
 ok "the newest version installed hands over to nobody" "$(grep -c '^continuing with team' "$T/update.out") $(grep -c -- "--bg --resume $TL1 The team plugin was updated to 0.0.1 " "$T/claude.log")" "0 1"
 ok "and restarts with its own prompt" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -c "$sentence")" "0"
-# 9.9.9 installed too: the older version updates the plugin, then 9.9.9 goes on.
-mv "$T/9.9.9" "$CACHE/9.9.9"
+# 9.9.9 published too: the older version updates the plugin, then 9.9.9 goes on.
+echo "$T/config 9.9.9" >>"$T/publish"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 : >"$T/claude.log"

@@ -117,6 +117,11 @@ check deny tech-lead 'gh api -X DELETE repos/someone/else/issues/comments/1'
 # PATCH on an issue can close it, or a pull request: there it edits a comment only.
 check deny tech-lead 'gh api -X PATCH repos/someone/else/issues/3 -f title=x'
 check deny tech-lead 'gh api -X PATCH repos/someone/else/issues/5 -f state=closed'
+# GitHub takes a POST on an issue as a PATCH.
+check deny tech-lead 'gh api repos/someone/else/issues/5 -f state=closed'
+check deny tech-lead 'gh api -X POST repos/someone/else/issues/5 -f state=closed'
+check deny tech-lead 'gh api -iXPOST repos/someone/else/issues/5/ -f state=closed'
+check allow tech-lead 'gh api repos/someone/else/issues/5/labels -f "labels[]=bug"'
 check deny tech-lead 'gh api -X PATCH repos/someone/else/issues/comments/9/reactions -f content=x'
 check deny tech-lead 'gh api https://api.github.com/repos/someone/else/pulls -f title=x'
 check deny tech-lead 'GH_REPO=someone/else gh api repos/{owner}/{repo}/issues'

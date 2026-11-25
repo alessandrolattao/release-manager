@@ -10,7 +10,7 @@ Refused:
     gh search, links to it, writing or building inside it), except, for a tech lead, its issues and comments:
     gh issue view, list, create, edit, comment and gh pr view, list, diff, comment, whether the repository
     comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
-    POST on repos/<other>/issues..., PATCH on repos/<other>/issues/comments/<id>;
+    POST on repos/<other>/issues... but an issue itself, PATCH on repos/<other>/issues/comments/<id>;
   - any gh repo subcommand but view, clone, gitignore and license, on any repository (view and clone pass
     with a link to another one too);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
@@ -180,9 +180,10 @@ def elsewhere_refused(head, words, assigns):
             path = m.group(2) or ""
             if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
                 continue
-            if method == "POST" and re.match(r"^/issues(/|$)", path):
+            # PATCH on an issue can close it, or a pull request: only a comment is edited this way. GitHub takes
+            # a POST on what it patches as that PATCH, so a POST on an issue itself is refused too.
+            if method == "POST" and re.match(r"^/issues(/|$)", path) and not re.match(r"^/issues/\d+/?$", path):
                 continue
-            # PATCH on an issue can close it, or a pull request: only a comment is edited this way.
             if method == "PATCH" and re.match(r"^/issues/comments/\d+/?$", path):
                 continue
             return (f"{method} {w} is not for this repository: on {m.group(1)} it reads issues and pull requests "

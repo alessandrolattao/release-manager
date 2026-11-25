@@ -16,6 +16,9 @@ git init -q -b main "$R" || exit 1
 # A sibling repository, outside the fake one: there a spike may only read.
 S="$T/sibling"
 git init -q -b main "$S" || exit 1
+# Another one whose path holds characters the shell takes for operators unquoted.
+C="$T/sibling (copy)"
+git init -q -b main "$C" || exit 1
 pass=0 fail=0
 check() {
 	want=$1 role=$2 cmd=$3
@@ -144,6 +147,16 @@ check deny tech-lead "echo 'git push' | sudo -u '>' sh"
 check allow tech-lead "grep -c '>' README.md"
 # As on main, the check on writing a file in another repository takes a quoted '>' for one.
 check deny tech-lead "cd $S && echo '>' x"
+# The redirection decision's own examples, and a number written apart from > is a word, no descriptor.
+check deny tech-lead 'git </dev/null push'
+check deny tech-lead 'echo x;>/dev/null git push'
+check deny tech-lead 'git branch 2 >/dev/null'
+check allow tech-lead 'git branch -a 2>/dev/null'
+# A quoted path that holds ( ) ; & | < > is still that path.
+check deny tech-lead "cd '$C' && rm -rf src"
+check deny tech-lead "cd '$C' && echo x > f.txt"
+check deny tech-lead "cd \"$C\" && npm install"
+check allow tech-lead "cd '$C' && git log -1"
 # A redirection with no command left, after a ) or alone, still writes a file there, as main refuses.
 check deny tech-lead "cd $S && source <(echo ls) > out.txt"
 check deny tech-lead "cd $S && bash <(echo ls) > out.txt"

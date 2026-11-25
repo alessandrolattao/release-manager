@@ -314,11 +314,11 @@ def remote_command(args):
 
 def unredirected(words):
     """A command's words without its redirections, operator and target (>/dev/null git push is git push), and
-    the file descriptor before one (2>/dev/null)."""
+    the descriptor number written against one (2>/dev/null; in git branch 2 >/dev/null, 2 is a word)."""
     out, i = [], 0
     while i < len(words):
         if REDIRECT.fullmatch(words[i]):
-            if out and out[-1].isdigit():
+            if out and re.fullmatch(r"[\ue100-\ue109]+", out[-1]):
                 out.pop()
             i += 1 if words[i + 1:i + 2] == ["<("] else 2
         else:
@@ -421,6 +421,11 @@ def scan(text):
         elif c == "\n" and quote is None:
             out[i] = ";"
             i += 1
+        elif quote is None and c.isdigit() and (i == 0 or text[i - 1] in " \t\n;&|()") and re.match(r"\d+[<>]", text[i:]):
+            # A descriptor number written against its operator (2>, not 2 >): unredirected() drops it.
+            end = re.match(r"\d+", text[i:]).end() + i
+            out[i:end] = [chr(0xE100 + ord(d) - ord("0")) for d in text[i:end]]
+            i = end
         elif c == "#" and quote is None and i != after and (i == 0 or text[i - 1] in " \t\n;&|()<>"):
             end = text.find("\n", i)
             end = len(text) if end < 0 else end
@@ -459,7 +464,9 @@ def marked(c):
 
 
 def restored(text):
-    """Text with its marked operators given back (the -c string of sh -c 'a; b' is a; b again)."""
+    """Text with its marked operators and descriptor numbers given back (the -c string of sh -c 'a; b' is a; b
+    again)."""
+    text = re.sub(r"[\ue100-\ue109]", lambda m: chr(ord(m.group()) - 0xE100 + ord("0")), text)
     return re.sub(r"[\ue000-\ue0ff]", lambda m: chr(ord(m.group()) - 0xE000), text)
 
 
@@ -528,7 +535,7 @@ for match in LINK.finditer(script):
 
 where = cwd
 for n, (written, _) in enumerate(commands):
-    words = bare(unredirected(bare(written)))
+    words = [restored(w) for w in bare(unredirected(bare(written)))]
     if not words:
         # Nothing but a redirection (> out.txt, (ls) > out.txt): main took it for the command and refused it in
         # another repository; so does this.
@@ -575,7 +582,8 @@ for n, (written, _) in enumerate(commands):
     other = top if top and top != root and not top.startswith(root + os.sep) else None
     # A redirection before the command (>out.txt git log): main took it for the command and refused it in
     # another repository; so does this.
-    if other and bare(written)[:1] != words[:1] and any(re.match(r"^\d*>>?$", restored(w)) for w in written):
+    if other and [restored(w) for w in bare(written)[:1]] != words[:1] and any(
+            re.match(r"^\d*>>?$", restored(w)) for w in written):
         refuse(f"it writes a file while in another repository ({other})")
 
     if head == "git":

@@ -2,10 +2,11 @@
 # Updates the team plugin on this machine and moves the team onto the new version:
 #   1. updates the plugin on every Claude Code account the team's sessions here use;
 #   2. restarts on the new version every dispatcher that was running here (a stopped one stays stopped);
-#   3. restarts every live team session on the new version, each once it is quiet (its conversation
-#      unchanged for 90 seconds, so no turn is cut): the quiet ones at once, the busy ones as soon as they
-#      go quiet, the one that started the update last; resuming it with no flags (a flag would start a
-#      copy) and a message with the new version and where its scripts are.
+#   3. restarts every live team session on the new version, each once it is quiet (between turns for 5
+#      seconds, so no turn is cut; one started by a version that does not record its turns, its conversation
+#      unchanged for 90 seconds): the quiet ones at once, the busy ones as soon as they go quiet, the one
+#      that started the update last; resuming it with no flags (a flag would start a copy) and a message
+#      with the new version and where its scripts are.
 # After step 1 the newest installed version's own update.sh does the rest, so the restart prompt and every
 # later step are the new version's, whatever version started the update.
 # A process of its own, so it goes on after the session that started it is restarted too.
@@ -18,7 +19,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/session-dir.sh
 . "$here/session-dir.sh"
 log="$team_state/update.log"
-QUIET=${UPDATE_QUIET:-90}
+QUIET=${UPDATE_QUIET:-5}
+TRANSCRIPT_QUIET=${UPDATE_TRANSCRIPT_QUIET:-90}
 GONE=${UPDATE_GONE:-60}
 
 if [ "${1:-start}" = start ]; then
@@ -120,9 +122,19 @@ look() {
 		echo "$name: left as it is (no plugin or folder)"
 		return 0
 	}
-	# Quiet: its conversation unchanged for $QUIET seconds, so no turn is cut.
-	transcript=$(find "$(home_of "$cfg")/projects" -name "$id.jsonl" 2>/dev/null | head -1)
-	[ -z "$transcript" ] || [ $(($(date +%s) - $(stat -c %Y "$transcript"))) -ge "$QUIET" ] || return 1
+	# Quiet: between turns for $QUIET seconds, so no turn is cut. Its `idle` holds the time its last turn
+	# ended, empty while one runs (hooks/sessions.tsx); its conversation file is no measure, it changes while
+	# the session waits.
+	if [ -f "$folder/idle" ]; then
+		ended=$(cat "$folder/idle" 2>/dev/null || true)
+		case "$ended" in "" | *[!0-9]*) return 1 ;; esac
+		[ $(($(date +%s) - ended)) -ge "$QUIET" ] || return 1
+	else
+		# Started by a version with no `idle` file: its conversation unchanged for $TRANSCRIPT_QUIET seconds,
+		# long enough not to cut a turn running a long command.
+		transcript=$(find "$(home_of "$cfg")/projects" -name "$id.jsonl" 2>/dev/null | head -1)
+		[ -z "$transcript" ] || [ $(($(date +%s) - $(stat -c %Y "$transcript"))) -ge "$TRANSCRIPT_QUIET" ] || return 1
+	fi
 	as "$cfg" claude stop "${id%%-*}" </dev/null >/dev/null 2>&1
 	n=0
 	until gone "$cfg" "$id" || [ "$n" -ge "$GONE" ]; do

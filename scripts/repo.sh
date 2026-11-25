@@ -92,6 +92,44 @@ alive() {
 	[ $(($(date +%s) - at)) -le 180 ]
 }
 
+# merge_method [--merge|--rebase|--squash]: the method a merge in this repository uses (merge.sh, merge-bot.sh).
+# The one asked for, which the repository's own instructions name; without one, a merge commit when the
+# repository allows it, else the method it allows. Fails on anything else.
+merge_method() {
+	case "${1:-}" in
+	--merge | --rebase | --squash) echo "${1#--}" ;;
+	"")
+		allowed=$(gh api "repos/$repo_full" --jq '[if .allow_merge_commit then "merge" else empty end,
+			if .allow_rebase_merge then "rebase" else empty end, if .allow_squash_merge then "squash" else empty end] | join(" ")' 2>/dev/null || true)
+		case " $allowed " in
+		*" merge "* | "  ") echo merge ;;
+		*) echo "${allowed%% *}" ;;
+		esac
+		;;
+	*) return 1 ;;
+	esac
+}
+
+# checks_not_green <pr>: the pull request's checks that are not green, as "<name>: <state>, ...", nothing when every
+# one is or it has none. When they cannot be read it prints why and fails.
+checks_not_green() {
+	# gh exits non-zero for pending or failing checks too: only an answer that is not a list, other than "no
+	# checks reported", is a failure to read them.
+	err=$(mktemp)
+	checks=$(gh pr checks "$1" --json state,name 2>"$err") || true
+	if ! printf '%s' "$checks" | jq -e 'type == "array"' >/dev/null 2>&1; then
+		if grep -qi 'no checks reported' "$err"; then
+			checks='[]'
+		else
+			head -1 "$err"
+			rm -f "$err"
+			return 1
+		fi
+	fi
+	rm -f "$err"
+	printf '%s' "$checks" | jq -r '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL") | "\(.name): \(.state)"] | join(", ")'
+}
+
 # inbox_dir <owner/name>: the inbox of another repository's tech leads, for what cannot go on an issue.
 inbox_dir() { printf '%s/inbox/%s' "$team_data" "$(printf '%s' "${1:-$repo_full}" | tr '/' '_')"; }
 

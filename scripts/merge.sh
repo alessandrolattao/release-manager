@@ -23,21 +23,10 @@ refuse() {
 	exit 1
 }
 
-case "${2:-}" in
---merge | --rebase | --squash) method=${2#--} ;;
-"")
-	allowed=$(gh api "repos/$repo_full" --jq '[if .allow_merge_commit then "merge" else empty end,
-		if .allow_rebase_merge then "rebase" else empty end, if .allow_squash_merge then "squash" else empty end] | join(" ")' 2>/dev/null || true)
-	case " $allowed " in
-	*" merge "* | "  ") method=merge ;;
-	*) method=${allowed%% *} ;;
-	esac
-	;;
-*)
+method=$(merge_method "${2:-}") || {
 	echo "usage: merge.sh <pr> [--merge|--rebase|--squash]" >&2
 	exit 2
-	;;
-esac
+}
 
 info=$(gh pr view "$pr" --json headRefOid,state,mergeable,closingIssuesReferences)
 [ "$(printf '%s' "$info" | jq -r .state)" = OPEN ] || refuse "#$pr is not open"
@@ -80,21 +69,7 @@ no) ;;
 esac
 [ "$(printf '%s' "$info" | jq -r .mergeable)" != CONFLICTING ] ||
 	refuse "#$pr conflicts with the default branch: bring it into your branch the way the repository's instructions say (a merge when they say nothing, a rebase with a force push of your own branch only where they ask for it), push, and start over"
-# gh exits non-zero for pending or failing checks too: only an answer that is not a list, other than "no
-# checks reported", is a failure to read them, and that refuses.
-err=$(mktemp)
-checks=$(gh pr checks "$pr" --json state,name 2>"$err") || true
-if ! printf '%s' "$checks" | jq -e 'type == "array"' >/dev/null 2>&1; then
-	if grep -qi 'no checks reported' "$err"; then
-		checks='[]'
-	else
-		reason=$(head -1 "$err")
-		rm -f "$err"
-		refuse "could not read the checks of #$pr: ${reason:-no answer}"
-	fi
-fi
-rm -f "$err"
-bad=$(printf '%s' "$checks" | jq -r '[.[] | select(.state != "SUCCESS" and .state != "SKIPPED" and .state != "NEUTRAL") | "\(.name): \(.state)"] | join(", ")')
+bad=$(checks_not_green "$pr") || refuse "could not read the checks of #$pr: ${bad:-no answer}"
 [ -z "$bad" ] || refuse "checks not green: $bad"
 
 # Only the head that was reviewed and checked: a push in between makes GitHub refuse the merge.

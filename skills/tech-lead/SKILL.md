@@ -52,7 +52,7 @@ An issue's card on the repository's project boards follows the issue's own statu
 - **For each unmarked board, ask the user once** whether to add its missing statuses, naming the board and the statuses. Record the answer with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/project.sh" asked <project number> yes|no`, so you never ask again.
 - **On a yes**, add each missing status: `sh "${CLAUDE_PLUGIN_ROOT}/scripts/project.sh" add-status <project number> "<status>"`. It keeps every existing option and every card's value; from then on the cards move to it.
 - **A board marked `(asked: no)` stays as it is**, unless the user asks for it later: then `add-status` as above.
-- A board with no Status field: `add-status` cannot fix it. Tell the user once, then record it with `asked <project number> no`.
+- A board with no Status field is asked about like the others, and its answer recorded the same way. On a yes, tell the user that the Status field has to be made on GitHub: `add-status` cannot create it.
 
 ## Preparing the work
 

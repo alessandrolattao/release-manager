@@ -18,9 +18,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     `role`: at session start, or at the first tick that finds the one role.sh wrote. scripts/update.sh
 //     restarts only the sessions behind the newest version installed.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
-//     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub, the main checkout freed
-//     for it, and in a tech lead the messages other repositories left in its inbox (tell.sh). A session
-//     outside the team runs nothing.
+//     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
+//     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
+//     (tell.sh). A session outside the team runs nothing.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
@@ -970,9 +970,9 @@ async function tick($: EngineInterface): Promise<void> {
 }
 
 // A wake line as dispatch.sh and checkout.sh write it: time, from, what, link. A GitHub comment's from is
-// "<author> on #<issue>", the issue being its thread (an issue and the pull requests that close it), and its
-// time is the comment's.
-type WakeLine = { time: number; from: string; text: string }
+// "<author> on #<issue>", the issue being its thread (an issue and the pull requests that close it), its
+// time is the comment's and its link the comment's own.
+type WakeLine = { time: number; from: string; link: string; text: string }
 
 // What the session wrote on GitHub (comment.sh, note.sh), one line of `commented` each: when, on which
 // thread, to whom (an address; empty for a note).
@@ -997,14 +997,46 @@ async function saidOf($: EngineInterface, folder: string): Promise<Said[]> {
     })
 }
 
-// A comment the session already answered: one of the user's by any later comment of the session on its
-// thread, an agent's only by a later comment of the session written to that agent.
-function isAnswered(line: WakeLine, said: Said[]): boolean {
+// A comment the session already answered. In a tech lead: one of the user's by any later comment of the
+// session on its thread, an agent's only by a later comment of the session written to that agent. In any
+// other session: by any later comment of the session on its thread, a note included, whoever it was to.
+function isAnswered(line: WakeLine, said: Said[], role: string): boolean {
   const comment = commentOf(line.from)
   if (comment === null || !(line.time > 0)) {
     return false
   }
-  return said.some(s => s.issue === comment.issue && s.time > line.time && (comment.author === USER || s.to === comment.author))
+  return said.some(
+    s => s.issue === comment.issue && s.time > line.time && (role !== 'tech-lead' || comment.author === USER || s.to === comment.author),
+  )
+}
+
+// A GitHub comment's link as dispatch.sh writes it (the comment's html_url) as its repository and its id;
+// null for any other link (a new issue) or none (the checkout).
+function commentLink(link: string): { repo: string; id: string } | null {
+  const match = /^https:\/\/[^/]+\/([^/]+)\/([^/]+)\/(?:issues|pull)\/\d+#issuecomment-(\d+)$/.exec(link)
+  return match === null ? null : { repo: `${match[1] ?? ''}/${match[2] ?? ''}`, id: match[3] ?? '' }
+}
+
+// The comments GitHub no longer has, by link: never asked about again in this session.
+const gone = new Set<string>()
+
+// A comment deleted since it was written: GitHub answers 404 for it. Any other failure (no network, the
+// hourly allowance) tells nothing, and keeps it.
+async function isGone($: EngineInterface, cwd: string, link: string): Promise<boolean> {
+  const comment = commentLink(link)
+  if (comment === null) {
+    return false
+  }
+  try {
+    const ran = await $.process.run(['gh', 'api', `repos/${comment.repo}/issues/comments/${comment.id}`, '--silent'], { cwd, timeoutMs: GITHUB_TIMEOUT_MS })
+    if (ran.exitCode !== 0 && /HTTP 404/.test(ran.stderr)) {
+      gone.add(link)
+      return true
+    }
+  } catch (err) {
+    $.ui.log(`team: comment lookup: ${String(err)}`)
+  }
+  return false
 }
 
 // Wakes the session, between turns, with what was written to it since: a GitHub comment the dispatcher
@@ -1012,9 +1044,10 @@ function isAnswered(line: WakeLine, said: Said[]): boolean {
 // lead the messages other repositories left in its inbox. Once the model has been stopped a few seconds; a
 // tech lead whose last message asked the user something in its chat is left alone, the user is talking to
 // it, until the user writes to it on GitHub: that is the user talking too, and every fresh line goes with it.
-// A comment the session already answered on GitHub (isAnswered) is delivered without a turn. `wake-read`,
-// beside it, counts the lines delivered, so a restart does not deliver them again. A line from the one the
-// session waits on ends that wait before the turn starts (answered).
+// Each comment is checked again as it is delivered: one the session already answered on GitHub (isAnswered),
+// then, asking GitHub, one deleted since (isGone), is delivered without a turn; with nothing left, no wake.
+// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again. A line from
+// the one the session waits on ends that wait before the turn starts (answered).
 async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
   const idleSince = Number(await readText($, `${folder}/idle`))
   if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
@@ -1035,12 +1068,23 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
   }
   const fresh: WakeLine[] = lines.slice(delivered).map(line => {
     const [time = '', from = '', what = '', link = ''] = line.split('\t')
-    return { time: Number(time), from, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
+    return { time: Number(time), from, link, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
   })
   const said = fresh.length > 0 ? await saidOf($, folder) : []
-  const kept = fresh.filter(line => !isAnswered(line, said))
-  if (isInChat && !kept.some(line => commentOf(line.from)?.author === USER)) {
+  // First what needs no call to GitHub: the comments answered, and those already found deleted.
+  let kept = fresh.filter(line => !isAnswered(line, said, role) && !gone.has(line.link))
+  const hasUser = () => kept.some(line => commentOf(line.from)?.author === USER)
+  if (isInChat && !hasUser()) {
     return
+  }
+  if (kept.some(line => commentLink(line.link) !== null)) {
+    const cwd = (await readText($, `${folder}/cwd`)) || (await $.session.cwd())
+    const deleted = await Promise.all(kept.map(line => isGone($, cwd, line.link)))
+    kept = kept.filter((_, i) => !deleted[i])
+    // A turn that started while GitHub answered (the user wrote) has the wake wait for its end, checked again.
+    if (isBusy || (isInChat && !hasUser())) {
+      return
+    }
   }
   if (fresh.length > 0) {
     await $.fs.write(`${folder}/wake-read`, `${lines.length}\n`)

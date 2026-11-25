@@ -971,9 +971,9 @@ cat >"$G/boards.json" <<'EOF'
  {"number":5,"title":"Ideas","field":{"options":[{"name":"Backlog"}]}},
  {"number":6,"title":"Notes","field":null}]}}}}
 EOF
-ok "check lists the boards that lack a status, with what they lack" "$(sh "$SC/project.sh" check 2>&1 | tr '\n' '|')" 'board 3 "Roadmap" lacks: In Review|board 5 "Ideas" lacks: Todo, In Progress, In Review, Done|board 6 "Notes" has no Status field|'
+ok "check lists the boards that lack a status, with what they lack and what to do" "$(sh "$SC/project.sh" check 2>&1 | tr '\n' '|')" 'board 3 "Roadmap" lacks: In Review. Ask the user whether to add it, then: project.sh asked 3 yes|no|board 5 "Ideas" lacks: Todo, In Progress, In Review, Done. Ask the user whether to add them, then: project.sh asked 5 yes|no|board 6 "Notes" has no Status field. Ask the user whether to add it, then: project.sh asked 6 yes|no|'
 ok "asked records the user's answer" "$(sh "$SC/project.sh" asked 3 no 2>&1) $(cat "$R/board-asked.3")" "board 3: the user's answer is recorded (no) no"
-ok "check marks the boards already asked with the answer" "$(sh "$SC/project.sh" check 2>&1 | head -2 | tr '\n' '|')" 'board 3 "Roadmap" lacks: In Review (asked: no)|board 5 "Ideas" lacks: Todo, In Progress, In Review, Done|'
+ok "check marks the boards already asked with the answer, and says what to do with the others" "$(sh "$SC/project.sh" check 2>&1 | head -2 | tr '\n' '|')" 'board 3 "Roadmap" lacks: In Review (asked: no)|board 5 "Ideas" lacks: Todo, In Progress, In Review, Done. Ask the user whether to add them, then: project.sh asked 5 yes|no|'
 sh "$SC/project.sh" asked 5 maybe >/dev/null 2>&1; code=$?
 ok "asked takes only yes or no" "$code $([ -f "$R/board-asked.5" ] && echo recorded || echo none)" "2 none"
 cat >"$G/board.json" <<'EOF'

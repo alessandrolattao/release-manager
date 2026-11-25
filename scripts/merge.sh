@@ -55,7 +55,7 @@ no) ;;
 *) refuse "could not read the labels of #$issue: try again" ;;
 esac
 [ "$(printf '%s' "$info" | jq -r .mergeable)" != CONFLICTING ] ||
-	refuse "#$pr conflicts with the default branch: merge it into your branch (no rebase, no force push), push, and start over"
+	refuse "#$pr conflicts with the default branch: bring it into your branch the way the repository's instructions say (a merge when they say nothing, a rebase with a force push of your own branch only where they ask for it), push, and start over"
 # gh exits non-zero for pending or failing checks too: only an answer that is not a list, other than "no
 # checks reported", is a failure to read them, and that refuses.
 err=$(mktemp)

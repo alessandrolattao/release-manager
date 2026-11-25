@@ -10,8 +10,9 @@ Refused:
     gh search, links to it, writing or building inside it), except, for a tech lead, its issues and comments:
     gh issue view, list, create, edit, comment and gh pr view, list, diff, comment, whether the repository
     comes with -R, --repo, GH_REPO or a link; gh api GET on repos/<other>/issues... and repos/<other>/pulls...,
-    POST and PATCH on repos/<other>/issues...;
-  - for a tech lead, any gh repo subcommand but view, clone, gitignore and license, on any repository;
+    POST on repos/<other>/issues..., PATCH on repos/<other>/issues/comments/<id>;
+  - any gh repo subcommand but view, clone, gitignore and license, on any repository (view and clone pass
+    with a link to another one too);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
@@ -39,7 +40,7 @@ GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("iss
 GH_API_SHORT_VALUES = set("FHXfpqt")
 GH_API_LONG_VALUES = {"--cache", "--field", "--header", "--hostname", "--input", "--jq", "--method", "--preview",
                       "--raw-field", "--template"}
-# The gh repo subcommands a tech lead may run, on any repository: they only read, or copy one to read it.
+# The gh repo subcommands a tech lead or a spike may run, on any repository: they only read, or copy one to read it.
 GH_REPO_READS = {"view", "clone", "gitignore", "license"}
 API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
 LINK_REF = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+)")
@@ -147,8 +148,11 @@ def elsewhere_refused(head, words, assigns):
         return None
     # A substitution inside a quoted word, or in backticks, stays in that word: what it runs would ride on the
     # allowed command unseen, so a command carrying one gets no exception.
-    allowed = role == "tech-lead" and head == "gh" and not any(re.search(r"\$\(|`|<\(|>\(", w) for w in text)
-    if allowed and (tuple(rest[:2]) in GH_ELSEWHERE or (rest[:1] == ["repo"] and rest[1:2] in (["view"], ["clone"]))):
+    plain = head == "gh" and not any(re.search(r"\$\(|`|<\(|>\(", w) for w in text)
+    if plain and rest[:1] == ["repo"] and rest[1:2] in (["view"], ["clone"]):
+        return None
+    allowed = role == "tech-lead" and plain
+    if allowed and tuple(rest[:2]) in GH_ELSEWHERE:
         return None
     if allowed and rest[:1] == ["api"] and not pointed:
         # Its endpoint decides; the repositories named in its fields are data. Every word that starts as an
@@ -161,7 +165,10 @@ def elsewhere_refused(head, words, assigns):
             path = m.group(2) or ""
             if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
                 continue
-            if method in ("POST", "PATCH") and re.match(r"^/issues(/|$)", path):
+            if method == "POST" and re.match(r"^/issues(/|$)", path):
+                continue
+            # PATCH on an issue can close it, or a pull request: only a comment is edited this way.
+            if method == "PATCH" and re.match(r"^/issues/comments/\d+/?$", path):
                 continue
             return (f"{method} {w} is not for this repository: on {m.group(1)} it reads issues and pull requests "
                     "and writes issues and comments only")
@@ -297,8 +304,8 @@ for words in segments:
             refuse(f"gh pr {sub[1]} is a developer's work")
         if sub[:2] == ["issue", "develop"]:
             refuse("gh issue develop is a developer's work")
-        if role == "tech-lead" and sub[:1] == ["repo"] and sub[1:2] and sub[1] not in GH_REPO_READS:
-            refuse(f"gh repo {sub[1]} changes a repository; a tech lead only views or clones one")
+        if sub[:1] == ["repo"] and sub[1:2] and sub[1] not in GH_REPO_READS:
+            refuse(f"gh repo {sub[1]} changes a repository; here a repository is only viewed or cloned")
         continue
 
     if head == "claude" and any(w in ("--bg", "--background", "-p", "--print") for w in words[1:]):

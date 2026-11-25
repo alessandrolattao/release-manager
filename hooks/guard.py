@@ -35,8 +35,10 @@ SPIKE_FORBIDDEN_SCRIPTS = {"spike.sh", "start-dev.sh", "start-qa.sh", "merge.sh"
 # What a tech lead may do on another repository: read its issues and pull requests, write issues and comments.
 GH_ELSEWHERE = {("issue", "view"), ("issue", "list"), ("issue", "create"), ("issue", "edit"), ("issue", "comment"),
                 ("pr", "view"), ("pr", "list"), ("pr", "diff"), ("pr", "comment")}
-# gh api's short options that take a value: the rest of their word, or the next word.
+# gh api's options that take a value: the rest of their word (after = for a long one), or the next word.
 GH_API_SHORT_VALUES = set("FHXfpqt")
+GH_API_LONG_VALUES = {"--cache", "--field", "--header", "--hostname", "--input", "--jq", "--method", "--preview",
+                      "--raw-field", "--template"}
 # The gh repo subcommands a tech lead may run, on any repository: they only read, or copy one to read it.
 GH_REPO_READS = {"view", "clone", "gitignore", "license"}
 API_REF = re.compile(r"repos/([\w.-]+/[\w.-]+)")
@@ -93,21 +95,30 @@ def api_method(words):
     """The HTTP method of a gh api call: -X / --method, else POST with fields or an input, else GET.
 
     Short options stack as gh reads them: in `-iXPUT` or `-if title=x`, -i takes no value and the next letter
-    takes the rest of the word, or the next word.
+    takes the rest of the word, or the next word. A value in the next word is that option's, whatever it looks
+    like: in `-q -XGET` it is a jq filter, not a method.
     """
-    method, fields = None, False
+    method, fields, value_of = None, False, None
     for i, w in enumerate(words):
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if value_of == i:
+            continue
         if w.startswith("--"):
-            name, _, value = w.partition("=")
+            name, eq, value = w.partition("=")
+            if name in GH_API_LONG_VALUES and not eq:
+                value, value_of = nxt, i + 1
             if name == "--method":
-                method = value or (words[i + 1] if i + 1 < len(words) else "")
+                method = value
             elif name in ("--field", "--raw-field", "--input"):
                 fields = True
         elif w.startswith("-") and len(w) > 1:
             for k, letter in enumerate(w[1:], 2):
                 if letter in GH_API_SHORT_VALUES:
+                    value = w[k:]
+                    if not value:
+                        value, value_of = nxt, i + 1
                     if letter == "X":
-                        method = w[k:] or (words[i + 1] if i + 1 < len(words) else "")
+                        method = value
                     elif letter in "fF":
                         fields = True
                     break

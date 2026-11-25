@@ -101,6 +101,8 @@ case "$*" in
 "pr checks 50 --json state,name") [ ! -f "$G/checks-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; echo '[{"name":"build","state":"SUCCESS"}]' ;;
 "pr view 51 --json closingIssuesReferences --jq .closingIssuesReferences[0].number // empty") echo 44 ;;
 "pr merge 50 --"*" --match-head-commit "*)
+	# GitHub failing to answer, as during an incident: whether the merge landed, the default branch says.
+	[ ! -f "$G/merge-fails" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 	# GitHub merges only the head it is told, and only when it is the pull request's.
 	[ "$6" = "$(cat "$G/head-50" 2>/dev/null || echo abc1234567)" ] || { echo "head moved" >&2; exit 1; }
 	case "$4" in --merge) echo merged >"$G/merged-50" ;; --rebase) echo rebased >"$G/merged-50" ;; esac ;;
@@ -130,8 +132,12 @@ case "$*" in
 	else
 		cat "$G/repo-comments.tsv" 2>/dev/null
 	fi ;;
-"pr view 50 --json mergeCommit --jq .mergeCommit.oid // empty") echo deadbeefcafe ;;
-"run list --commit deadbeefcafe "*) cat "$G/runs" 2>/dev/null || echo '[]' ;;
+# A merge GitHub has not marked yet (unmarked-50) has no mergeCommit; its runs are those of the merge commit in
+# the default branch (landed-50).
+"pr view 50 --json mergeCommit --jq .mergeCommit.oid // empty") [ -f "$G/unmarked-50" ] || echo deadbeefcafe ;;
+"pr view 50 --json headRefOid --jq .headRefOid") cat "$G/head-50" 2>/dev/null || echo abc1234567 ;;
+"run list --commit "*)
+	if [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
 "run list "*) echo '[]' ;;
 "workflow list "*) [ ! -f "$G/workflows-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/workflows" 2>/dev/null || true ;;
 "workflow view "*" --yaml --ref main") cat "$G/workflow-$3.yml" 2>/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; } ;;
@@ -619,6 +625,27 @@ out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "decisions that cannot be read refuse the merge" "$code $(printf '%s' "$out" | grep -c 'could not read the comments of #42') $(merged)" "1 1 not-merged"
 rm -f "$G/comments-broken" "$G/decided-42"
 
+echo "== merge.sh: gh pr merge fails"
+# merging <pr>: the developer's state before it merges, so a merge's own shows.
+merging() { jq -c --arg d "merging #$1" '.state = "working" | .detail = $d' "$S/$DEV/status" >"$S/$DEV/status.t" && mv "$S/$DEV/status.t" "$S/$DEV/status"; }
+touch "$G/merge-fails"
+merging 50
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "it fails and the head is not in the default branch: it fails as today, with gh's error" "$code | $out | $(st "$DEV" detail)" "1 | HTTP 502: Bad Gateway | merging #50"
+# The merge landed all the same: the default branch holds its merge commit, the head as its second parent.
+git clone -q "$T/origin.git" "$T/landed" 2>/dev/null
+git -C "$T/landed" -c user.email=t@t -c user.name=t merge -q --no-ff -m "Merge pull request #50" "$reviewed"
+git -C "$T/landed" push -q origin main
+landed=$(git -C "$T/landed" rev-parse HEAD)
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "it fails and the head is in the default branch: exit 0, the merge landed and GitHub has not marked it yet" "$code $(printf '%s\n' "$out" | grep -c "^merged #50 (merge): gh pr merge failed, but its head ${reviewed%"${reviewed#???????}"} is in main: the merge landed, GitHub has not marked the pull request merged yet$")" "0 1"
+ok "and the state moves on as after a merge" "$(st "$DEV" state) | $(st "$DEV" detail)" "working | merged #50, waits for its CI and deploy"
+ok "with the next step, main-ci.sh" "$(printf '%s\n' "$out" | grep -c '^next: sh ".*/main-ci.sh" 50 --wait, in the background$')" "1"
+merging 50
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 --squash 2>&1); code=$?
+ok "a squash leaves no merge commit: it fails as today" "$code | $out | $(st "$DEV" detail)" "1 | HTTP 502: Bad Gateway | merging #50"
+rm -f "$G/merge-fails"
+
 echo "== merge-bot.sh: a dependency bot's pull request, merged by the tech lead"
 cd "$ROOT" || exit 1
 # bot_pr <author> [state] [draft] [mergeable]: pull request 60 as GitHub's REST API answers it.
@@ -1064,6 +1091,16 @@ ok "a workflow file that cannot be read: it waits as today" "$(within 2 sh "$SC/
 touch "$G/workflows-broken"
 ok "a workflow list that cannot be read: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
 rm -f "$G/workflows-broken"
+# A merge that landed while gh pr merge failed (merge.sh): GitHub has not marked the pull request merged yet.
+touch "$G/unmarked-50"
+echo "$landed" >"$G/landed-50"
+echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+ok "no mergeCommit and the head in the default branch: the merge commit by its second parent, and its CI" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main ${landed%"${landed#???????}"}: t"
+echo abc1234567 >"$G/head-50"
+ok "no mergeCommit and the head not in it: not merged, as today" "$(sh "$SC/main-ci.sh" 50)" "#50 is not merged"
+echo "$reviewed" >"$G/head-50"
+rm -f "$G/unmarked-50" "$G/landed-50" "$G/workflows"
 
 echo "== push-trigger.py: a workflow's on: has a push trigger"
 pt() { printf "$1" | python3 -I "$SC/push-trigger.py"; }

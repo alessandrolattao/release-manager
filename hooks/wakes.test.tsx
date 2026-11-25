@@ -27,16 +27,24 @@ function folder(on: On, seed: Record<string, string>, inbox: string[] = []): Map
   return files
 }
 
-// What the engine answers beneath the plugins at the start of a session.
-function engine(on: On, logs: string[] = []): void {
+// What the engine answers beneath the plugins at the start of a session. The processes the module runs (a
+// tech lead starting its dispatcher) are recorded, their command lines joined by spaces, and succeed.
+function engine(on: On, logs: string[] = []): string[] {
+  const runs: string[] = []
   on('session.start', () => ({ cwd: '/repo' }))
   on('ui.log', (_$, e) => {
     logs.push(JSON.stringify(e))
     return { value: undefined }
   })
+  on('ui.toast', () => ({ value: undefined }))
   on('command.register', () => ({ value: { command: 'team' } }))
   // /color and /rename, which the module runs between turns.
   on('command.run', () => ({ text: '' }))
+  on('process.run', (_$, e) => {
+    runs.push(e.argv.join(' '))
+    return { value: { exitCode: 0, stdout: 'the dispatcher runs', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return runs
 }
 
 function prompts(on: On): string[] {
@@ -153,4 +161,42 @@ test('a tech lead the user comes back to after a pause hears that its inbox hold
   expect(contexts[0]?.join(' ')).toMatch(/^📨 2 message\(s\) from other repositories wait in your inbox/)
   // A minute later it is the same conversation: no note again.
   expect(contexts[1]).toEqual([])
+})
+
+// A tech lead whose dispatcher had its last cycle an hour ago: stopped by a restart of the machine.
+function stoppedDispatcher(on: On, extra: Record<string, string> = {}): void {
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
+    'dispatcher.alive': String(NOW / 1000 - 3600),
+    cwd: '/repo',
+    ...extra,
+  })
+}
+
+test('a tech lead starts its stopped dispatcher, and does not try again at once', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  stoppedDispatcher(on)
+  const logs: string[] = []
+  const runs = engine(on, logs)
+
+  await $.session.start(START)
+  await clock.advance(4000)
+  expect(logs).toEqual([])
+  expect(runs.filter(run => run.endsWith('/scripts/dispatcher.sh start')).length).toBe(1)
+  await clock.advance(20000)
+  expect(runs.length).toBe(1)
+})
+
+test('a dispatcher the user stopped stays stopped', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  stoppedDispatcher(on, { 'dispatcher.stopped': String(NOW / 1000 - 60) })
+  const runs = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(8000)
+  expect(runs).toEqual([])
 })

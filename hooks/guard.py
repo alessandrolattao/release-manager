@@ -412,6 +412,9 @@ def scan(text):
         elif c in "'\"" and quote in (None, c):
             if quote:
                 strings.append((opened, i))
+                # A quoted string of operators alone ('>', '&&') is a word: the tokenizer must not take it for one.
+                if set(text[opened:i]) and set(text[opened:i]) <= set(";&|()<>"):
+                    out[opened:i] = [chr(0xE000 + ord(ch)) for ch in text[opened:i]]
             quote, opened = (None, 0) if quote else (c, i + 1)
             i += 1
         elif c == "\n" and quote is None:

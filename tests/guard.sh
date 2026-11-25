@@ -139,6 +139,9 @@ check deny tech-lead '>/dev/null sudo git push'
 check deny tech-lead ">/dev/null bash -c 'git push'"
 check allow tech-lead '>/dev/null git log -1'
 check deny tech-lead "cd $S && >out.txt git log -1"
+# A quoted '>' is a word, no redirection: it takes no word with it.
+check deny tech-lead "echo 'git push' | sudo -u '>' sh"
+check allow tech-lead "grep -c '>' README.md"
 check deny tech-lead "eval \"\$(echo 'gh api repos/someone/else/issues')\""
 check deny tech-lead "eval \"\$(printf 'git push')\""
 check deny tech-lead "bash -c \"\$(echo 'git push')\""

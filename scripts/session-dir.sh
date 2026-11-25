@@ -1,7 +1,8 @@
 # Sourced by every script and hook: where the team keeps its state. One place serves every Claude Code
 # account, since session ids are unique across them.
 #   $team_state/sessions/<id>/   one folder per session: role, cwd, config, alive, idle, status, color, name,
-#                                asked, blocked, wake (what the hooks module and the scripts read and write)
+#                                asked, blocked, wake, commented (what the hooks module and the scripts read
+#                                and write)
 #   $team_state/repos/<key>/     one folder per repository: the checkout lock, the dispatcher's lock and
 #                                cursor, QA and review records, the board
 #   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages
@@ -46,6 +47,14 @@ status_set() {
 state_set() {
 	status_set "$1" --arg s "$2" --arg d "$3" --argjson now "$(date +%s)" \
 		'(if .state == $s and .detail == $d then . else .since = $now end) | .state = $s | .detail = $d | del(.waits_on)'
+}
+
+# commented_on <session-id> <issue> [to]: the session wrote on that issue's thread (an issue and the pull
+# requests that close it), to that address (empty for a note): one line of `commented`, <time> <issue> <to>.
+# A wake for a comment it answered since is dropped (hooks/sessions.tsx). Nothing outside a team session.
+commented_on() {
+	[ -n "$1" ] && [ -d "$sessions_dir/$1" ] || return 0
+	printf '%s\t%s\t%s\n' "$(date +%s)" "$2" "${3:-}" >>"$sessions_dir/$1/commented"
 }
 
 # waiting_in_chat <session-id>: true when an agent's last turn ended asking something in its own chat

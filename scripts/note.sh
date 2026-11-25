@@ -15,11 +15,14 @@ target=${1:?issue or pull request number}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
+# shellcheck source=scripts/rest.sh
+. "$here/rest.sh"
 body=$(cat)
 [ -n "$body" ] || {
 	echo "the comment comes on stdin" >&2
 	exit 2
 }
 me=${CLAUDE_CODE_SESSION_ID:-}
-printf '%s\n\n<!-- team · %s -->\n' "$body" "$(address_of "$me")" | gh issue comment "$target" --body-file -
+printf '%s\n\n<!-- team · %s -->\n' "$body" "$(address_of "$me")" |
+	rest_body "repos/$repo_full/issues/$target/comments" --jq .html_url
 commented_on "$me" "$(thread_of "$target")"

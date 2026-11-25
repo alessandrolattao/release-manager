@@ -33,6 +33,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections import Counter
 
 role, own, root, cwd, plugin = sys.argv[1], sys.argv[2].lower(), os.path.realpath(sys.argv[3]), sys.argv[4], os.path.realpath(sys.argv[5])
 command = sys.stdin.read()
@@ -150,6 +151,15 @@ def api_method(words):
     return (method or ("POST" if fields else "GET")).upper()
 
 
+def mentioned(texts):
+    """Another repository's API paths and links in these texts, counted: what the whole command must account for."""
+    found = Counter()
+    for text in texts:
+        found.update(("calls the API of", m.group(1).lower()) for m in API_REF.finditer(text) if m.group(1).lower() != own)
+        found.update(("links", m.group(1).lower()) for m in LINK_REF.finditer(text) if repo_of(m.group(1)) not in (None, own))
+    return found
+
+
 def elsewhere_name(name):
     """A repository named for gh is another one: not this one, or one held in a shell variable."""
     return "$" in name or repo_of(name) not in (None, own)
@@ -249,6 +259,22 @@ def unreadable_query(query):
     return bool(set(re.findall(r"\$(\w+)", query)) - set(re.findall(r"\$(\w+)\s*:", query)))
 
 
+def shell_fills_query(text):
+    """A query=... word of the raw command where the shell fills something in: a $ or a backtick outside single
+    quotes. Inside single quotes a $name is the query's own variable; the tokenizer drops the quotes, so only the
+    raw text tells the two apart."""
+    for match in re.finditer(r"query=", text):
+        quote = None
+        for char in text[match.end():]:
+            if quote is None and (char.isspace() or char in ";&|<>()"):
+                break
+            if char in "'\"" and quote in (None, char):
+                quote = None if quote == char else char
+            elif char in "$`" and quote != "'":
+                return True
+    return False
+
+
 def graphql_refused(head, words):
     """Why a command sends GitHub's GraphQL API a mutation typed by hand, or a query the guard cannot read."""
     rest = gh_words(words[1:])[0] if head == "gh" else []
@@ -257,6 +283,7 @@ def graphql_refused(head, words):
             return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
         unread = [w for w in rest if w == "--input" or w.startswith("--input=")]
         unread += [w for w in rest if "query=" in w and unreadable_query(w.split("query=", 1)[1])]
+        unread += [w for w in rest if "query=" in w and shell_fills_query(script)]
         if unread:
             return f"the GraphQL query comes from where the guard cannot read it ({unread[0]}): type it in the command"
         return None
@@ -300,10 +327,13 @@ if current:
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
 
+# Another repository named in the text must be in a command the guard judged and let through: a word the
+# tokenizer drops (a # inside a word), an option it skips (env -S) or an argument after a sh -c string is not.
+judged = Counter()
 where, pushed = cwd, []
 for words in segments:
     assigns, chdir = [], None
-    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec")):
+    while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or words[0] in ("sudo", "time", "env", "nohup", "exec", "command")):
         if "=" in words[0]:
             assigns.append(words[0])
         elif words[0] == "env":
@@ -325,6 +355,7 @@ for words in segments:
         why = elsewhere_refused("", [""], assigns)
         if why:
             refuse(why)
+        judged += mentioned(assigns)
         continue
     head = os.path.basename(words[0])
     here = os.path.realpath(os.path.join(where, os.path.expanduser(chdir))) if chdir else where
@@ -352,6 +383,7 @@ for words in segments:
         # They act on the repository of the folder they run in.
         if other:
             refuse(f"the plugin's scripts act on the repository they run in: not from another one's checkout ({other})")
+        judged += mentioned(assigns + words)
         continue
 
     # A command inside a command (sh -c '...', eval ...) is checked as one of its own.
@@ -368,6 +400,7 @@ for words in segments:
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
+        judged += mentioned([inner])
         continue
 
     if head in ("cd", "pushd") and len(words) > 1:
@@ -382,6 +415,7 @@ for words in segments:
     why = elsewhere_refused(head, words, assigns, other) or graphql_refused(head, words)
     if why:
         refuse(why)
+    judged += mentioned(assigns + words)
 
     if head == "git":
         j, gitdir = 1, here
@@ -445,4 +479,8 @@ for words in segments:
             refuse(f"{head} could change another repository ({other}); there you may only read")
         if any(re.match(r"^\d*>>?$", w) for w in words):
             refuse(f"it writes a file while in another repository ({other})")
+unjudged = mentioned([script]) - judged
+if unjudged:
+    (kind, name), _ = next(iter(unjudged.items()))
+    refuse(f"it {kind} {name} where the guard cannot judge it")
 sys.exit(0)

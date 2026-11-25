@@ -195,6 +195,8 @@ check deny tech-lead 'gh api graphql -f query="$Q"'
 check deny tech-lead 'gh api graphql -f query="query Q { viewer { login } } $M" -f operationName=M'
 check deny tech-lead 'gh api graphql -f query="$(cat m.graphql)"'
 check deny tech-lead 'gh api graphql --input body.json'
+check deny tech-lead "gh api graphql -f operationName=M -f query='query Q(\$M: Int) { viewer { login } } '\"\$M\""
+check deny tech-lead 'gh api graphql -f query="query Q($M: Int) { viewer { login } }"'
 check deny tech-lead "gh api 'graphql?x=1' -F query=@m.graphql"
 check deny tech-lead "gh api 'graphql#x' -F query=@m.graphql"
 check deny tech-lead "gh api /graphql/ -f query='mutation { x }'"
@@ -279,6 +281,21 @@ check deny spike 'gh issue comment 3 -R $R --body x'
 check deny tech-lead "gh alias set m 'pr merge 5 -R someone/else'"
 check deny spike "gh alias import aliases.yml"
 check allow tech-lead 'gh alias list'
+# command before gh hides nothing.
+check deny tech-lead "command gh repo delete someone/else --yes"
+check deny tech-lead "command gh alias set m 'pr merge 5 -R someone/else'"
+check deny tech-lead "command gh pr merge 5"
+check allow tech-lead "command -v gh"
+# Another repository named where no command the guard judged holds it: refused, as on main.
+check deny tech-lead "bash -c 'gh api -X PUT \"\$0\"' repos/someone/else/pulls/5/merge"
+check deny tech-lead "bash -c 'gh issue close \"\$0\"' https://github.com/someone/else/issues/5"
+check deny spike "bash -c 'gh issue comment \"\$0\" --body x' https://github.com/someone/else/issues/5"
+check deny tech-lead "env --split-string='gh api -X PUT repos/someone/else/pulls/5/merge'"
+check deny tech-lead "env -S'gh issue close https://github.com/someone/else/issues/5'"
+check deny tech-lead 'echo x#; gh api -X PUT repos/someone/else/pulls/5/merge'
+check deny spike 'echo x#; gh issue close https://github.com/someone/else/issues/5'
+check allow tech-lead "bash -c 'gh api repos/someone/else/issues/3'"
+check allow tech-lead 'gh issue view 3 -R someone/else; gh api repos/someone/else/issues/3/comments'
 # A spike only reads, and still not another repository through GitHub.
 check deny spike 'gh issue view 3 -R someone/else'
 check deny spike 'gh api repos/someone/else/issues'

@@ -15,8 +15,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
-//     comment (the dispatcher appends it to `wake`), the main checkout freed for it, and in a tech lead the
-//     messages other repositories left in its inbox (tell.sh). A session outside the team runs nothing.
+//     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub, the main checkout freed
+//     for it, and in a tech lead the messages other repositories left in its inbox (tell.sh). A session
+//     outside the team runs nothing.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
@@ -945,20 +946,58 @@ async function tick($: EngineInterface): Promise<void> {
   }
 }
 
+// A wake line as dispatch.sh and checkout.sh write it: time, from, what, link. A GitHub comment's from is
+// "<author> on #<issue>", the issue being its thread (an issue and the pull requests that close it), and its
+// time is the comment's.
+type WakeLine = { time: number; from: string; text: string }
+
+// What the session wrote on GitHub (comment.sh, note.sh), one line of `commented` each: when, on which
+// thread, to whom (an address; empty for a note).
+type Said = { time: number; issue: string; to: string }
+
+// The author of the comments written on GitHub without a header (dispatch.sh): the user.
+const USER = 'the user'
+
+// "<author> on #<issue>" as its author and its issue; null for a line that is not a GitHub comment.
+function commentOf(from: string): { author: string; issue: string } | null {
+  const match = /^(.+) on #(\d+)$/.exec(from)
+  return match === null ? null : { author: match[1] ?? '', issue: match[2] ?? '' }
+}
+
+async function saidOf($: EngineInterface, folder: string): Promise<Said[]> {
+  return (await readText($, `${folder}/commented`))
+    .split('\n')
+    .filter(line => line !== '')
+    .map(line => {
+      const [time = '', issue = '', to = ''] = line.split('\t')
+      return { time: Number(time), issue, to }
+    })
+}
+
+// A comment the session already answered: one of the user's by any later comment of the session on its
+// thread, an agent's only by a later comment of the session written to that agent.
+function isAnswered(line: WakeLine, said: Said[]): boolean {
+  const comment = commentOf(line.from)
+  if (comment === null || !(line.time > 0)) {
+    return false
+  }
+  return said.some(s => s.issue === comment.issue && s.time > line.time && (comment.author === USER || s.to === comment.author))
+}
+
 // Wakes the session, between turns, with what was written to it since: a GitHub comment the dispatcher
 // appended to `wake` (one line each: time, from, what, link), the main checkout freed for it, and for a tech
 // lead the messages other repositories left in its inbox. Once the model has been stopped a few seconds; a
-// tech lead whose last message asked the user something in its chat is left alone: the user is talking to it.
-// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again. A line from
-// the one the session waits on ends that wait before the turn starts (answered).
+// tech lead whose last message asked the user something in its chat is left alone, the user is talking to
+// it, until the user writes to it on GitHub: that is the user talking too, and every fresh line goes with it.
+// A comment the session already answered on GitHub (isAnswered) is delivered without a turn. `wake-read`,
+// beside it, counts the lines delivered, so a restart does not deliver them again. A line from the one the
+// session waits on ends that wait before the turn starts (answered).
 async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
   const idleSince = Number(await readText($, `${folder}/idle`))
   if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
     return
   }
-  if (role === 'tech-lead' && status.state === 'you' && (status.asked_on ?? null) === null) {
-    return
-  }
+  const isInChat = role === 'tech-lead' && status.state === 'you' && (status.asked_on ?? null) === null
   const parts: string[] = []
   let wake = ''
   try {
@@ -971,20 +1010,27 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
   if (delivered > lines.length) {
     delivered = 0
   }
-  if (lines.length > delivered) {
-    const fresh = lines.slice(delivered).map(line => {
-      const [, from = '', what = '', link = ''] = line.split('\t')
-      return { from, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
-    })
-    parts.push(`for you on GitHub: ${fresh.map(line => line.text).join('; ')}`)
+  const fresh: WakeLine[] = lines.slice(delivered).map(line => {
+    const [time = '', from = '', what = '', link = ''] = line.split('\t')
+    return { time: Number(time), from, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
+  })
+  const said = fresh.length > 0 ? await saidOf($, folder) : []
+  const kept = fresh.filter(line => !isAnswered(line, said))
+  if (isInChat && !kept.some(line => commentOf(line.from)?.author === USER)) {
+    return
+  }
+  if (fresh.length > 0) {
     await $.fs.write(`${folder}/wake-read`, `${lines.length}\n`)
-    await answered($, folder, role, fresh.map(line => line.from), now)
+  }
+  if (kept.length > 0) {
+    parts.push(`for you on GitHub: ${kept.map(line => line.text).join('; ')}`)
+    await answered($, folder, role, kept.map(line => line.from), now)
   }
   if (role === 'tech-lead' && status.repo) {
     const inbox = await inboxOf($, status.repo)
-    const fresh = inbox.filter(name => !toldInbox.has(name))
-    if (fresh.length > 0) {
-      parts.push(`${fresh.length} message(s) from other repositories: sh "${$.plugin.root}/scripts/inbox.sh" read`)
+    const unread = inbox.filter(name => !toldInbox.has(name))
+    if (unread.length > 0) {
+      parts.push(`${unread.length} message(s) from other repositories: sh "${$.plugin.root}/scripts/inbox.sh" read`)
     }
     toldInbox = new Set(inbox)
   }
@@ -995,15 +1041,20 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
 
 // A comment from the one the session waits on (`waits_on`, recorded by comment.sh) ends the wait: working,
 // answered by them, with nothing to put back, so markTurn does not restore the wait when the turn it wakes
-// ends. A comment from anyone else leaves the wait: worked for the turn, back to waiting after it. Each
-// `from` is a wake line's as dispatch.sh writes it, "<author> on #<issue>".
+// ends. A tech lead that asked the user in its own chat waits on the user, who may answer on GitHub too: as a
+// prompt the user types, the user's comment ends that wait. A comment from anyone else leaves the wait: worked
+// for the turn, back to waiting after it. Each `from` is a wake line's as dispatch.sh writes it, "<author> on
+// #<issue>".
 async function answered($: EngineInterface, folder: string, role: string, froms: string[], now: number): Promise<void> {
   const status = await readStatus($, folder)
-  const isWaiting = status.state === 'others' || (status.state === 'you' && role === 'tech-lead' && (status.asked_on ?? null) !== null)
-  if (!isWaiting || status.waits_on === undefined) {
+  const isTechLeadAsking = status.state === 'you' && role === 'tech-lead'
+  const isInChat = isTechLeadAsking && (status.asked_on ?? null) === null
+  const isWaiting = status.state === 'others' || (isTechLeadAsking && !isInChat)
+  const waitsOn = isInChat ? USER : isWaiting ? status.waits_on : undefined
+  if (waitsOn === undefined) {
     return
   }
-  const author = froms.map(from => from.replace(/ on #\d+$/, '')).find(from => from === status.waits_on)
+  const author = froms.map(from => commentOf(from)?.author).find(from => from === waitsOn)
   if (author === undefined) {
     return
   }

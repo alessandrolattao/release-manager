@@ -72,6 +72,19 @@ issue_of() {
 	cat "$known" 2>/dev/null || echo "$1"
 }
 
+# thread_of <issue-or-pr>: the issue a number belongs to: the number itself, or the issue a pull request
+# closes.
+thread_of() {
+	if gh pr view "$1" --json number >/dev/null 2>&1; then
+		_closes=$(gh pr view "$1" --json closingIssuesReferences --jq '.closingIssuesReferences[0].number // empty' 2>/dev/null || true)
+		[ -z "$_closes" ] || {
+			echo "$_closes"
+			return
+		}
+	fi
+	echo "$1"
+}
+
 # alive <session-id>: its heartbeat (hooks/sessions.tsx, every minute) is at most 3 minutes old.
 alive() {
 	at=$(cat "$sessions_dir/$1/alive" 2>/dev/null || true)

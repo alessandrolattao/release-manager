@@ -8,11 +8,14 @@ T=$(mktemp -d) || exit 1
 S="$T/state/team/sessions"
 R="$T/state/team/repos/test_repo"
 spk=""
+busy=""
 # On the way out, even after a failure: the dispatchers started here stop with every process of theirs (each
-# runs in a session of its own), a spike left running is killed, and the temporary folder goes.
+# runs in a session of its own), a spike or a busy session's toucher left running is killed, and the
+# temporary folder goes.
 cleanup() {
 	cd / || true
 	[ -z "$spk" ] || kill "$spk" 2>/dev/null
+	[ -z "$busy" ] || kill "$busy" 2>/dev/null
 	for f in "$T"/state/team/repos/*/dispatcher.pid; do
 		pid=$(cat "$f" 2>/dev/null || true)
 		case "$pid" in "" | *[!0-9]*) continue ;; esac
@@ -704,16 +707,39 @@ cd "$ROOT" || exit 1
 mkdir -p "$T/config/plugins/cache/team/team"
 ln -s "$W" "$T/config/plugins/cache/team/team/9.9.9"
 date +%s >"$S/$TL1/alive"
+date +%s >"$S/$DEV2/alive"
+date +%s >"$S/$NEW/alive"
 sh "$SC/dispatcher.sh" start >/dev/null 2>&1
 old_pid=$(cat "$R/dispatcher.pid")
 : >"$T/claude.log"
-UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+# Two live sessions, the first listed busy (its transcript touched again and again, until the second has
+# restarted) and the second quiet (its transcript untouched for an hour); the tech lead, listed before them,
+# started the update.
+mkdir -p "$T/config/projects/repo"
+touch -d '1 hour ago' "$T/config/projects/repo/$NEW.jsonl"
+(
+	n=0
+	while ! grep -q -- "--resume $NEW " "$T/claude.log" 2>/dev/null && [ "$n" -lt 150 ]; do
+		touch "$T/config/projects/repo/$DEV2.jsonl"
+		sleep 0.2
+		n=$((n + 1))
+	done
+) &
+busy=$!
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=2 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+kill "$busy" 2>/dev/null
+busy=""
+ok "a quiet session restarts without waiting on a busy one listed before it, the busy one once it goes quiet" "$(grep -o -e "--resume $DEV2 " -e "--resume $NEW " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$NEW $DEV2 "
+ok "the one that started the update restarts last" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$NEW $DEV2 $TL1 "
+ok "each restart has its line in the log, in the order they happen" "$(grep ': backgrounded' "$T/update.out" | cut -d: -f1 | tr '\n' '|')" "repo · dev #44 · in review · Title 44|repo · dev #43 · in progress · Title 43|repo · tech lead|"
+ok "nobody is left busy" "$(grep -c 'still busy' "$T/update.out")" "0"
 ok "the plugin is updated on the team's account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"
 ok "a live session resumes on the new version" "$(grep -c -- "--bg --resume $TL1 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts: use this path from now on. Your role.s rules may have changed: read [^ ]*/skills/tech-lead/SKILL.md again" "$T/claude.log")" "1"
 ok "it is told its background commands keep running" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -cF 'Then go on from where you were. Commands you started in the background before the restart (a `main-ci.sh --wait`, a spike'"'"'s wait) keep running and their end still reaches you: do not start them again.')" "1"
 ok "with no flags, which would start a copy" "$(grep -- '--resume' "$T/claude.log" | grep -c -- '--name')" "0"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"
+ok "before any session" "$(grep -e '^dispatcher ' -e ': backgrounded' "$T/update.out" | head -1 | cut -d: -f1)" "dispatcher test_repo"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
 sh "$SC/dispatcher.sh" stop >/dev/null
 

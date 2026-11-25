@@ -837,8 +837,8 @@ async function checkLatest($: EngineInterface, nowMs: number): Promise<void> {
 }
 
 // A click on update at the board's foot: /team:update, detached (scripts/update.sh start). It updates the
-// plugin on every account of this machine and restarts every live team session and running dispatcher on
-// the new version, each once it is quiet, this session last.
+// plugin on every account of this machine and restarts on the new version every running dispatcher, then
+// every live team session, each once it is quiet, this session last.
 async function startUpdate($: EngineInterface): Promise<void> {
   if (isStartingUpdate) {
     return

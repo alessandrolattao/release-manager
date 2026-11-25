@@ -1,5 +1,5 @@
 import type { On } from 'claude-code'
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test, type Engine } from 'claude-code/testing'
 
 const NOW = 1_800_000_000_000
 const START = { cwd: '/repo', surface: null, isInteractive: false } as const
@@ -122,6 +122,104 @@ test('a tech lead waiting on the user in its chat is left alone; one that asked 
   await clock.advance(2000)
   expect(seen.length).toBe(1)
   expect(seen[0]).toMatch(/^for you on GitHub: tester on #44: chiamalo pippo; 1 message\(s\) from other repositories: sh ".*\/scripts\/inbox\.sh" read$/)
+})
+
+// The engine beneath the turns the module hears, and one turn the wake started: it starts and ends on an
+// answer, with no script changing the state in between.
+function turns(on: On): void {
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+}
+
+async function wokenTurn($: Engine): Promise<void> {
+  await $.turn.start({ text: '', turnId: 't1' })
+  await $.turn.complete({ answer: 'fatto', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+}
+
+type Waiting = { state?: string; detail?: string; waits_on?: string; resume_to?: unknown }
+
+function statusOf(files: Map<string, string>): Waiting {
+  return JSON.parse(files.get('status') ?? '{}') as Waiting
+}
+
+test('a developer waiting on the tech lead, woken by the tech lead, is answered and stays working after the turn', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ role: 'dev', issue: 42, state: 'others', detail: 'waits for tech lead: which table?', waits_on: 'tech lead' }),
+    wake: `${NOW / 1000}\ttech lead on #42\tUsa la tabella users\thttps://x/42#c101\n`,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs)
+  turns(on)
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(seen.length).toBe(1)
+  let status = statusOf(files)
+  expect(`${status.state} · ${status.detail}`).toBe('working · answered by tech lead')
+  expect(status.waits_on).toBe(undefined)
+  expect(status.resume_to).toBe(undefined)
+
+  await wokenTurn($)
+  expect(logs).toEqual([])
+  status = statusOf(files)
+  expect(`${status.state} · ${status.detail}`).toBe('working · answered by tech lead')
+})
+
+test('a developer waiting on the tech lead, woken by someone else, is back to waiting after the turn', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ role: 'dev', issue: 42, state: 'others', detail: 'waits for tech lead: which table?', waits_on: 'tech lead' }),
+    wake: `${NOW / 1000}\tqa #42 on #42\tLa pagina non carica\thttps://x/50#c102\n`,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs)
+  turns(on)
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(seen.length).toBe(1)
+  expect(statusOf(files).state).toBe('others')
+
+  await wokenTurn($)
+  expect(logs).toEqual([])
+  const status = statusOf(files)
+  expect(`${status.state} · ${status.detail}`).toBe('others · waits for tech lead: which table?')
+  expect(status.waits_on).toBe('tech lead')
+})
+
+test('a tech lead that asked the user on GitHub, woken by the user\'s answer, no longer waits on the user', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'you', detail: 'Come lo chiamiamo?', asked_on: 44, waits_on: 'the user' }),
+    wake: `${NOW / 1000}\tthe user on #44\tchiamalo pippo\thttps://x/44#c201\n`,
+  })
+  const seen = prompts(on)
+  engine(on)
+  turns(on)
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(seen.length).toBe(1)
+  let status = statusOf(files)
+  expect(`${status.state} · ${status.detail}`).toBe('working · answered by the user')
+  expect(status.waits_on).toBe(undefined)
+
+  await wokenTurn($)
+  status = statusOf(files)
+  expect(status.state).not.toBe('you')
+  expect(status.resume_to).toBe(undefined)
 })
 
 test('the user writing to a team session ends its wait; the plugin\'s own prompts do not', async ($, on) => {

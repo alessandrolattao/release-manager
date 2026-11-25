@@ -149,6 +149,7 @@ echo "Quale tabella legge il nuovo endpoint?" | CLAUDE_CODE_SESSION_ID=$DEV sh "
 last=$(ls -t "$G/comments" | head -1)
 ok "header names writer and reader" "$(head -1 "$G/comments/$last")" "**dev #42 → tech lead**"
 ok "the writer waits on another agent" "$(st "$DEV" state)" "others"
+ok "and records whom it waits on" "$(st "$DEV" waits_on)" "tech lead"
 echo "Serve il login AWS" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 you >/dev/null 2>&1; code=$?
 ok "a developer never writes to the user" "$code" "2"
 echo "Mi serve il login AWS" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 you >/dev/null
@@ -156,11 +157,14 @@ last=$(ls -t "$G/comments" | head -1)
 ok "a tech lead to the user: a real mention" "$(head -1 "$G/comments/$last")" "**tech lead → @tester**"
 ok "to the user: label question" "$(cat "$G/question-labels")" "42"
 ok "to the user: yellow" "$(st "$TL1" state)" "you"
-jq -c '.state = "working" | del(.asked_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
+ok "to the user: waits on the user" "$(st "$TL1" waits_on)" "the user"
+# The user's answer reached it: the hooks module ended the wait.
+jq -c '.state = "working" | del(.asked_on, .waits_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
 echo "PR 50 riguarda la 42" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 50 dev --fyi >/dev/null
 last=$(ls -t "$G/comments" | head -1)
 ok "on a pull request, dev means the issue's developer; news says fyi" "$(head -1 "$G/comments/$last")" "**tech lead → dev #42** · fyi"
 ok "--fyi leaves the writer's state" "$(st "$TL1" state)" "working"
+ok "--fyi records nobody to wait on" "$(st "$TL1" waits_on)" ""
 
 echo "== dispatch.sh: router"
 tab=$(printf '\t')
@@ -238,8 +242,10 @@ echo "== checkout.sh"
 date +%s >"$S/$DEV2/alive"
 state_dev2=$(st "$DEV2" state)
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+waited_on=$(st "$DEV" waits_on)
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" take >/dev/null; code=$?
 ok "the first agent takes the checkout" "$code" "0"
+ok "a script setting a state drops whom it waited on" "$waited_on -> $(st "$DEV" waits_on)" "tech lead -> "
 ok "the main checkout is on its branch" "$(git -C "$ROOT" rev-parse HEAD)" "$(git -C "$ROOT" rev-parse origin/42-feature)"
 ok "its place is the checkout" "$(st "$DEV" place)" "checkout"
 cd "$ROOT/.claude/worktrees/43-other" || exit 1

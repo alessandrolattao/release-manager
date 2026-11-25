@@ -354,6 +354,10 @@ check deny tech-lead 'read -r HOME <<< https://api.github.com; curl -s ~/repos/s
 check allow tech-lead 'HOME=/tmp/x; tail -1 ~/.local/state/team/repos/someone_else/dispatcher.log'
 check deny tech-lead 'for HOME in https://api.github.com; do curl -s ~/repos/someone/else/issues; done'
 check deny tech-lead ': ${HOME:=https://api.github.com}; curl -s ~/repos/someone/else/issues'
+check deny tech-lead "declare HO''ME=https://api.github.com; curl -s ~/repos/someone/else/issues"
+check deny tech-lead 'declare "H$(echo O)ME=https://api.github.com"; curl -s ~/repos/someone/else/issues'
+check deny tech-lead 'source ./env.sh; curl -s ~/repos/someone/else/issues'
+check deny tech-lead '. ./env.sh; curl -s $HOME/repos/someone/else/issues'
 check allow tech-lead 'cat "${XDG_STATE_HOME:-$HOME/.local/state}/team/repos/someone_else/dispatcher.log"; cat ~/../repos/a/b'
 # Only spaces before repos/ in a quoted string are no other text: it still starts with the endpoint.
 check deny tech-lead "echo ' repos/someone/else/issues' | xargs gh api"

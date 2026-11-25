@@ -10,7 +10,8 @@ Refused:
     building inside it, its API: repos/<other> in the words of gh api or in a curl or wget URL to api.github.com,
     whatever the method; a local path that holds repos/... or github.com/... is no call and no link);
   - for a spike: moving the main checkout (git checkout, switch, pull) and starting agents.
-A command inside a command (sh -c, bash -lc, eval) is judged as one of its own.
+A command inside a command (sh -c, bash -lc, eval, a string echo or printf pipes into a shell or <<< gives it)
+is judged as one of its own; a here-document is data, also into a shell.
 Prints the reason and exits 1 when refused, exits 0 otherwise.
     python3 -I guard.py <role> <owner/name> <repo root> <cwd> <plugin root>   (command on stdin)
 """
@@ -71,9 +72,10 @@ def inside_repo(path):
     return real == root or real.startswith(root + os.sep)
 
 
-def segments_of(text):
-    """The commands of a shell text, each as its words: the words of a quoted string stay one word. A comment
-    starts only where a word does, as in the shell (shlex would also start one inside a word: a#b)."""
+def commands_of(text):
+    """The commands of a shell text, each as its words and the separator before it (';', '|', '&&', ...): the
+    words of a quoted string stay one word. A comment starts only where a word does, as in the shell (shlex
+    would also start one inside a word: a#b)."""
     try:
         lexer = shlex.shlex(unquoted(text, strings=False), posix=True, punctuation_chars=";&|()<>")
         lexer.whitespace_split = True
@@ -81,17 +83,57 @@ def segments_of(text):
         tokens = list(lexer)
     except ValueError:
         tokens = text.split()
-    segments, current = [], []
+    commands, current, separator = [], [], ""
     for token in tokens:
         if token and set(token) <= set(";&|()"):
             if current:
-                segments.append(current)
-            current = []
+                commands.append((current, separator))
+                separator = ""
+            current, separator = [], separator + token
         else:
             current.append(token)
     if current:
-        segments.append(current)
-    return segments
+        commands.append((current, separator))
+    return commands
+
+
+def segments_of(text):
+    """The commands of a shell text, each as its words."""
+    return [words for words, _ in commands_of(text)]
+
+
+def piped(separator):
+    """Whether a command reads what the one before it prints: | or |&, not ||, also around a subshell's ( )."""
+    tail = separator.rstrip("(")
+    return tail.endswith(("|", "|&")) and not tail.endswith("||")
+
+
+def printed(words):
+    """What echo, printf or cat <<< prints into a pipe, near enough to read it as commands; None for any other
+    command, or for one whose output the command does not show (a file, a here-document)."""
+    words = bare(words)
+    head = os.path.basename(words[0]) if words else ""
+    if head == "cat":
+        return words[words.index("<<<") + 1] if "<<<" in words[:-1] else None
+    if head not in ("echo", "printf"):
+        return None
+    rest = words[1:]
+    while rest and re.fullmatch(r"-[neE]+", rest[0]):
+        rest = rest[1:]
+    return " ".join(rest[1:] if rest[:1] == ["--"] else rest).replace("\\n", "\n")
+
+
+def handed_to_shell(words, piped_from=None):
+    """The command text the first shell in a command runs: its -c string (bash -lc too), its <<< string, or
+    what echo, printf or cat <<< pipes into it; None when it runs none of these."""
+    for i, word in enumerate(words):
+        if os.path.basename(word) in SHELLS:
+            rest = words[i + 1:]
+            k = next((k for k, w in enumerate(rest) if SHELL_COMMAND.fullmatch(w) or w == "<<<"), None)
+            if k is not None:
+                return rest[k + 1] if k + 1 < len(rest) else ""
+            return printed(piped_from) if piped_from else None
+    return None
 
 
 def bare(words):
@@ -108,24 +150,24 @@ def api_calls(text):
     for match in SUBSTITUTION.finditer(unquoted(text)):
         k = 1 if match.group(1) is not None else 2
         found += api_calls(text[match.start(k):match.end(k)])
-    for words in segments_of(text):
-        found += api_repos(words)
+    previous = None
+    for words, separator in commands_of(text):
+        found += api_repos(words, previous if piped(separator) else None)
+        previous = words
     return found
 
 
-def api_repos(words):
+def api_repos(words, piped_from=None):
     """The repositories whose API a command calls, as written in it: gh api, curl or wget, also when another
-    command runs them (X=1, env, timeout, nice, xargs, sh -c '...', ...)."""
+    command runs them (X=1, env, timeout, nice, xargs, ...) or a shell does (sh -c '...', | sh, sh <<< ...)."""
     for i, word in enumerate(words):
         head = os.path.basename(word)
         if head == "gh" and words[i + 1:i + 2] == ["api"]:
             return [m.group(1) for w in words[i + 2:] if (m := GH_API_ENDPOINT.match(w))]
         if head in ("curl", "wget"):
             return [m.group(1) for w in words[i + 1:] for m in API_URL.finditer(w)]
-        if head in SHELLS:
-            k = next((k for k in range(i + 1, len(words)) if SHELL_COMMAND.fullmatch(words[k])), None)
-            if k is not None:
-                return api_calls(words[k + 1]) if k + 1 < len(words) else []
+        if head in SHELLS and (inner := handed_to_shell(words[i:], piped_from)) is not None:
+            return api_calls(inner)
     return []
 
 
@@ -173,7 +215,8 @@ for line in command.split("\n"):
         skipping = match.group(1)
 script = ";\n".join(lines)
 
-segments = segments_of(script)
+commands = commands_of(script)
+segments = [words for words, _ in commands]
 
 if any(s[:2] == ["gh", "search"] for s in segments):
     refuse("gh search looks across repositories")
@@ -185,7 +228,7 @@ for match in LINK.finditer(script):
         refuse(f"it links {match.group(1)}")
 
 where = cwd
-for words in segments:
+for n, (words, separator) in enumerate(commands):
     words = bare(words)
     if not words:
         continue
@@ -199,12 +242,11 @@ for words in segments:
             refuse(f"a spike only reads: it does not run {os.path.basename(real)}")
         continue
 
-    # A command inside a command (sh -c '...', bash -lc '...', eval ...) is checked as one of its own.
+    # A command inside a command (sh -c '...', bash -lc '...', echo '...' | sh, sh <<< '...', eval ...) is
+    # checked as one of its own.
     inner = None
     if head in SHELLS:
-        k = next((k for k, w in enumerate(words) if k and SHELL_COMMAND.fullmatch(w)), None)
-        if k is not None:
-            inner = words[k + 1] if k + 1 < len(words) else ""
+        inner = handed_to_shell(words, commands[n - 1][0] if n and piped(separator) else None)
     elif head == "eval":
         inner = " ".join(words[1:])
     if inner is not None:

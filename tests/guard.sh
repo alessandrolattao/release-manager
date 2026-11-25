@@ -55,6 +55,21 @@ check deny tech-lead "bash -lc 'git push origin HEAD'"
 check deny spike "sh -ec 'git commit -m x'"
 check deny tech-lead "bash -lc 'gh api repos/someone/else/issues'"
 check allow tech-lead "bash -lc 'git log --oneline -3'"
+# A string piped into a shell by echo or printf, or given to it with <<<, is read too; a here-document stays data.
+check deny tech-lead "echo 'git push origin HEAD' | sh"
+check deny tech-lead "printf 'git commit -m x\\n' | bash"
+check deny spike "echo 'git switch main' | sudo bash"
+check deny tech-lead "bash -s <<< 'git push'"
+check deny tech-lead "cat <<< 'git push' | sh"
+check deny tech-lead "(echo 'git push') | sh"
+check deny tech-lead "echo 'git push' |& bash"
+check allow tech-lead "echo 'git push' || sh -c 'git log -1'"
+check allow tech-lead "echo 'git log --oneline -3' | sh"
+check allow tech-lead "echo 'git push' | grep push"
+check allow tech-lead "grep -c push <<< 'git push'"
+check allow tech-lead "bash <<'EOF'
+git log -1
+EOF"
 check deny tech-lead 'cat <<< hello
 git push'
 # git symbolic-ref only reads with one argument; with two, or --delete, it changes the repository.
@@ -104,6 +119,10 @@ check deny tech-lead 'echo 1 | xargs -I{} gh api repos/someone/else/issues/{}'
 check deny tech-lead 'timeout 5 curl -s https://api.github.com/repos/someone/else/issues'
 check deny tech-lead "timeout 10 bash -c 'gh api repos/someone/else/issues'"
 check deny tech-lead "echo 1 | xargs sh -c 'gh api repos/someone/else/issues'"
+check deny tech-lead "echo 'gh api repos/someone/else/issues' | sh"
+check deny tech-lead "echo 'gh api repos/someone/else/issues' | timeout 5 sh"
+check deny tech-lead "sh <<< 'gh api repos/someone/else/issues'"
+check allow tech-lead "echo 'gh api repos/test/repo/issues' | sh"
 # A line ending in a backslash goes on in the next one; a here-document's body stays data.
 check deny tech-lead 'gh api -X POST \
   repos/someone/else/issues \

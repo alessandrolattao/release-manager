@@ -292,17 +292,32 @@ def is_call(text, at, strings):
     stand for them (gh api "repos/...", "$API/repos/..."). strings holds where each quoted string's text starts
     and ends."""
     string = next((start for start, end in strings if start <= at < end), None)
-    if string is not None:
-        word = text[string:at]
-        if re.search(r"\s", word):
-            return False
-    else:
-        word = re.search(r"[^\s'\"=;&|()<>`]*$", text[:at]).group()
+    inside = text[string:at] if string is not None else ""
+    if re.search(r"\s", inside):
+        return False
+    word = word_before(text, string - 1 if string is not None else at, strings) + inside
     for made in expanded(word):
         made = folded(made)
-        if ENDPOINT_PREFIX.fullmatch(made) or VARIABLE_BEFORE.search(made) or (string is None and "/" not in made):
+        if ENDPOINT_PREFIX.fullmatch(made) or VARIABLE_BEFORE.search(made) or (not inside and "/" not in made):
             return True
     return False
+
+
+def word_before(text, end, strings):
+    """What comes before this place in its shell word, quoted parts included and their quotes removed
+    ('~/.local/state/team'/repos/... gives ~/.local/state/team/)."""
+    closing = {stop: start for start, stop in strings}
+    out, i = [], end - 1
+    while i >= 0:
+        if i in closing and text[i] in "'\"":
+            out.append(text[closing[i]:i])
+            i = closing[i] - 2
+        elif text[i] in " \t\n;&|()<>`=":
+            break
+        else:
+            out.append(text[i])
+            i -= 1
+    return "".join(reversed(out))
 
 
 def expanded(word):
@@ -446,7 +461,7 @@ for n, (words, separator) in enumerate(commands):
 
     # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...', find
     # -exec sh -c '...') is checked as a command of its own; the command that runs it is still judged by its own
-    # rules below (in another repository, sh > file writes a file).
+    # rules below (in another repository, echo ls | sh > file writes a file), but for sh -c and eval, as on main.
     for code in {code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None),
                  shell_inside(commands[n][0])} - {None}:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
@@ -455,6 +470,9 @@ for n, (words, separator) in enumerate(commands):
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
+    # As on main, sh -c '...' and eval '...' are their string and nothing more.
+    if (head in SHELLS and "-c" in words[1:]) or head == "eval":
+        continue
 
     if head == "cd" and len(words) > 1:
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))

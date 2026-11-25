@@ -110,6 +110,9 @@ check deny tech-lead "cd $S && timeout 5 bash -c 'ls' > out.txt"
 check deny tech-lead "cd $S && bash <<< 'ls' > out.txt"
 check deny tech-lead "cd $S && printf 'ls' | bash >> out.txt"
 check allow tech-lead "cd $S && echo ls | sh"
+# As on main, sh -c '...' and eval '...' are their string and nothing more.
+check allow tech-lead "cd $S && bash -c 'ls' > out.txt"
+check allow tech-lead "cd $S && sh -c 'ls' >> out.txt"
 # env -S splits its string into the command; sudo -R, env -P and doas -a take a value.
 check deny tech-lead "echo 'git push' | env -S sh"
 check deny tech-lead "env -S \"bash -c 'git push'\""
@@ -276,6 +279,15 @@ check deny tech-lead 'curl -s https://api.github.com/\repos/someone/else/issues'
 check deny tech-lead 'curl -s https://api.github.com/{repos/someone/else/issues,}'
 check deny tech-lead 'curl -s {https://api.github.com/,}repos/someone/else/issues'
 check allow tech-lead 'ls ~/src/{a,b}/repos/x/y'
+# A shell word may hold quoted parts: the word before repos/ is all of them, its quotes removed.
+check allow tech-lead "tail '/home/x/.local/state/team'/repos/someone_else/dispatcher.log"
+check allow tech-lead 'tail "$HOME/.local/state/team/"repos/someone_else/dispatcher.log'
+check allow tech-lead 'tail ~/.local/state/team/"repos/someone_else/dispatcher.log"'
+check allow tech-lead 'curl "https://example.com"/repos/a/b'
+check deny tech-lead 'gh api "/"repos/someone/else/issues'
+check deny tech-lead 'gh api ""repos/someone/else/issues'
+check deny tech-lead 'curl "https://api.github.com"/repos/someone/else/issues'
+check deny tech-lead "curl https://api.github.com/'repos/someone/else/issues'"
 # A word that only names a shell, . or eval is no command that runs code.
 check allow tech-lead 'echo "see repos/a/b" | grep .'
 check allow tech-lead "printf '%s\\n' 'see repos/a/b' | grep -c sh"

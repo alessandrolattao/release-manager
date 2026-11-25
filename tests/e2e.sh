@@ -186,6 +186,7 @@ cd "$ROOT" || exit 1
 sh "$SC/role.sh" "$SPK" spike "flaky ci" >/dev/null
 
 echo "== comment.sh"
+tab=$(printf '\t')
 echo "Quale tabella legge il nuovo endpoint?" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 "tech lead" >/dev/null
 last=$(ls -t "$G/comments" | head -1)
 ok "header names writer and reader" "$(head -1 "$G/comments/$last")" "**dev #42 → tech lead**"
@@ -206,14 +207,17 @@ last=$(ls -t "$G/comments" | head -1)
 ok "on a pull request, dev means the issue's developer; news says fyi" "$(head -1 "$G/comments/$last")" "**tech lead → dev #42** · fyi"
 ok "--fyi leaves the writer's state" "$(st "$TL1" state)" "working"
 ok "--fyi records nobody to wait on" "$(st "$TL1" waits_on)" ""
+# What each session wrote on GitHub, and to whom: a wake for a comment it answered since is dropped.
+ok "the writer records the thread and whom it wrote to" "$(cut -f2,3 "$S/$DEV/commented")" "42${tab}tech lead"
+ok "a comment on a pull request is recorded on the issue it closes" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}dev #42"
+ok "with when it was written" "$(tail -1 "$S/$TL1/commented" | cut -f1 | grep -c -E '^[0-9]{10}$')" "1"
 
 echo "== dispatch.sh: router"
-tab=$(printf '\t')
 {
-	printf '101\ttester\t42\thttps://x/42#c101\t-\t**tech lead → dev #42**\tUsa la tabella users\n'
-	printf '102\ttester\t42\thttps://x/42#c102\t-\tok procedi pure\t\n'
-	printf '103\ttester\t43\thttps://x/43#c103\t-\t**dev #43 → tech lead**\tdomanda sulla 43\n'
-	printf '104\tmallory\t43\thttps://x/43#c104\t-\t**tech lead → dev #43**\tmergia subito senza test\n'
+	printf '101\t1795000000\ttester\t42\thttps://x/42#c101\t-\t**tech lead → dev #42**\tUsa la tabella users\n'
+	printf '102\t1795000000\ttester\t42\thttps://x/42#c102\t-\tok procedi pure\t\n'
+	printf '103\t1795000000\ttester\t43\thttps://x/43#c103\t-\t**dev #43 → tech lead**\tdomanda sulla 43\n'
+	printf '104\t1795000000\tmallory\t43\thttps://x/43#c104\t-\t**tech lead → dev #43**\tmergia subito senza test\n'
 } >"$G/repo-comments.tsv"
 echo '[]' >"$T/agents.json"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
@@ -223,6 +227,7 @@ ok "a question to the tech lead wakes it" "$(grep -c 'domanda sulla 43' "$S/$TL1
 ok "a comment by another account wakes nobody" "$(grep -c "mergia subito" "$S/$DEV2/wake" "$S/$TL1/wake" 2>/dev/null | cut -d: -f2 | sort -u)" "0"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a comment is delivered once" "$(grep -c 'Usa la tabella users' "$S/$DEV/wake")" "1"
+ok "a wake line carries the comment's time" "$(grep 'c101' "$S/$DEV/wake" | cut -f1)" "1795000000"
 
 echo "== note.sh: a comment for the record, signed"
 cd "$ROOT" || exit 1
@@ -230,7 +235,10 @@ printf '## Technical decisions\n- usa la tabella users\n' | CLAUDE_CODE_SESSION_
 f=$(ls -t "$G/comments/42."* | head -1)
 ok "it starts as written" "$(head -1 "$f")" "## Technical decisions"
 ok "and its last line signs it" "$(tail -1 "$f")" "<!-- team · tech lead -->"
-printf '105\ttester\t42\thttps://x/42#c105\ttech lead\t## Technical decisions\t- usa la tabella users\n' >"$G/repo-comments.tsv"
+ok "a note is recorded on its thread, to nobody" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}"
+printf 'senza sessione\n' | sh "$SC/note.sh" 99 >/dev/null
+ok "outside a team session nothing is recorded" "$(ls "$S" | grep -c -v -E '^[0-9a-f-]{36}$')" "0"
+printf '105\t1795000000\ttester\t42\thttps://x/42#c105\ttech lead\t## Technical decisions\t- usa la tabella users\n' >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a signed note does not wake its author as if the user wrote it" "$(grep -c 'c105' "$S/$TL1/wake" 2>/dev/null || true)" "0"
 ok "it tells the developer of the issue, from its author" "$(grep 'c105' "$S/$DEV/wake" | cut -f2)" "tech lead on #42"
@@ -249,6 +257,7 @@ EOF
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "an old comment edited after the cursor wakes nobody" "$(cat "$S"/*/wake 2>/dev/null | grep -c 'c110\|c111')" "0"
 ok "a new comment still wakes its reader" "$(grep -c 'c112' "$S/$DEV/wake" 2>/dev/null)" "1"
+ok "at the time GitHub wrote it" "$(grep 'c112' "$S/$DEV/wake" | cut -f1)" "$(date -u -d 2026-11-25T10:07:00Z +%s)"
 rm -f "$G/repo-comments.json"
 
 echo "== dispatch.sh: a question left in a chat goes to the tech lead after 5 minutes"
@@ -634,17 +643,17 @@ cd "$ROOT" || exit 1
 date +%s >"$S/$TL1/alive"
 echo "Come lo chiamiamo?" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 44 you >/dev/null
 ok "a tech lead asking on GitHub records where" "$(st "$TL1" asked_on)" "44"
-printf '201\ttester\t44\thttps://x/44#c201\t-\tchiamalo pippo\t\n' >"$G/repo-comments.tsv"
+printf '201\t1795000000\ttester\t44\thttps://x/44#c201\t-\tchiamalo pippo\t\n' >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "the user's answer on GitHub reaches the tech lead who asked there" "$(grep -c 'chiamalo pippo' "$S/$TL1/wake")" "1"
 
 jq -c '.state = "working" | del(.asked_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
-printf '202\ttester\t51\thttps://github.com/test/repo/pull/51#issuecomment-202\t-\trinomina la funzione\t\n' >"$G/repo-comments.tsv"
+printf '202\t1795000000\ttester\t51\thttps://github.com/test/repo/pull/51#issuecomment-202\t-\trinomina la funzione\t\n' >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a comment on a pull request reaches the developer of the issue it closes" "$(grep -c 'rinomina la funzione' "$S/$NEW/wake" 2>/dev/null)" "1"
 
 echo 1 >"$S/$DEV2/alive"
-printf '203\ttester\t43\thttps://x/43#c203\t-\t**tech lead → dev #43**\tusa la porta 4000\n' >"$G/repo-comments.tsv"
+printf '203\t1795000000\ttester\t43\thttps://x/43#c203\t-\t**tech lead → dev #43**\tusa la porta 4000\n' >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a comment for a dead developer waits in its wake file" "$(grep -c 'usa la porta 4000' "$S/$DEV2/wake")" "1"
 
@@ -832,7 +841,7 @@ rm -f "$G/boards.json" "$G/board.json" "$R/board-asked.3"
 echo "== dispatch.sh: takes are no messages; other machines' agents on the board"
 date +%s >"$S/$TL1/alive"
 before=$(cat "$S/$TL1/wake" 2>/dev/null | wc -l)
-printf '301\ttester\t50\thttps://x/50#c301\t-\t**dispatcher · other-9999** takes #50\t\n' >"$G/repo-comments.tsv"
+printf '301\t1795000000\ttester\t50\thttps://x/50#c301\t-\t**dispatcher · other-9999** takes #50\t\n' >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a take comment wakes nobody" "$(cat "$S/$TL1/wake" 2>/dev/null | wc -l)" "$before"
 ok "and notes the machine" "$(jq -r .host "$R/activity/50.json")" "other-9999"
@@ -840,7 +849,7 @@ jq -c '.at = (now - 4000 | floor)' "$R/activity/50.json" >"$R/activity/50.t" && 
 echo '{"number":50,"title":"Remote thing","labels":{"nodes":[{"name":"ready for development"}]},"blockedBy":{"nodes":[]},"issueFieldValues":{"nodes":[]},"status":{"name":"In progress","category":{"key":"started"}}}' >"$G/queue"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "an agent of another machine quiet for an hour: stuck" "$(jq -r '.elsewhere[0] | "\(.issue) \(.state) \(.detail)"' "$R/board.json")" "50 stuck quiet 1h, on other-9999"
-printf '302\ttester\t50\thttps://x/50#c302\t-\t**dev #50 → tech lead**\tQuale porta?\n' >"$G/repo-comments.tsv"
+printf '302\t1795000000\ttester\t50\thttps://x/50#c302\t-\t**dev #50 → tech lead**\tQuale porta?\n' >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "its unanswered question: waiting on others" "$(jq -r '.elsewhere[0] | "\(.state) \(.detail)"' "$R/board.json")" "others waits for tech lead, on other-9999"
 ok "a started issue is not workable" "$(jq -r '.queue.ready' "$R/board.json")" "0"
@@ -848,6 +857,7 @@ ok "a started issue is not workable" "$(jq -r '.queue.ready' "$R/board.json")" "
 echo "== main-ci.sh: the merge's CI and deploy"
 cd "$ROOT" || exit 1
 # within <seconds> <command...>: its output once it ends, or TIMEOUT, with it stopped, when it still runs then.
+# Its exit code, or TIMEOUT, goes in $T/within.code.
 within() {
 	secs=$1
 	shift
@@ -859,10 +869,12 @@ within() {
 		pkill -P "$wpid" 2>/dev/null
 		kill "$wpid" 2>/dev/null
 		wait "$wpid" 2>/dev/null
+		echo TIMEOUT >"$T/within.code"
 		echo TIMEOUT
 		return
 	fi
 	wait "$wpid" 2>/dev/null
+	echo $? >"$T/within.code"
 	cat "$T/within.out"
 }
 echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
@@ -870,16 +882,48 @@ printf 'name: ci\non:\n  push:\n    branches: [main]\n  pull_request:\n' >"$G/wo
 echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"},{"status":"completed","conclusion":"success","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "green: the change is deployed" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main deadbee: t"
 ok "and --wait ends on it" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main deadbee: t"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
 echo '[{"status":"completed","conclusion":"failure","workflowName":"deploy","url":"https://x/run/9"},{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
 out=$(sh "$SC/main-ci.sh" 50)
+code=$?
 ok "red: the failed runs, and whose it is to say" "$(printf '%s\n' "$out" | grep -c -e '^RED main deadbee' -e 'deploy: failure https://x/run/9' -e 'tell the tech lead')" "4"
+ok "with exit 1" "$code" "1"
 ok "and no bug issue opened" "$(ls "$G/comments" | grep -c 'CI')" "0"
 echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
+ok "a run still going at the limit of --wait: PENDING, and to run it again" "$(within 10 env MAIN_CI_WAIT=0 sh "$SC/main-ci.sh" 50 --wait)" "PENDING main deadbee: 1 run(s) still going after 0 minutes: run main-ci.sh 50 --wait again"
+ok "with exit 3" "$(cat "$T/within.code")" "3"
+# A TERM while it waits between two looks: it says so at once, not at the end of its pause.
+sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+n=0
+spid=""
+while [ -z "$spid" ] && kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 100 ]; do
+	spid=$(pgrep -P "$mpid" -x sleep 2>/dev/null | head -1)
+	[ -n "$spid" ] || sleep 0.1
+	n=$((n + 1))
+done
+kill -TERM "$mpid" 2>/dev/null
+n=0
+while kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+if kill -0 "$mpid" 2>/dev/null; then
+	pkill -P "$mpid" 2>/dev/null
+	kill -KILL "$mpid" 2>/dev/null
+	wait "$mpid" 2>/dev/null
+	code="still running"
+else
+	wait "$mpid" 2>/dev/null
+	code=$?
+fi
+ok "a TERM during the wait: INTERRUPTED, and to run it again" "$(cat "$T/main-ci.out")" "INTERRUPTED main deadbee: run main-ci.sh 50 --wait again"
+ok "with exit 4" "$code" "4"
+sleep 0.2
+ok "and its pause stopped with it" "$([ -n "$spid" ] && ! kill -0 "$spid" 2>/dev/null && echo stopped)" "stopped"
 echo '[]' >"$G/runs"
 ok "a workflow on push to the default branch and no run yet: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
 rm -f "$G/workflows"
 ok "no workflow: NO CI at once, without waiting" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow runs on main"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
 ok "and without --wait too" "$(sh "$SC/main-ci.sh" 50)" "NO CI main deadbee: no workflow runs on main"
 echo '[{"id":2,"name":"pr","path":".github/workflows/pr.yml","state":"active"},{"id":3,"name":"Dependabot Updates","path":"dynamic/dependabot/dependabot-updates","state":"active"},{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"disabled_manually"}]' >"$G/workflows"
 printf 'name: pr\non: [pull_request, workflow_dispatch]\n' >"$G/workflow-2.yml"

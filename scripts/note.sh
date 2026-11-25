@@ -2,7 +2,8 @@
 # A comment for the record, written to nobody in particular: an issue's `## Technical decisions`, findings, what
 # was settled. It goes out with the user's GitHub account, as every comment of the team, so a hidden last line
 # signs it (`<!-- team · <address> -->`): the plugin then knows it is not the user's, wakes nobody for its
-# author, and tells the developer and the QA agent of that issue.
+# author, and tells the developer and the QA agent of that issue. The session's `commented` records it
+# (session-dir.sh commented_on): a wake for a comment the user wrote on that thread before is not delivered.
 #   note.sh <issue-or-pr> <<'EOF'
 #   ## Technical decisions
 #   ...
@@ -19,4 +20,6 @@ body=$(cat)
 	echo "the comment comes on stdin" >&2
 	exit 2
 }
-printf '%s\n\n<!-- team · %s -->\n' "$body" "$(address_of "${CLAUDE_CODE_SESSION_ID:-}")" | gh issue comment "$target" --body-file -
+me=${CLAUDE_CODE_SESSION_ID:-}
+printf '%s\n\n<!-- team · %s -->\n' "$body" "$(address_of "$me")" | gh issue comment "$target" --body-file -
+commented_on "$me" "$(thread_of "$target")"

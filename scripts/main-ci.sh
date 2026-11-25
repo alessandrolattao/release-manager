@@ -4,6 +4,10 @@
 # reasons, most of them someone else's. When it is red the developer reads the failed runs: its own failure
 # it fixes, and tells the tech lead; anyone else's it tells the tech lead, and its work is over.
 #   main-ci.sh <pr> [--wait]   the runs of the pull request's merge commit; --wait: until they all end (45 min)
+# Its answer: GREEN or NO CI (exit 0), RED (exit 1); without --wait, PENDING while runs still go (exit 0).
+# With --wait, exit 0 comes only with an answer that ends the developer's wait. When it stops before the runs
+# end it says so, and the developer runs it again: PENDING at its time limit (exit 3), INTERRUPTED when a
+# signal stops it, as a restart of the session or a kill (exit 4).
 # Every workflow that runs on the commit counts; a cancelled one (superseded by a newer commit) does not, and
 # when all of them were, the newest commit of the default branch, which holds the change, is followed instead.
 # A repository with no workflow that runs on a push gets NO CI at once, without waiting: the work ends with the
@@ -42,25 +46,41 @@ superseded() {
 		[ "$(printf '%s' "$1" | jq length)" -gt 0 ]
 }
 
+# The wait's own pause, a sleep in the background so that a signal stops it at once; stopped with the wait.
+nap=""
+pause() {
+	sleep 60 &
+	nap=$!
+	wait "$nap" || true
+	nap=""
+}
+interrupted() {
+	[ -z "$nap" ] || kill "$nap" 2>/dev/null || true
+	echo "INTERRUPTED $base ${sha%"${sha#???????}"}: run main-ci.sh $pr --wait again"
+	exit 4
+}
+[ "${2:-}" != --wait ] || trap interrupted HUP INT TERM
+
 if ! push_workflow; then
 	echo "NO CI $base $short: no workflow runs on $base"
 	exit 0
 fi
 
 if [ "${2:-}" = --wait ]; then
-	end=$(($(date +%s) + 45 * 60))
+	minutes=${MAIN_CI_WAIT:-45}
+	end=$(($(date +%s) + minutes * 60))
 	while [ "$(date +%s)" -lt "$end" ]; do
 		list=$(runs)
 		if superseded "$list"; then
 			sha=$(git ls-remote origin "refs/heads/$base" | cut -f1)
-			sleep 60
+			pause
 			continue
 		fi
 		total=$(printf '%s' "$list" | jq length)
 		pending=$(printf '%s' "$list" | jq '[.[] | select(.status != "completed")] | length')
 		# Runs may take a moment to appear after a merge; once a minute, to spare the API.
 		[ "$total" -gt 0 ] && [ "$pending" -eq 0 ] && break
-		sleep 60
+		pause
 	done
 fi
 
@@ -72,10 +92,14 @@ if [ "$(printf '%s' "$failed" | jq length)" -gt 0 ]; then
 	printf '%s' "$failed" | jq -r '.[] | "  \(.workflowName): \(.conclusion) \(.url)"'
 	echo "Read the failed runs: when the failure is your change's, fix it on a new branch and tell the tech lead;"
 	echo "when it is not, tell the tech lead what fails (comment.sh <issue> \"tech lead\"), and your work is over."
-	exit 0
+	exit 1
 fi
 pending=$(printf '%s' "$list" | jq '[.[] | select(.status != "completed")] | length')
 if [ "$pending" -gt 0 ] || [ "$(printf '%s' "$list" | jq length)" -eq 0 ]; then
+	if [ "${2:-}" = --wait ]; then
+		echo "PENDING $base $short: $pending run(s) still going after $minutes minutes: run main-ci.sh $pr --wait again"
+		exit 3
+	fi
 	echo "PENDING $base $short: $pending run(s) still going"
 	exit 0
 fi

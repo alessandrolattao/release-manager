@@ -56,7 +56,10 @@ case "$*" in
 "pr view 50 --json closingIssuesReferences --jq .closingIssuesReferences[0].number // empty") echo 42 ;;
 "pr view 50 --json headRefOid --jq .headRefOid") echo abc1234567 ;;
 "pr view 50 --json headRefName --jq .headRefName") echo 42-feature ;;
-"pr view 50 --json headRefOid,state,mergeable,closingIssuesReferences") echo '{"headRefOid":"abc1234567","state":"OPEN","mergeable":"MERGEABLE","closingIssuesReferences":[{"number":42}]}' ;;
+"pr view 50 --json headRefOid,state,mergeable,closingIssuesReferences")
+	m=MERGEABLE
+	[ ! -f "$G/conflicting" ] || m=CONFLICTING
+	echo '{"headRefOid":"abc1234567","state":"OPEN","mergeable":"'"$m"'","closingIssuesReferences":[{"number":42}]}' ;;
 "pr checks 50 --json state,name") [ ! -f "$G/checks-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; echo '[{"name":"build","state":"SUCCESS"}]' ;;
 "pr view 51 --json closingIssuesReferences --jq .closingIssuesReferences[0].number // empty") echo 44 ;;
 "pr merge 50 --merge --match-head-commit abc1234567") echo merged >"$G/merged-50" ;;
@@ -261,6 +264,10 @@ CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/qa.sh" request 50 >/dev/null
 ok "asking for QA: waiting, purple" "$(st "$DEV" state)" "others"
 ok "the QA request names the issue" "$(cut -f3 "$R/qa/50")" "42"
 sh "$SC/qa.sh" pass 50 >/dev/null
+touch "$G/conflicting"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a conflict: refused, catching up the way the repository's instructions say" "$code $(printf '%s' "$out" | grep -c "bring it into your branch the way the repository's instructions say (a merge when they say nothing") $([ -f "$G/merged-50" ] && echo merged || echo not-merged)" "1 1 not-merged"
+rm -f "$G/conflicting"
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
 ok "everything holds: merged" "$(cat "$G/merged-50" 2>/dev/null)" "merged"
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 --rebase >/dev/null 2>&1

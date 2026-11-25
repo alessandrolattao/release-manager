@@ -78,6 +78,8 @@ case "$*" in
 "pr view 50 --json mergeCommit --jq .mergeCommit.oid // empty") echo deadbeefcafe ;;
 "run list --commit deadbeefcafe "*) cat "$G/runs" 2>/dev/null || echo '[]' ;;
 "run list "*) echo '[]' ;;
+"workflow list "*) [ ! -f "$G/workflows-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/workflows" 2>/dev/null || true ;;
+"workflow view "*" --yaml --ref main") cat "$G/workflow-$3.yml" 2>/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; } ;;
 "api graphql "*)
 	case "$*" in
 	*planningStatuses*) echo '[{"id":"S_TODO","name":"Todo"},{"id":"S_PROG","name":"In progress"},{"id":"S_REV","name":"In review"}]' ;;
@@ -680,14 +682,67 @@ ok "a started issue is not workable" "$(jq -r '.queue.ready' "$R/board.json")" "
 
 echo "== main-ci.sh: the merge's CI and deploy"
 cd "$ROOT" || exit 1
+# within <seconds> <command...>: its output once it ends, or TIMEOUT, with it stopped, when it still runs then.
+within() {
+	secs=$1
+	shift
+	"$@" >"$T/within.out" 2>&1 &
+	wpid=$!
+	n=0
+	while kill -0 "$wpid" 2>/dev/null && [ "$n" -lt $((secs * 10)) ]; do sleep 0.1; n=$((n + 1)); done
+	if kill -0 "$wpid" 2>/dev/null; then
+		pkill -P "$wpid" 2>/dev/null
+		kill "$wpid" 2>/dev/null
+		wait "$wpid" 2>/dev/null
+		echo TIMEOUT
+		return
+	fi
+	wait "$wpid" 2>/dev/null
+	cat "$T/within.out"
+}
+echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
+printf 'name: ci\non:\n  push:\n    branches: [main]\n  pull_request:\n' >"$G/workflow-1.yml"
 echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"},{"status":"completed","conclusion":"success","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "green: the change is deployed" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main deadbee: t"
+ok "and --wait ends on it" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main deadbee: t"
 echo '[{"status":"completed","conclusion":"failure","workflowName":"deploy","url":"https://x/run/9"},{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
 out=$(sh "$SC/main-ci.sh" 50)
 ok "red: the failed runs, and whose it is to say" "$(printf '%s\n' "$out" | grep -c -e '^RED main deadbee' -e 'deploy: failure https://x/run/9' -e 'tell the tech lead')" "4"
 ok "and no bug issue opened" "$(ls "$G/comments" | grep -c 'CI')" "0"
 echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
+echo '[]' >"$G/runs"
+ok "a workflow on push to the default branch and no run yet: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+rm -f "$G/workflows"
+ok "no workflow: NO CI at once, without waiting" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow runs on main"
+ok "and without --wait too" "$(sh "$SC/main-ci.sh" 50)" "NO CI main deadbee: no workflow runs on main"
+echo '[{"id":2,"name":"pr","path":".github/workflows/pr.yml","state":"active"},{"id":3,"name":"Dependabot Updates","path":"dynamic/dependabot/dependabot-updates","state":"active"},{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"disabled_manually"}]' >"$G/workflows"
+printf 'name: pr\non: [pull_request, workflow_dispatch]\n' >"$G/workflow-2.yml"
+ok "workflows on other events, a dynamic one and a disabled one on push: NO CI" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow runs on main"
+echo '[{"id":2,"name":"pr","path":".github/workflows/pr.yml","state":"active"},{"id":4,"name":"gone","path":".github/workflows/gone.yml","state":"active"}]' >"$G/workflows"
+ok "a workflow file that cannot be read: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+touch "$G/workflows-broken"
+ok "a workflow list that cannot be read: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+rm -f "$G/workflows-broken"
+
+echo "== push-trigger.py: a workflow's on: has a push trigger"
+pt() { printf "$1" | python3 -I "$SC/push-trigger.py"; }
+ok "a name" "$(pt 'on: push\n')" "push"
+ok "another name" "$(pt 'on: workflow_dispatch # push by hand\n')" "no"
+ok "a list on one line" "$(pt 'name: x\n"on": [pull_request, push]\n')" "push"
+ok "a list over several lines" "$(pt "on: [pull_request,\n  push]\njobs:\n")" "push"
+ok "a list with no push" "$(pt "'on': [pull_request, schedule]\n")" "no"
+ok "one item per line" "$(pt 'on:\n- workflow_dispatch\n- push\njobs:\n')" "push"
+ok "a list on the line under on:" "$(pt 'on:\n  [pull_request, push]\njobs:\n')" "push"
+ok "a map on the line under on:" "$(pt 'on:\n  {push: {branches: [main]}}\njobs:\n')" "push"
+ok "a list with no push on the line under on:" "$(pt 'on:\n  [pull_request]\njobs:\n')" "no"
+ok "a map whose key's list sits at the key's indentation is no list of events" "$(pt "name: stale\non:\n  schedule:\n  - cron: '0 0 * * *'\n  workflow_dispatch:\njobs:\n")" "no"
+ok "and with push among its keys" "$(pt "on:\n  schedule:\n  - cron: '0 0 * * *'\n  push:\n    branches:\n    - main\n")" "push"
+ok "an item it cannot read as a name: it cannot tell, so push" "$(pt 'on:\n  - [pull_request]\njobs:\n')" "push"
+ok "a map: push with filters counts, they are not interpreted" "$(pt 'on:\n  push:\n    tags: [v*]\n    branches-ignore: [main]\njobs:\n  push:\n')" "push"
+ok "a map with no push: neither a deeper key nor a later block counts" "$(pt 'on:\n  # push: off\n  pull_request:\n    branches: [push]\n  schedule:\n    - cron: x\njobs:\n  push:\n')" "no"
+ok "no on: it cannot tell, so push" "$(pt 'name: x\njobs:\n')" "push"
+ok "an alias: it cannot tell, so push" "$(pt 'on: *triggers\n')" "push"
 
 echo "== report.sh: the same title again, right after, comments on the open report"
 cd "$T" || exit 1

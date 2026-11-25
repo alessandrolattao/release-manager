@@ -42,6 +42,7 @@ function engine(on: On, logs: string[] = [], published = '9.9.9', toasts: string
   })
   on('command.register', () => ({ value: { command: 'team' } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.cwd', () => ({ value: '/repo' }))
   // /color and /rename, which the module runs between turns.
   on('command.run', () => ({ text: '' }))
   // The version published on the plugin's repository: the one running.
@@ -65,6 +66,8 @@ function prompts(on: On): string[] {
 test('a team session is woken between turns with what was written to it, once', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
+  // A developer opens its pane by itself: no surface in a test.
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
   const files = folder(on, {
     role: 'dev',
     status: JSON.stringify({ role: 'dev', state: 'others', detail: 'the tech lead' }),

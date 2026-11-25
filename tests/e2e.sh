@@ -88,6 +88,18 @@ case "$*" in
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
+# The plugin's own repository, for report.sh. The REST listing has an issue as soon as it is opened, and a
+# pull request among the issues it lists; the search index behind `gh issue list --label` has not seen it yet.
+"api repos/"*"/issues?labels=flow-report&state=open&per_page=100")
+	{
+		for f in "$G/reports/"*; do [ -f "$f" ] || continue; jq -n --rawfile t "$f" --argjson n "${f##*/}" '{number: $n, title: ($t | rtrimstr("\n"))}'; done
+		[ ! -f "$G/report-pr" ] || jq -n --rawfile t "$G/report-pr" '{number: 900, title: ($t | rtrimstr("\n")), pull_request: {url: "https://x/pulls/900"}}'
+	} | jq -s '.' ;;
+"issue list -R "*" --state open --label flow-report "*) echo '[]' ;;
+"label list -R "*" --limit 200 --json name --jq .[].name") echo flow-report ;;
+"issue create -R "*" --label flow-report --body-file -")
+	n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"
+	mkdir -p "$G/reports"; printf '%s\n' "$6" >"$G/reports/$n"; cat >"$G/report-body.$n"; echo "https://github.com/x/y/issues/$n" ;;
 *) echo "gh stub: unhandled: $*" >>"$G/unhandled"; exit 1 ;;
 esac
 EOF
@@ -621,6 +633,19 @@ ok "red: the failed runs, and whose it is to say" "$(printf '%s\n' "$out" | grep
 ok "and no bug issue opened" "$(ls "$G/comments" | grep -c 'CI')" "0"
 echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
+
+echo "== report.sh: the same title again, right after, comments on the open report"
+cd "$T" || exit 1
+echo "first" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "A wake for nothing" >/dev/null
+echo "second" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "A wake for nothing" >/dev/null
+rep=$(ls "$G/reports" 2>/dev/null | head -1)
+ok "one issue" "$(ls "$G/reports" 2>/dev/null | wc -l)" "1"
+ok "and one comment on it, with the second report" "$(ls "$G/comments" | grep -c "^$rep\.") $(cat "$G/comments/$rep".* 2>/dev/null | head -1)" "1 second"
+echo "third" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "a WAKE for nothing" >/dev/null
+ok "the title compared without case" "$(ls "$G/reports" | wc -l) $(ls "$G/comments" | grep -c "^$rep\.")" "1 2"
+echo "Board shows a wrong color" >"$G/report-pr"
+echo "fourth" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/report.sh" "Board shows a wrong color" >/dev/null
+ok "a pull request with the title is no report: a new issue" "$(ls "$G/reports" | wc -l) $(ls "$G/comments" | grep -c '^900\.')" "2 0"
 
 echo "== update.sh"
 cd "$ROOT" || exit 1

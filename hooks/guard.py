@@ -461,7 +461,7 @@ for n, (words, separator) in enumerate(commands):
 
     # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...', find
     # -exec sh -c '...') is checked as a command of its own; the command that runs it is still judged by its own
-    # rules below (in another repository, echo ls | sh > file writes a file), but for sh -c and eval, as on main.
+    # rules below (in another repository, bash -c 'ls' > file writes a file).
     for code in {code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None),
                  shell_inside(commands[n][0])} - {None}:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
@@ -470,9 +470,6 @@ for n, (words, separator) in enumerate(commands):
             sys.stdout.write(nested.stdout)
             sys.stderr.write(nested.stderr)
             sys.exit(nested.returncode)
-    # As on main, sh -c '...' and eval '...' are their string and nothing more.
-    if (head in SHELLS and "-c" in words[1:]) or head == "eval":
-        continue
 
     if head == "cd" and len(words) > 1:
         where = os.path.realpath(os.path.join(where, os.path.expanduser(words[1])))

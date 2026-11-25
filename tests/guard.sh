@@ -110,9 +110,11 @@ check deny tech-lead "cd $S && timeout 5 bash -c 'ls' > out.txt"
 check deny tech-lead "cd $S && bash <<< 'ls' > out.txt"
 check deny tech-lead "cd $S && printf 'ls' | bash >> out.txt"
 check allow tech-lead "cd $S && echo ls | sh"
-# As on main, sh -c '...' and eval '...' are their string and nothing more.
-check allow tech-lead "cd $S && bash -c 'ls' > out.txt"
-check allow tech-lead "cd $S && sh -c 'ls' >> out.txt"
+# sh -c '...' and eval '...' too: their command keeps its own rules (main lets these through).
+check deny tech-lead "cd $S && bash -c 'ls' > out.txt"
+check deny tech-lead "cd $S && sh -c 'ls' >> out.txt"
+check deny tech-lead "cd $S && eval ls > out.txt"
+check allow tech-lead "cd $S && bash -c 'ls'"
 # env -S splits its string into the command; sudo -R, env -P and doas -a take a value.
 check deny tech-lead "echo 'git push' | env -S sh"
 check deny tech-lead "env -S \"bash -c 'git push'\""

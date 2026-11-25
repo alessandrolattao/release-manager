@@ -68,6 +68,7 @@ case "$*" in
 "label list --limit 200 --json name --jq .[].name") echo question ;;
 "issue edit "*" --add-label question") echo "$3" >>"$G/question-labels" ;;
 "issue view 42 --json labels --jq "*) cat "$G/qa-42" 2>/dev/null || echo no ;;
+"issue view 42 --json comments --jq "*) [ ! -f "$G/comments-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/decided-42" 2>/dev/null || true ;;
 "issue view "*" --json state,labels --jq "*) cat "$G/issue-open" 2>/dev/null || echo false ;;
 "api --paginate repos/test/repo/issues/comments?since="*"per_page=100") cat "$G/mentions.json" 2>/dev/null || echo '[]' ;;
 "api --paginate repos/test/repo/issues/comments?since="*) cat "$G/repo-comments.tsv" 2>/dev/null ;;
@@ -292,7 +293,7 @@ CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/qa.sh" request 42 >/dev/null
 ok "asking for QA: waiting, purple" "$(st "$DEV" state)" "others"
 ok "the QA request is keyed by the issue, with the pushed head and the branch" "$(cut -f1,2,3,5 "$R/qa/42" 2>/dev/null)" "requested	$reviewed	42	42-feature"
 sh "$SC/qa.sh" pass 42 >/dev/null
-ok "the QA outcome is recorded by issue, at the pushed head" "$(cat "$R/qa/42")" "pass	$reviewed"
+ok "the QA outcome is recorded by issue, at the pushed head" "$(cut -f1,2 "$R/qa/42")" "pass	$reviewed"
 # The pull request is opened only now; at another head than the one reviewed, it is refused.
 echo abc1234567 >"$G/head-50"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
@@ -317,6 +318,47 @@ rm -f "$G/merged-50"
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1
 ok "without one, the only method the repository allows" "$(cat "$G/merged-50" 2>/dev/null)" "rebased"
 rm -f "$G/merge-methods"
+
+echo "== merge.sh: Technical decisions newer than the review or the QA"
+merged() { [ -f "$G/merged-50" ] && echo merged || echo not-merged; }
+stamp='^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
+echo no >"$G/qa-42"
+rm -f "$G/merged-50"
+sleep 1
+date -u +%Y-%m-%dT%H:%M:%SZ >"$G/decided-42"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a review, then newer decisions: refused, asking for a new review" "$code $(printf '%s' "$out" | grep -c 'the decisions changed after the review: run the decision review again') $(merged)" "1 1 not-merged"
+sleep 1
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/review.sh" pass 42 "decisioni rispettate" >/dev/null
+ok "the review records its time beside the head and the summary" "$(cut -f1,3 "$R/review/42") $(cut -f2 "$R/review/42" | grep -c "$stamp")" "$reviewed	decisioni rispettate 1"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1
+ok "a new review: merged" "$(merged)" "merged"
+rm -f "$G/merged-50"
+printf '%s\tdecisioni rispettate\n' "$reviewed" >"$R/review/42"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a review recorded with no time counts as older than any decision" "$code $(printf '%s' "$out" | grep -c 'the decisions changed after the review') $(merged)" "1 1 not-merged"
+echo yes >"$G/qa-42"
+sleep 1
+date -u +%Y-%m-%dT%H:%M:%SZ >"$G/decided-42"
+sleep 1
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/review.sh" pass 42 "decisioni rispettate" >/dev/null
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a QA pass older than the decisions: refused the same way" "$code $(printf '%s' "$out" | grep -c 'the decisions changed after the QA: qa.sh request 42') $(merged)" "1 1 not-merged"
+printf 'requested\t%s\t42\t%s\t42-feature\n' "$reviewed" "$DEV" >"$R/qa/42"
+sh "$SC/qa.sh" pass 42 >/dev/null
+ok "the QA pass records its time beside the head" "$(cut -f1,2 "$R/qa/42") $(cut -f3 "$R/qa/42" | grep -c "$stamp")" "pass	$reviewed 1"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1
+ok "a new QA pass: merged" "$(merged)" "merged"
+rm -f "$G/merged-50"
+printf 'pass\t%s\n' "$reviewed" >"$R/qa/42"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "a QA pass recorded with no time counts as older too" "$code $(printf '%s' "$out" | grep -c 'the decisions changed after the QA') $(merged)" "1 1 not-merged"
+printf 'requested\t%s\t42\t%s\t42-feature\n' "$reviewed" "$DEV" >"$R/qa/42"
+sh "$SC/qa.sh" pass 42 >/dev/null
+touch "$G/comments-broken"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "decisions that cannot be read refuse the merge" "$code $(printf '%s' "$out" | grep -c 'could not read the comments of #42') $(merged)" "1 1 not-merged"
+rm -f "$G/comments-broken" "$G/decided-42"
 
 echo "== asks.sh and session-blocked.sh"
 payload() { jq -n --arg s "$1" --arg c "$2" --arg m "${3:-}" '{session_id:$s,cwd:$c,transcript_path:"",last_assistant_message:$m,tool_name:"Bash",tool_input:{command:"npm publish"}}'; }

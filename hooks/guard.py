@@ -49,26 +49,38 @@ SHELL_COMMAND = re.compile(r"-[A-Za-z]*c[A-Za-z]*")
 # The commands that run a string as code, and ssh's options that take a value.
 CODE_RUNNERS = SHELLS + ("eval", "source", ".", "ssh")
 SSH_VALUE_FLAGS = set("bcDEeFIiJLlmOopQRSWw")
-# Commands that run the command after them (timeout 5 sh, xargs -I {} sh -c, sudo -u me sh ...), with their
-# options that take a value. env -S is apart: its string is the command, split into words.
+# Commands that run the command after them (timeout 5 sh, xargs -I {} sh -c, sudo -u me sh ...): their long
+# options, all of them so that a prefix expands as getopt_long expands it (--us is --user), and the options
+# that take a value as the next word (or the rest of a bundle: -nu me). env -S is apart: its string is the
+# command, split into words.
 WRAPPERS = {
-    "sudo": {"-u", "-g", "-C", "-D", "-h", "-p", "-r", "-R", "-t", "-T", "-U", "--user", "--group", "--chdir",
-             "--chroot", "--prompt", "--role", "--type", "--other-user", "--close-from", "--host", "--command-timeout"},
-    "doas": {"-u", "-C", "-a"},
-    "env": {"-u", "-C", "-P", "-a", "--unset", "--chdir", "--argv0"},
-    "time": {"-f", "-o", "--format", "--output"},
-    "nohup": set(),
-    "exec": {"-a"},
-    "timeout": {"-s", "-k", "--signal", "--kill-after"},
-    "nice": {"-n", "--adjustment"},
-    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"},
-    "command": set(),
-    "builtin": set(),
-    "xargs": {"-I", "-L", "-n", "-P", "-s", "-d", "-E", "-a", "--max-args", "--max-procs", "--replace", "--delimiter",
-              "--arg-file", "--max-lines", "--max-chars", "--eof"},
-    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
-    "setsid": set(),
+    "sudo": ("--askpass --background --bell --chdir --chroot --close-from --command-timeout --edit --group --help "
+             "--host --list --login --non-interactive --other-user --preserve-env --preserve-groups --prompt "
+             "--remove-timestamp --reset-timestamp --role --set-home --shell --stdin --type --user --validate --version",
+             "-u -g -C -D -h -p -r -R -t -T -U --chdir --chroot --close-from --command-timeout --group --host "
+             "--other-user --prompt --role --type --user"),
+    "doas": ("", "-u -C -a"),
+    "env": ("--argv0 --block-signal --chdir --debug --default-signal --help --ignore-environment --ignore-signal "
+            "--list-signal-handling --null --split-string --unset --version",
+            "-u -C -P -a -S --argv0 --chdir --split-string --unset"),
+    "time": ("--append --format --help --output --portability --quiet --verbose --version", "-f -o --format --output"),
+    "nohup": ("--help --version", ""),
+    "exec": ("", "-a"),
+    "timeout": ("--foreground --help --kill-after --preserve-status --signal --verbose --version",
+                "-s -k --kill-after --signal"),
+    "nice": ("--adjustment --help --version", "-n --adjustment"),
+    "ionice": ("--class --classdata --help --ignore --pgid --pid --uid --version",
+               "-c -n -p -P -u --class --classdata --pgid --pid --uid"),
+    "command": ("", ""),
+    "builtin": ("", ""),
+    "xargs": ("--arg-file --delimiter --eof --exit --help --interactive --max-args --max-chars --max-lines --max-procs "
+              "--no-run-if-empty --null --open-tty --process-slot-var --replace --show-limits --verbose --version",
+              "-I -L -n -P -s -d -E -a --arg-file --delimiter --max-args --max-chars --max-lines --max-procs "
+              "--process-slot-var"),
+    "stdbuf": ("--error --help --input --output --version", "-i -o -e --error --input --output"),
+    "setsid": ("--ctty --fork --help --version --wait", ""),
 }
+WRAPPERS = {name: (longs.split(), set(values.split())) for name, (longs, values) in WRAPPERS.items()}
 # A link to GitHub is a URL or an ssh remote (https://github.com/..., git@github.com:..., github.com/... as a
 # word, any subdomain), never a folder of a local path (~/go/pkg/mod/github.com/...); api.github.com is the
 # API rule's.
@@ -163,18 +175,21 @@ def command_words(words):
         elif os.path.basename(word) in WRAPPERS:
             wrapper, words = os.path.basename(word), words[1:]
         elif wrapper and word.startswith("--"):
+            longs, values = WRAPPERS[wrapper]
             name, eq, given = word.partition("=")
-            takes = name in WRAPPERS[wrapper] or (wrapper == "env" and name == "--split-string")
+            names = [o for o in longs if o.startswith(name)] if name not in longs and name != "--" else [name]
+            name = names[0] if len(names) == 1 else name
+            takes = name in values
             value, words = (given, words[1:]) if eq or not takes else (words[1] if len(words) > 1 else "", words[2:])
             if wrapper == "env" and name == "--split-string":
                 words, split = split_words(value) + words, True
         elif wrapper and word.startswith("-") and len(word) > 1:
             words = words[1:]
             for i, c in enumerate(word[1:], 2):
-                if "-" + c in WRAPPERS[wrapper] or (wrapper == "env" and c == "S"):
+                if "-" + c in WRAPPERS[wrapper][1]:
                     value = word[i:] or (words[0] if words else "")
                     words = words if word[i:] else words[1:]
-                    if c == "S":
+                    if wrapper == "env" and c == "S":
                         words, split = split_words(value) + words, True
                     break
         elif wrapper == "timeout" and re.fullmatch(r"\d+(?:\.\d+)?[smhd]?", word):

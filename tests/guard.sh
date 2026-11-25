@@ -122,6 +122,12 @@ check deny tech-lead "echo 'git push' | sudo -num sh"
 check deny tech-lead "echo 'git push' | env -Sbash"
 check deny tech-lead "echo 1 | xargs -0I {} sh -c 'git push'"
 check allow tech-lead "env -iS 'git log -1'"
+# A long option may be cut short, as getopt_long reads it, and some take a value only with =.
+check deny tech-lead 'env --split "gh api repos/someone/else/issues"'
+check deny tech-lead "env --spl='git push'"
+check deny tech-lead "echo 'git push' | sudo --us me sh"
+check deny tech-lead "echo 'git push' | timeout --sig KILL 5 sh"
+check deny tech-lead "echo 'git push' | xargs --replace sh"
 # ssh reads options after the host too, and -- ends them.
 check deny tech-lead "ssh host -- 'git push'"
 check deny tech-lead "ssh host -t 'git push'"

@@ -159,13 +159,13 @@ def printed(words):
     words = bare(words)
     head = os.path.basename(words[0]) if words else ""
     if head == "cat":
-        return words[words.index("<<<") + 1] if "<<<" in words[:-1] else None
+        return restored(words[words.index("<<<") + 1]) if "<<<" in words[:-1] else None
     if head not in ("echo", "printf"):
         return None
     rest = words[1:]
     while rest and re.fullmatch(r"-[neE]+", rest[0]):
         rest = rest[1:]
-    return " ".join(rest[1:] if rest[:1] == ["--"] else rest).replace("\\n", "\n")
+    return restored(" ".join(rest[1:] if rest[:1] == ["--"] else rest).replace("\\n", "\n"))
 
 
 def command_words(words):
@@ -255,6 +255,7 @@ def with_printed(code):
     (eval "$(echo '...')", bash -c "$(printf '...')")."""
     if code is None:
         return None
+    code = restored(code)
     return "\n".join([code] + [text for inner in scan(code)[1] for words in segments_of(inner)
                                 if (text := printed(words)) is not None])
 
@@ -406,15 +407,15 @@ def scan(text):
     while i < len(text):
         c = text[i]
         if quote == "'" and c != "'":
+            out[i] = marked(c)
             i += 1
         elif c == "\\" and quote != "'":
+            if i + 1 < len(text):
+                out[i + 1] = marked(text[i + 1])
             i += 2
         elif c in "'\"" and quote in (None, c):
             if quote:
                 strings.append((opened, i))
-                # A quoted string of operators alone ('>', '&&') is a word: the tokenizer must not take it for one.
-                if set(text[opened:i]) and set(text[opened:i]) <= set(";&|()<>"):
-                    out[opened:i] = [chr(0xE000 + ord(ch)) for ch in text[opened:i]]
             quote, opened = (None, 0) if quote else (c, i + 1)
             i += 1
         elif c == "\n" and quote is None:
@@ -432,6 +433,8 @@ def scan(text):
             plain[i:end + 1] = "$" * (min(end + 1, len(text)) - i)
             i = after = end + 1
         else:
+            if quote:
+                out[i] = marked(c)
             i += 1
     if quote:
         strings.append((opened, len(text)))
@@ -447,6 +450,17 @@ def folded(word):
         if fold == word:
             return word
         word = fold
+
+
+def marked(c):
+    """An operator character as the tokenizer must see it when quoted or escaped: a word's, not an operator
+    ('>', \>, "a;b"). restored() gives it back where the text becomes code."""
+    return chr(0xE000 + ord(c)) if c in ";&|()<>" else c
+
+
+def restored(text):
+    """Text with its marked operators given back (the -c string of sh -c 'a; b' is a; b again)."""
+    return re.sub(r"[\ue000-\ue0ff]", lambda m: chr(ord(m.group()) - 0xE000), text)
 
 
 def closing(text, i):
@@ -555,7 +569,7 @@ for n, (written, _) in enumerate(commands):
     other = top if top and top != root and not top.startswith(root + os.sep) else None
     # A redirection before the command (>out.txt git log): main took it for the command and refused it in
     # another repository; so does this.
-    if other and bare(written)[:1] != words[:1] and any(re.match(r"^\d*>>?$", w) for w in written):
+    if other and bare(written)[:1] != words[:1] and any(re.match(r"^\d*>>?$", restored(w)) for w in written):
         refuse(f"it writes a file while in another repository ({other})")
 
     if head == "git":
@@ -612,6 +626,6 @@ for n, (written, _) in enumerate(commands):
     if other:
         if head in BUILD:
             refuse(f"{head} could change another repository ({other}); there you may only read")
-        if any(re.match(r"^\d*>>?$", w) for w in written):
+        if any(re.match(r"^\d*>>?$", restored(w)) for w in written):
             refuse(f"it writes a file while in another repository ({other})")
 sys.exit(0)

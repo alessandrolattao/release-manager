@@ -17,9 +17,11 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 	status="$sessions_dir/$id/status"
 	[ "$(jq -r .state "$status")" != done ] || continue
 	alive "$id" && continue
-	# Dead means failed, or working with no process behind it (the machine went down before the state moved).
+	# Dead means no process behind it, whatever its last turn left: failed, cut off while working, or between
+	# turns waiting on someone (blocked, done) when the machine went down. Left alone: one stopped on purpose
+	# (`claude stop`), one removed (`claude rm`), one running.
 	state=$(printf '%s' "$listing" | jq -r --arg s "$id" '[.[] | select(.sessionId == $s)][0] | if . == null then "gone" elif .status != null then "running" else .state end')
-	case "$state" in failed | working) ;; *) continue ;; esac
+	case "$state" in stopped | gone | running) continue ;; esac
 	issue=$(jq -r .issue "$status")
 	open=$(gh issue view "$issue" --json state,labels --jq '.state == "OPEN" and any(.labels[]; .name == "ready for development")' 2>/dev/null || echo unknown)
 	[ "$open" = true ] || continue

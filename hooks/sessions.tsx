@@ -21,6 +21,8 @@ import type { Board, BoardRow } from '../types'
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
 //     starts when it is stopped.
+//   - a tech lead looks every 30 minutes for a newer version of the plugin, published on its repository's
+//     default branch; the board's foot offers it, and a click runs /team:update (scripts/update.sh).
 //   - a tech lead keeps that dispatcher running: stopped (a restart of the machine, a crash), it starts it
 //     again; one the user stopped by hand stays stopped until the user starts it.
 
@@ -32,6 +34,8 @@ const DISPATCHER_START_MS = 30000
 const DISPATCHER_ALIVE_S = 660
 // A dispatcher the tech lead could not start is tried again after this long.
 const DISPATCHER_RETRY_S = 300
+const UPDATE_CHECK_MS = 30 * 60 * 1000
+const UPDATE_START_MS = 30000
 const STUCK_AFTER_S = 20 * 60
 // A wake waits until the model has been stopped for this long.
 const WAKE_QUIET_S = 5
@@ -64,6 +68,11 @@ const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', worki
 const board = atom({ plugin: 'team', key: 'board' } as const, { repo: '', rows: [], summary: null, dispatcher: { running: false, version: '' }, updated: 0 }, {
   shape: 'board-4',
 })
+
+// The plugin's newest published version, when newer than the one running: the board's foot offers it.
+const latest = atom({ plugin: 'team', key: 'latest' } as const, '')
+let updateCheckedAt = 0
+let isStartingUpdate = false
 
 let stateRoot: string | undefined
 let dataRoot: string | undefined
@@ -481,6 +490,69 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
   await update($, board, () => ({ repo, rows, summary, dispatcher, updated: now }))
 }
 
+// a newer than b, both "x.y.z".
+function isNewer(a: string, b: string): boolean {
+  const x = a.split('.').map(Number)
+  const y = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0)
+    if (d !== 0) {
+      return d > 0
+    }
+  }
+  return false
+}
+
+// A tech lead looks, every 30 minutes, at the version published on the plugin's repository (its manifest on
+// the default branch, read from raw.githubusercontent.com: no GitHub API call, nothing from the account's
+// allowance). Newer than the one running, it goes on the board's foot, with a toast the first time.
+async function checkLatest($: EngineInterface, nowMs: number): Promise<void> {
+  if (updateCheckedAt !== 0 && nowMs - updateCheckedAt < UPDATE_CHECK_MS) {
+    return
+  }
+  updateCheckedAt = nowMs
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { repository?: string }
+    const repo = (manifest.repository ?? '').replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '')
+    if (repo === '') {
+      return
+    }
+    const answer = await $.http.fetch(`https://raw.githubusercontent.com/${repo}/HEAD/.claude-plugin/plugin.json`)
+    if (!answer.ok) {
+      return
+    }
+    const published = (JSON.parse(answer.text) as { version?: string }).version ?? ''
+    const running = await versionOf($)
+    const newer = published !== '' && running !== '' && isNewer(published, running) ? published : ''
+    if (newer !== '' && newer !== (await read($, latest))) {
+      $.ui.toast(`team ${newer} is out: click update at the foot of the board`)
+    }
+    await update($, latest, () => newer)
+  } catch (err) {
+    $.ui.log(`team: update check: ${String(err)}`)
+  }
+}
+
+// A click on update at the board's foot: /team:update, detached (scripts/update.sh start). It updates the
+// plugin on every account of this machine and restarts every live team session and running dispatcher on
+// the new version, each once it is quiet, this session last.
+async function startUpdate($: EngineInterface): Promise<void> {
+  if (isStartingUpdate) {
+    return
+  }
+  isStartingUpdate = true
+  try {
+    const cwd = (await readText($, `${await folderOf($)}/cwd`)) || (await $.session.cwd())
+    const ran = await $.process.run(['sh', `${$.plugin.root}/scripts/update.sh`, 'start'], { cwd, timeoutMs: UPDATE_START_MS })
+    $.ui.toast((ran.exitCode === 0 ? ran.stdout : ran.stderr || ran.stdout).trim() || 'update: no answer')
+  } catch (err) {
+    $.ui.log(`team: update: ${String(err)}`)
+    $.ui.toast('the update did not start: run /team:update')
+  } finally {
+    isStartingUpdate = false
+  }
+}
+
 // The plugin's version, read once from its manifest, for the foot of the board.
 let pluginVersion: string | undefined
 async function versionOf($: EngineInterface): Promise<string> {
@@ -530,6 +602,7 @@ async function tick($: EngineInterface): Promise<void> {
       if (tickNumber % BOARD_EVERY_TICKS === 0 && status.repo) {
         await refreshBoard($, status.repo)
         await keepDispatcher($, status.repo, nowMs)
+        await checkLatest($, nowMs)
         if (!isPaneOpened) {
           isPaneOpened = true
           void openBoard($)
@@ -754,7 +827,11 @@ export const register: Register = on => {
           ]
     const bottom = summaryRows(items, columns)
     const version = await versionOf($)
+    const newer = await read($, latest)
     const footer = version === '' ? 'team' : `team ${version}`
+    // A newer version published: the foot offers it, and a click on update runs /team:update.
+    const offer = newer === '' ? '' : ` · ${newer} available · `
+    const offerAction = newer === '' ? '' : 'update'
     const segmentOf = (segment: Segment, key: string) => (
       <Text key={key} {...LOOKS[segment.look]}>
         {segment.text}
@@ -827,10 +904,25 @@ export const register: Register = on => {
         </Box>
         {/* An empty row, then the version: a Text holding a space, since an empty one takes no height. */}
         <Text> </Text>
-        <Text dimColor>
-          {' '.repeat(Math.max(0, Math.floor((columns - footer.length) / 2)))}
-          {footer}
-        </Text>
+        {newer === '' ? (
+          <Text dimColor>
+            {' '.repeat(Math.max(0, Math.floor((columns - footer.length) / 2)))}
+            {footer}
+          </Text>
+        ) : (
+          <Box flexDirection="row">
+            <Text dimColor>
+              {' '.repeat(Math.max(0, Math.floor((columns - footer.length - offer.length - offerAction.length) / 2)))}
+              {footer}
+            </Text>
+            <Text color="yellow">{offer}</Text>
+            <Button key="update" plain onPress={() => startUpdate($)}>
+              <Text color="yellow" bold underline>
+                {offerAction}
+              </Text>
+            </Button>
+          </Box>
+        )}
       </Box>
     )
   })

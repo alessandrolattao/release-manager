@@ -69,7 +69,18 @@ start)
 	;;
 stop)
 	pid=$(cat "$pid_file" 2>/dev/null || true)
-	case "$pid" in "" | *[!0-9]*) ;; *) kill "$pid" 2>/dev/null || true ;; esac
+	case "$pid" in
+	"" | *[!0-9]*) ;;
+	*)
+		# Gone before this returns, so a start right after never meets it.
+		kill "$pid" 2>/dev/null || true
+		n=0
+		while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 20 ]; do
+			sleep 0.5
+			n=$((n + 1))
+		done
+		;;
+	esac
 	rm -f "$pid_file" "$alive_file"
 	date +%s >"$stopped_file"
 	echo "the dispatcher of $repo_full is stopped on this machine, until you start it again"
@@ -88,9 +99,13 @@ run)
 	for v in $(env | grep -o -E '^CLAUDE[A-Z_]*' | grep -v '^CLAUDE_CONFIG_DIR$'); do unset "$v"; done
 	echo $$ >"$pid_file"
 	jq -r '.version // ""' "$here/../.claude-plugin/plugin.json" >"$version_file" 2>/dev/null || true
-	trap 'rm -f "$pid_file"' EXIT
+	# On its way out it removes the pid file only while it is still its own: a dispatcher started meanwhile
+	# keeps its own.
+	trap '[ "$(cat "$pid_file" 2>/dev/null)" != "$$" ] || rm -f "$pid_file"' EXIT
 	trap 'exit 0' INT TERM
 	while :; do
+		# Another dispatcher took this repository over (its pid in the file): this one leaves.
+		[ "$(cat "$pid_file" 2>/dev/null)" = "$$" ] || exit 0
 		date +%s >"$alive_file"
 		sh "$here/dispatch.sh" || echo "$(date '+%F %T') dispatch.sh exited $?"
 		date +%s >"$alive_file"

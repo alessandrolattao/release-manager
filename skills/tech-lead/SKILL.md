@@ -134,15 +134,15 @@ In the chat, a few lines and the link. The link goes on the issue the analysis i
 
 ## Recurring checks with Pulse
 
-When the user asks for something to be checked again and again, set it up with the `pulse` skill as it says, and make its report come back to this repository's tech leads. In the check's text, end with: "When done, whatever the outcome, leave it in the tech leads' inbox with the last step of the method", and give as the last step of `--method`:
+When the user asks for something to be checked again and again, set it up with the `pulse` skill as it says, and make its result come back to this repository's tech leads with a callback (`--callback "<command>"`), not with a last step of its method. After every run Pulse itself runs the command, which leaves the outcome in the tech leads' inbox:
 
 ```sh
-cd "<this repository's main checkout>" && sh "${CLAUDE_PLUGIN_ROOT}/scripts/tell.sh" <owner/name> <info, or question when the user must decide> --from "Pulse · <check name>" <<'EOF'
-<outcome: ok, found or error, and the findings in a few lines>
-EOF
+cd "<this repository's main checkout>" && printf '%s\n' "$PULSE_OUTCOME: $PULSE_SUMMARY" | sh "$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/plugins/cache/team/team/*/ | sort -V | tail -1)scripts/tell.sh" <owner/name> info --from "Pulse · $PULSE_CHECK"
 ```
 
-A check you set up for a piece of work (a batch of issues, a deploy, a pull request, new reports while the user is away) says in its text what work it serves and when it ends. Record it in your notes (`~/.local/share/team/notes/<owner>_<repo>/`), one line: the check's id and name, the work it serves, when it ends; so a restarted tech lead still removes it. As soon as that work is over, remove the check (`remove <check id>`, as the `pulse` skill says), take its line out of your notes, and tell the user in one line. A check the user asked to keep, with no end, stays.
+The `pulse` skill saves a callback only with the user's yes to its exact command: show the user the command, filled in, and save it after their yes. A callback that fails shows only in `pulse log`, with its exit status and output.
+
+A check you set up for a piece of work (a batch of issues, a deploy, a pull request, new reports while the user is away) gets its end with `--until "<when that work is over>"`, so it switches itself off. A check the user asked to keep, with no end, has none.
 
 ## Problems of the plugin itself
 

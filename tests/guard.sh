@@ -166,6 +166,15 @@ check deny tech-lead 'gh api repos/someone/else/issues/5/lock -f lock_reason=res
 check deny tech-lead 'gh api repos/someone/else/issues/%35/comments -f body=x'
 check allow tech-lead 'gh api repos/someone/else/issues/5/assignees -f "assignees[]=a"'
 check allow tech-lead 'gh api -X POST repos/someone/else/issues/comments/9 -f body=x'
+# Another repository's API only as the guard reads it plainly.
+check deny tech-lead "gh api -X PUT 'https://api.github.com:443/repos/someone/else/pulls/5/merge'"
+check deny tech-lead 'gh api -X PUT ./repos/someone/else/pulls/5/merge'
+check deny tech-lead "gh api -X PUT 'repos/test/repo/../../repos/someone/else/pulls/5/merge'"
+check deny tech-lead "gh api -X PUT 'repos/someone/else/issues/../pulls/5/merge'"
+check deny tech-lead "gh api 'repos/someone/else/issues/./5' -f state=closed"
+check allow tech-lead 'gh api https://api.github.com/repos/someone/else/issues/3'
+check allow tech-lead 'gh api /repos/someone/else/issues/3'
+check allow tech-lead 'gh api "repos/someone/else/issues?state=open&per_page=100"'
 # A repository reached by its id: whose it is the guard cannot tell.
 check deny tech-lead 'gh api -X PUT repositories/123/pulls/5/merge'
 check deny tech-lead 'gh api repositories/123/issues/5'
@@ -186,6 +195,10 @@ check deny tech-lead 'gh api graphql -f query="$Q"'
 check deny tech-lead 'gh api graphql -f query="query Q { viewer { login } } $M" -f operationName=M'
 check deny tech-lead 'gh api graphql -f query="$(cat m.graphql)"'
 check deny tech-lead 'gh api graphql --input body.json'
+check deny tech-lead "gh api 'graphql?x=1' -F query=@m.graphql"
+check deny tech-lead "gh api 'graphql#x' -F query=@m.graphql"
+check deny tech-lead "gh api /graphql/ -f query='mutation { x }'"
+check allow tech-lead "gh api 'graphql?x=1' -f query='{ viewer { login } }'"
 check deny tech-lead "curl -s -X POST https://api.github.com/graphql -d '{\"query\": \"mutation { x }\"}'"
 check allow tech-lead "sh $P/scripts/block.sh 5 3"
 # gh repo: a tech lead or a spike views or clones a repository, any one, and changes none, this one included.

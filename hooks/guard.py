@@ -56,10 +56,12 @@ BY_ID = re.compile(r"(?:^|/)repositories/\d+", re.IGNORECASE)
 POST_ELSEWHERE = re.compile(r"^/issues(/\d+/(comments|labels|assignees))?/?$|^/issues/comments/\d+/?$")
 PATCH_ELSEWHERE = re.compile(r"^/issues/comments/\d+/?$")
 # GitHub's GraphQL endpoint as gh api names it, and a mutation in what is sent there.
-GRAPHQL = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?graphql/?$", re.IGNORECASE)
+GRAPHQL = re.compile(r"(?:^|/)graphql(?:/|$|[?#])", re.IGNORECASE)
 MUTATION = re.compile(r"\bmutation\b")
 # A gh api endpoint: a path or a URL of the API, the repository, then the rest of the path.
-ENDPOINT = re.compile(r"^(?:(?:https?://)?api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)(/[^?#]*)?", re.IGNORECASE)
+ENDPOINT = re.compile(r"^(?:https://api\.github\.com)?/?repos/([\w.-]+/[\w.-]+)(/[^?#]*)?(?:[?#].*)?$", re.IGNORECASE)
+# A gh api field (key=value): data, not an endpoint.
+FIELD = re.compile(r"^[\w\[\]]+=")
 
 
 def refuse(reason):
@@ -189,14 +191,18 @@ def elsewhere_refused(head, words, assigns):
     if allowed and tuple(rest[:2]) in GH_ELSEWHERE:
         return None
     if allowed and rest[:1] == ["api"] and not pointed:
-        # Its endpoint decides; the repositories named in its fields are data. Every word that starts as an
-        # endpoint of another repository counts as one, so an unknown option cannot hide the real endpoint.
+        # Its endpoint decides; the repositories named in its fields (key=value) are data. Any other word that
+        # names another repository's API counts as an endpoint, so an unknown option cannot hide the real one,
+        # and has to be one the guard reads plainly: no port, no ./ before it, no . or .. in its path.
         method = api_method(rest)
         for w in rest[1:]:
-            m = ENDPOINT.match(w)
-            if not m or m.group(1).lower() == own:
+            if FIELD.match(w) or not any(r.lower() != own for r in API_REF.findall(w)):
                 continue
-            path = m.group(2) or ""
+            m = ENDPOINT.match(w)
+            path = (m.group(2) or "") if m else ""
+            if not m or re.search(r"(^|/)\.\.?(/|$)", path) or m.group(1).lower() == own:
+                return f"{w} reaches another repository's API in a form the guard does not read: write repos/<owner>/<name>/..."
+
             if method == "GET" and re.match(r"^/(issues|pulls)(/|$)", path):
                 continue
             if method == "POST" and POST_ELSEWHERE.match(path):
@@ -223,7 +229,7 @@ def unreadable_query(query):
 def graphql_refused(head, words):
     """Why a command sends GitHub's GraphQL API a mutation typed by hand, or a query the guard cannot read."""
     rest = gh_words(words[1:])[0] if head == "gh" else []
-    if rest[:1] == ["api"] and any(GRAPHQL.match(w) for w in rest[1:]):
+    if rest[:1] == ["api"] and any(GRAPHQL.search(w) for w in rest[1:] if not FIELD.match(w)):
         if any(MUTATION.search(w) for w in rest):
             return "a GraphQL mutation changes GitHub: here only queries are typed by hand"
         unread = [w for w in rest if w == "--input" or w.startswith("--input=")]

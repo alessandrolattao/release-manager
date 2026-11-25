@@ -174,6 +174,8 @@ for id in $(sessions_of dev) $(sessions_of qa); do
 		gh issue comment "$issue" --body-file - >/dev/null 2>&1 && {
 		touch "$asked.told"
 		state_set "$id" others "waits for tech lead: $(sed -n 4p "$asked")"
+		# The same wait as comment.sh's: the tech lead's answer ends it (hooks/sessions.tsx).
+		status_set "$id" '.waits_on = "tech lead"'
 	}
 done
 

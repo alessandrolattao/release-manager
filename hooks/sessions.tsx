@@ -127,6 +127,7 @@ type Status = {
   branch?: string
   resume_to?: { state: string; detail: string; since: number }
   asked_on?: string | null
+  waits_on?: string
 }
 
 // The detail a turn that starts gives; a turn that ends with it untouched changed nothing.
@@ -187,6 +188,7 @@ async function setState($: EngineInterface, folder: string, state: string, detai
   }
   status.state = state
   status.detail = detail
+  delete status.waits_on
   await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
 }
 
@@ -944,7 +946,8 @@ async function tick($: EngineInterface): Promise<void> {
 // appended to `wake` (one line each: time, from, what, link), the main checkout freed for it, and for a tech
 // lead the messages other repositories left in its inbox. Once the model has been stopped a few seconds; a
 // tech lead whose last message asked the user something in its chat is left alone: the user is talking to it.
-// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again.
+// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again. A line from
+// the one the session waits on ends that wait before the turn starts (answered).
 async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
   const idleSince = Number(await readText($, `${folder}/idle`))
   if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
@@ -968,10 +971,11 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
   if (lines.length > delivered) {
     const fresh = lines.slice(delivered).map(line => {
       const [, from = '', what = '', link = ''] = line.split('\t')
-      return `${from}: ${what}${link !== '' ? ` (${link})` : ''}`
+      return { from, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
     })
-    parts.push(`for you on GitHub: ${fresh.join('; ')}`)
+    parts.push(`for you on GitHub: ${fresh.map(line => line.text).join('; ')}`)
     await $.fs.write(`${folder}/wake-read`, `${lines.length}\n`)
+    await answered($, folder, role, fresh.map(line => line.from), now)
   }
   if (role === 'tech-lead' && status.repo) {
     const inbox = await inboxOf($, status.repo)
@@ -984,6 +988,28 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
   if (parts.length > 0) {
     void $.prompt.submit({ text: parts.join('; ') }).catch(err => $.ui.log(`team: ${String(err)}`))
   }
+}
+
+// A comment from the one the session waits on (`waits_on`, recorded by comment.sh) ends the wait: working,
+// answered by them, with nothing to put back, so markTurn does not restore the wait when the turn it wakes
+// ends. A comment from anyone else leaves the wait: worked for the turn, back to waiting after it. Each
+// `from` is a wake line's as dispatch.sh writes it, "<author> on #<issue>".
+async function answered($: EngineInterface, folder: string, role: string, froms: string[], now: number): Promise<void> {
+  const status = await readStatus($, folder)
+  const isWaiting = status.state === 'others' || (status.state === 'you' && role === 'tech-lead' && (status.asked_on ?? null) !== null)
+  if (!isWaiting || status.waits_on === undefined) {
+    return
+  }
+  const author = froms.map(from => from.replace(/ on #\d+$/, '')).find(from => from === status.waits_on)
+  if (author === undefined) {
+    return
+  }
+  status.state = 'working'
+  status.detail = `answered by ${author}`
+  status.since = now
+  delete status.waits_on
+  delete status.resume_to
+  await $.fs.write(`${folder}/status`, `${JSON.stringify(status)}\n`)
 }
 
 // The user writing to a team session (at its prompt, through Remote Control or Slack): it works with them,

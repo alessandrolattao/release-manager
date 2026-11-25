@@ -1138,24 +1138,49 @@ date +%s >"$S/$NEW/alive"
 sh "$SC/dispatcher.sh" start >/dev/null 2>&1
 old_pid=$(cat "$R/dispatcher.pid")
 : >"$T/claude.log"
-# Two live sessions, the first listed busy (its transcript touched again and again, until the second has
-# restarted) and the second quiet (its transcript untouched for an hour); the tech lead, listed before them,
-# started the update.
+# Two live sessions with an `idle` file: the first listed in a turn (its `idle` empty, its transcript
+# untouched for an hour) until the second has restarted, then between turns; the second between turns for a
+# minute, its transcript touched again and again as while it waits, until it restarts. The tech lead, listed
+# before them, started the update and has no `idle` file, as with a version that did not write it: its
+# transcript touched until the first one has restarted. The toucher notes when the sessions' step starts (the
+# dispatchers' line, the last before it) and when each session restarts.
 mkdir -p "$T/config/projects/repo"
-touch -d '1 hour ago' "$T/config/projects/repo/$NEW.jsonl"
+touch -d '1 hour ago' "$T/config/projects/repo/$DEV2.jsonl"
+: >"$S/$DEV2/idle"
+echo $(($(date +%s) - 60)) >"$S/$NEW/idle"
+rm -f "$S/$TL1/idle"
+: >"$T/update.out"
 (
 	n=0
-	while ! grep -q -- "--resume $NEW " "$T/claude.log" 2>/dev/null && [ "$n" -lt 150 ]; do
-		touch "$T/config/projects/repo/$DEV2.jsonl"
+	until grep -q -- "--resume $TL1 " "$T/claude.log" || [ "$n" -ge 400 ]; do
+		[ -s "$T/step3-at" ] || ! grep -q '^dispatcher test_repo: ' "$T/update.out" || date +%s >"$T/step3-at"
+		if [ ! -s "$T/new-at" ]; then
+			touch "$T/config/projects/repo/$NEW.jsonl"
+			if grep -q -- "--resume $NEW " "$T/claude.log"; then
+				date +%s >"$T/new-at"
+				date +%s >"$S/$DEV2/idle"
+			fi
+		fi
+		if [ ! -s "$T/dev2-at" ]; then
+			touch "$T/config/projects/repo/$TL1.jsonl"
+			! grep -q -- "--resume $DEV2 " "$T/claude.log" || date +%s >"$T/dev2-at"
+		fi
 		sleep 0.2
 		n=$((n + 1))
 	done
+	! grep -q -- "--resume $TL1 " "$T/claude.log" || date +%s >"$T/tl1-at"
 ) &
 busy=$!
-CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=2 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
-kill "$busy" 2>/dev/null
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_TRANSCRIPT_QUIET=2 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+wait "$busy"
 busy=""
-ok "a quiet session restarts without waiting on a busy one listed before it, the busy one once it goes quiet" "$(grep -o -e "--resume $DEV2 " -e "--resume $NEW " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$NEW $DEV2 "
+first=no
+[ -s "$T/new-at" ] && [ -s "$T/step3-at" ] && [ $(($(cat "$T/new-at") - $(cat "$T/step3-at"))) -lt 10 ] && first=yes
+ok "a session between turns restarts in the first pass, though its transcript keeps changing" "$first" "yes"
+ok "one in a turn waits for the next pass, though its transcript is an hour old" "$(grep -o -e "--resume $DEV2 " -e "--resume $NEW " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$NEW $DEV2 "
+fallback=no
+[ -s "$T/tl1-at" ] && [ -s "$T/dev2-at" ] && [ $(($(cat "$T/tl1-at") - $(cat "$T/dev2-at"))) -ge 5 ] && [ $(($(cat "$T/tl1-at") - $(cat "$T/dev2-at"))) -lt 20 ] && fallback=yes
+ok "one with no idle file waits for its transcript to stay unchanged, then restarts the pass after" "$fallback" "yes"
 ok "the one that started the update restarts last" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$NEW $DEV2 $TL1 "
 ok "each restart has its line in the log, in the order they happen" "$(grep ': backgrounded' "$T/update.out" | cut -d: -f1 | tr '\n' '|')" "repo · dev #44 · in review · Title 44|repo · dev #43 · in progress · Title 43|repo · tech lead|"
 ok "nobody is left busy" "$(grep -c 'still busy' "$T/update.out")" "0"
@@ -1226,7 +1251,7 @@ rm "$CACHE/9.9.9"
 echo "$T/config 0.0.1" >"$T/publish"
 date +%s >"$S/$TL1/alive"
 : >"$T/claude.log"
-UPDATE_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
+UPDATE_QUIET=0 UPDATE_TRANSCRIPT_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
 ok "the newest version installed hands over to nobody" "$(grep -c '^continuing with team' "$T/update.out") $(grep -c -- "--bg --resume $TL1 The team plugin was updated to 0.0.1 " "$T/claude.log")" "0 1"
 ok "and restarts with its own prompt" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -c "$sentence")" "0"
 # 9.9.9 published too: the older version updates the plugin, then 9.9.9 goes on.
@@ -1234,7 +1259,7 @@ echo "$T/config 9.9.9" >>"$T/publish"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 : >"$T/claude.log"
-CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_TRANSCRIPT_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
 ok "the log notes the hand-over" "$(grep -c '^continuing with team 9.9.9$' "$T/update.out")" "1"
 ok "the restarted sessions get the newer prompt" "$(grep -- "--bg --resume $TL1 The team plugin was updated to 9.9.9 " "$T/claude.log" | grep -c "$sentence") $(grep -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 " "$T/claude.log" | grep -c "$sentence")" "1 1"
 ok "the plugin is updated once on each account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"

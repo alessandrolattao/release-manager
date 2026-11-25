@@ -5,9 +5,12 @@
 #      unchanged for 90 seconds, so no turn is cut), resuming it with no flags (a flag would start a copy)
 #      and a message with the new version and where its scripts are;
 #   3. restarts on the new version every dispatcher that was running here (a stopped one stays stopped).
+# After step 1 the newest installed version's own update.sh does the rest, so the restart prompt and every
+# later step are the new version's, whatever version started the update.
 # A process of its own, so it goes on after the session that started it is restarted too.
-#   update.sh [start]   starts it in the background; its log: <state>/team/update.log
-#   update.sh run       the update itself
+#   update.sh [start]                starts it in the background; its log: <state>/team/update.log
+#   update.sh run                    the update itself
+#   update.sh run --plugin-updated   steps 2 and 3 only: an older version's update.sh hands over to this one
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -49,14 +52,26 @@ gone() {
 	[ "$roster" = 0 ] && ! running "$1" "$2"
 }
 
-echo "$(date '+%F %T') update starts"
-
-# 1. The plugin, on every account the team uses here.
-accounts=$( { cat "$sessions_dir"/*/config 2>/dev/null; echo; } | sort -u)
-printf '%s\n' "$accounts" | while IFS= read -r cfg; do
-	as "$cfg" claude plugin marketplace update team </dev/null >/dev/null 2>&1
-	echo "account $(home_of "$cfg"): $(as "$cfg" claude plugin update team@team </dev/null 2>&1 | tail -1)"
-done
+# 1. The plugin, on every account the team uses here; skipped when an older version handed over, whose
+# log already says the update started.
+if [ "${2:-}" != --plugin-updated ]; then
+	echo "$(date '+%F %T') update starts"
+	accounts=$( { cat "$sessions_dir"/*/config 2>/dev/null; echo; } | sort -u)
+	printf '%s\n' "$accounts" | while IFS= read -r cfg; do
+		as "$cfg" claude plugin marketplace update team </dev/null >/dev/null 2>&1
+		echo "account $(home_of "$cfg"): $(as "$cfg" claude plugin update team@team </dev/null 2>&1 | tail -1)"
+	done
+	# The rest is the newest installed version's, on any of those accounts, unless this is that version.
+	latest=$(printf '%s\n' "$accounts" | while IFS= read -r cfg; do
+		p=$(newest "$cfg")
+		[ -z "$p" ] || printf '%s\t%s\n' "$(basename "$p")" "$p"
+	done | sort -V | tail -1 | cut -f2)
+	mine=$(jq -r '.version // ""' "$here/../.claude-plugin/plugin.json" 2>/dev/null || true)
+	if [ -f "$latest/scripts/update.sh" ] && [ "$(basename "$latest")" != "$mine" ]; then
+		echo "continuing with team $(basename "$latest")"
+		exec env CLAUDE_CODE_SESSION_ID="$caller" sh "$latest/scripts/update.sh" run --plugin-updated
+	fi
+fi
 
 # 2. The live sessions, the one that started the update last.
 list=$(for folder in "$sessions_dir"/*/; do

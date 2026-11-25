@@ -717,6 +717,35 @@ ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
 sh "$SC/dispatcher.sh" stop >/dev/null
 
+echo "== update.sh: started by an older version, the newest one restarts the sessions"
+# An older version installed beside 9.9.9, whose restart prompt lacks a sentence of the newer one's.
+CACHE="$T/config/plugins/cache/team/team"
+OLD="$CACHE/0.0.1"
+sentence='Commands you started in the background before the restart'
+mkdir -p "$OLD/.claude-plugin"
+cp -R "$W/scripts" "$W/skills" "$W/briefs" "$OLD/"
+echo '{"name": "team", "version": "0.0.1"}' >"$OLD/.claude-plugin/plugin.json"
+sed "s/ $sentence.*do not start them again\.//" "$W/scripts/update.sh" >"$OLD/scripts/update.sh"
+ok "the older version's prompt lacks the sentence" "$(grep -c "$sentence" "$OLD/scripts/update.sh")" "0"
+# The older version alone installed: it is the newest, it goes on by itself.
+mv "$CACHE/9.9.9" "$T/9.9.9"
+date +%s >"$S/$TL1/alive"
+: >"$T/claude.log"
+UPDATE_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
+ok "the newest version installed hands over to nobody" "$(grep -c '^continuing with team' "$T/update.out") $(grep -c -- "--bg --resume $TL1 The team plugin was updated to 0.0.1 " "$T/claude.log")" "0 1"
+ok "and restarts with its own prompt" "$(grep -- "--bg --resume $TL1 " "$T/claude.log" | grep -c "$sentence")" "0"
+# 9.9.9 installed too: the older version updates the plugin, then 9.9.9 goes on.
+mv "$T/9.9.9" "$CACHE/9.9.9"
+date +%s >"$S/$TL1/alive"
+date +%s >"$S/$DEV2/alive"
+: >"$T/claude.log"
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_GONE=1 sh "$OLD/scripts/update.sh" run >"$T/update.out" 2>&1
+ok "the log notes the hand-over" "$(grep -c '^continuing with team 9.9.9$' "$T/update.out")" "1"
+ok "the restarted sessions get the newer prompt" "$(grep -- "--bg --resume $TL1 The team plugin was updated to 9.9.9 " "$T/claude.log" | grep -c "$sentence") $(grep -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 " "$T/claude.log" | grep -c "$sentence")" "1 1"
+ok "the plugin is updated once on each account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"
+ok "the one that started the update restarts last" "$(grep -- '--bg --resume' "$T/claude.log" | tail -1 | cut -d' ' -f3)" "$TL1"
+ok "and the log says once that the update starts, and that it is done" "$(grep -c 'update starts$' "$T/update.out") $(tail -1 "$T/update.out" | cut -c21-)" "1 update done"
+
 echo
 [ ! -f "$G/unhandled" ] || { echo "unhandled gh calls:"; sort -u "$G/unhandled"; }
 echo "passed=$pass failed=$fail"

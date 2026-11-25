@@ -165,15 +165,16 @@ def printed(words):
 
 def command_words(words):
     """A command's words from the command itself on, past assignments and wrappers with their options (sudo -u
-    me, sudo -nu me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1), read as getopt reads them; and whether
-    env -S gave them (its string, split into words, is the command)."""
-    words, wrapper, split = list(words), None, False
+    me, sudo -nu me, timeout -s KILL 5, xargs -I {}, nice -n 5, env X=1), read as getopt reads them; whether env
+    -S gave them (its string, split into words, is the command); and the wrappers that came before it."""
+    words, wrapper, split, wrappers = list(words), None, False, set()
     while words:
         word, value = words[0], None
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
             words = words[1:]
         elif os.path.basename(word) in WRAPPERS:
             wrapper, words = os.path.basename(word), words[1:]
+            wrappers.add(wrapper)
         elif wrapper and word.startswith("--"):
             longs, values = WRAPPERS[wrapper]
             name, eq, given = word.partition("=")
@@ -196,7 +197,7 @@ def command_words(words):
             words = words[1:]
         else:
             break
-    return words, split
+    return words, split, wrappers
 
 
 def split_words(text):
@@ -207,40 +208,81 @@ def split_words(text):
         return text.split()
 
 
-def code_of(words, piped_from=None):
-    """The text a command runs as code: a shell's -c string (bash -lc too) or <<< string; what echo, printf or
-    cat <<< prints into a shell, or into source or ., through a pipe or a <(...); eval's words; ssh's remote
-    command; the command env -S's string makes. The command is the word command_words finds: a later word that
-    only names one is an argument (sudo git commit -m eval, grep -c sh, jq .). None when the command runs no
-    code."""
-    command, split = command_words(words)
+def code_of(words, stdin=None):
+    """The text a command runs as code: a shell's -c string (bash -lc too, -- skipped); what a shell reads from
+    its stdin (stdin, what is printed into its pipe, or its <<< string), also as the -c string xargs gives it;
+    what echo, printf or cat <<< prints into a <(...) for a shell, source or .; eval's words; ssh's remote
+    command; the command env -S's string makes; and with any of these, what its substitutions print. The
+    command is the word command_words finds: a later word that only names one is an argument (sudo git commit -m
+    eval, grep -c sh, jq .). None when the command runs no code."""
+    command, split, wrappers = command_words(words)
     if not command:
         return None
     head, rest = os.path.basename(command[0]), command[1:]
     if head == "eval":
-        return " ".join(rest)
-    if head == "ssh":
-        return remote_command(rest)
-    if head not in CODE_RUNNERS:
-        return shlex.join(command) if split else None
-    k = next((k for k, w in enumerate(rest) if w in ("<<<", "<(") or (head in SHELLS and SHELL_COMMAND.fullmatch(w))), None)
-    if k is None:
-        return printed(piped_from) if piped_from else None
-    if rest[k] == "<(":
-        return printed(rest[k + 1:])
-    return rest[k + 1] if k + 1 < len(rest) else ""
+        code = " ".join(rest)
+    elif head == "ssh":
+        code = remote_command(rest)
+    elif head not in CODE_RUNNERS:
+        code = shlex.join(command) if split else None
+    else:
+        fed = rest[rest.index("<<<") + 1] if "<<<" in rest[:-1] else stdin
+        c = next((k for k, w in enumerate(rest) if head in SHELLS and SHELL_COMMAND.fullmatch(w)), None)
+        if c is not None:
+            string = given_string(rest[c + 1:])
+            code = string if string is not None else (fed if "xargs" in wrappers else "")
+        elif "<(" in rest:
+            code = printed(rest[rest.index("<(") + 1:])
+        else:
+            code = fed
+    return with_printed(code)
+
+
+def given_string(args):
+    """The string after a shell's -c, past a --; None when none comes (xargs gives it, or a redirection
+    follows)."""
+    args = args[1:] if args[:1] == ["--"] else args
+    return args[0] if args and not re.fullmatch(r"\d*[<>].*", args[0]) else None
+
+
+def with_printed(code):
+    """Code, and what the echo, printf or cat <<< of its substitutions print, which becomes code too
+    (eval "$(echo '...')", bash -c "$(printf '...')")."""
+    if code is None:
+        return None
+    return "\n".join([code] + [text for inner in scan(code)[1] for words in segments_of(inner)
+                                if (text := printed(words)) is not None])
+
+
+def piped_text(commands, n):
+    """What the echo, printf or cat <<< of the pipeline before the command at n print into its pipe: past
+    filters (tee, grep ...) and into a { group; } or a ( subshell ) of it; None when nothing known is piped in."""
+    if not piped(commands[n][1]):
+        return None
+    texts, depth, i = [], commands[n][1].count(")"), n - 1
+    while i >= 0:
+        words, separator = commands[i]
+        depth += words == ["}"]
+        text = printed([w for w in words if w != "{"]) if words != ["}"] else None
+        texts += [text] if text is not None else []
+        depth += separator.count(")") - separator.count("(") - (words[:1] == ["{"])
+        if depth <= 0 and not piped(separator):
+            break
+        i -= 1
+    return "\n".join(reversed(texts)) if texts else None
 
 
 def shell_inside(words):
-    """The -c string of a shell among a command's arguments (find -exec sh -c '...', parallel bash -lc '...');
-    None when there is none."""
+    """The -c string of a shell among a command's arguments (find -exec sh -c '...', parallel bash -lc '...'),
+    with what its substitutions print; None when there is none."""
     for i, word in enumerate(words):
         if os.path.basename(word) in SHELLS:
             for k in range(i + 1, len(words)):
                 if not words[k].startswith("-"):
                     break
                 if SHELL_COMMAND.fullmatch(words[k]):
-                    return words[k + 1] if k + 1 < len(words) else ""
+                    string = given_string(words[k + 1:])
+                    return with_printed(string if string is not None else "")
     return None
 
 
@@ -277,11 +319,10 @@ def api_calls(text):
     other text, or in a comment; a string that becomes code is read as code."""
     _, inners, plain, strings = scan(text)
     found = [repo for inner in inners for repo in api_calls(inner)]
-    previous = None
-    for words, separator in commands_of(text):
-        for inner in {code_of(words, previous if piped(separator) else None), shell_inside(words)} - {None}:
+    commands = commands_of(text)
+    for n, (words, _) in enumerate(commands):
+        for inner in {code_of(words, piped_text(commands, n)), shell_inside(words)} - {None}:
             found += api_calls(inner)
-        previous = words
     return found + [m.group(1) for m in REPOS.finditer(plain) if is_call(plain, m.start(), strings)]
 
 
@@ -335,10 +376,11 @@ def expanded(word):
 
 def scan(text):
     """Reads a shell text as the shell does, near enough. Gives the text, as long as it was, with its comments
-    blanked; the command texts of its substitutions; the text with its substitutions blanked too, as $; and
-    where the text of each quoted string starts and ends. A substitution is $(...) or `...`, bare or double-quoted; inside
-    single quotes or escaped (an odd number of backslashes) it is text. A comment starts where a word does (not
-    in a#b, nor right after a substitution: $(x)#b) and ends with its line."""
+    blanked and its unquoted new lines turned into ; (they end a command); the command texts of its
+    substitutions; the text with its substitutions blanked too, as $; and where the text of each quoted string
+    starts and ends. A substitution is $(...) or `...`, bare or double-quoted; inside single quotes or escaped
+    (an odd number of backslashes) it is text. A comment starts where a word does (not in a#b, nor right after a
+    substitution: $(x)#b) and ends with its line."""
     out, plain, inners, strings = list(text), list(text), [], []
     quote, opened, i, after = None, 0, 0, -1
     while i < len(text):
@@ -351,6 +393,9 @@ def scan(text):
             if quote:
                 strings.append((opened, i))
             quote, opened = (None, 0) if quote else (c, i + 1)
+            i += 1
+        elif c == "\n" and quote is None:
+            out[i] = ";"
             i += 1
         elif c == "#" and quote is None and i != after and (i == 0 or text[i - 1] in " \t\n;&|()<>"):
             end = text.find("\n", i)
@@ -445,7 +490,7 @@ for match in LINK.finditer(script):
         refuse(f"it links {match.group(1)}")
 
 where = cwd
-for n, (words, separator) in enumerate(commands):
+for n, (words, _) in enumerate(commands):
     words = bare(words)
     if not words:
         continue
@@ -462,8 +507,7 @@ for n, (words, separator) in enumerate(commands):
     # A string that becomes code (sh -c '...', echo '...' | sh, source <(...), eval '...', ssh host '...', find
     # -exec sh -c '...') is checked as a command of its own; the command that runs it is still judged by its own
     # rules below (in another repository, bash -c 'ls' > file writes a file).
-    for code in {code_of(commands[n][0], commands[n - 1][0] if n and piped(separator) else None),
-                 shell_inside(commands[n][0])} - {None}:
+    for code in {code_of(commands[n][0], piped_text(commands, n)), shell_inside(commands[n][0])} - {None}:
         nested = subprocess.run([sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]],
                                 input=f"cd {shlex.quote(where)}\n{code}", capture_output=True, text=True)
         if nested.returncode != 0:

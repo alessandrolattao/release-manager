@@ -848,6 +848,7 @@ ok "a started issue is not workable" "$(jq -r '.queue.ready' "$R/board.json")" "
 echo "== main-ci.sh: the merge's CI and deploy"
 cd "$ROOT" || exit 1
 # within <seconds> <command...>: its output once it ends, or TIMEOUT, with it stopped, when it still runs then.
+# Its exit code, or TIMEOUT, goes in $T/within.code.
 within() {
 	secs=$1
 	shift
@@ -859,10 +860,12 @@ within() {
 		pkill -P "$wpid" 2>/dev/null
 		kill "$wpid" 2>/dev/null
 		wait "$wpid" 2>/dev/null
+		echo TIMEOUT >"$T/within.code"
 		echo TIMEOUT
 		return
 	fi
 	wait "$wpid" 2>/dev/null
+	echo $? >"$T/within.code"
 	cat "$T/within.out"
 }
 echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
@@ -870,16 +873,48 @@ printf 'name: ci\non:\n  push:\n    branches: [main]\n  pull_request:\n' >"$G/wo
 echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"},{"status":"completed","conclusion":"success","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "green: the change is deployed" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main deadbee: t"
 ok "and --wait ends on it" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main deadbee: t"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
 echo '[{"status":"completed","conclusion":"failure","workflowName":"deploy","url":"https://x/run/9"},{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
 out=$(sh "$SC/main-ci.sh" 50)
+code=$?
 ok "red: the failed runs, and whose it is to say" "$(printf '%s\n' "$out" | grep -c -e '^RED main deadbee' -e 'deploy: failure https://x/run/9' -e 'tell the tech lead')" "4"
+ok "with exit 1" "$code" "1"
 ok "and no bug issue opened" "$(ls "$G/comments" | grep -c 'CI')" "0"
 echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2"}]' >"$G/runs"
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
+ok "a run still going at the limit of --wait: PENDING, and to run it again" "$(within 10 env MAIN_CI_WAIT=0 sh "$SC/main-ci.sh" 50 --wait)" "PENDING main deadbee: 1 run(s) still going after 0 minutes: run main-ci.sh 50 --wait again"
+ok "with exit 3" "$(cat "$T/within.code")" "3"
+# A TERM while it waits between two looks: it says so at once, not at the end of its pause.
+sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+n=0
+spid=""
+while [ -z "$spid" ] && kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 100 ]; do
+	spid=$(pgrep -P "$mpid" -x sleep 2>/dev/null | head -1)
+	[ -n "$spid" ] || sleep 0.1
+	n=$((n + 1))
+done
+kill -TERM "$mpid" 2>/dev/null
+n=0
+while kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+if kill -0 "$mpid" 2>/dev/null; then
+	pkill -P "$mpid" 2>/dev/null
+	kill -KILL "$mpid" 2>/dev/null
+	wait "$mpid" 2>/dev/null
+	code="still running"
+else
+	wait "$mpid" 2>/dev/null
+	code=$?
+fi
+ok "a TERM during the wait: INTERRUPTED, and to run it again" "$(cat "$T/main-ci.out")" "INTERRUPTED main deadbee: run main-ci.sh 50 --wait again"
+ok "with exit 4" "$code" "4"
+sleep 0.2
+ok "and its pause stopped with it" "$([ -n "$spid" ] && ! kill -0 "$spid" 2>/dev/null && echo stopped)" "stopped"
 echo '[]' >"$G/runs"
 ok "a workflow on push to the default branch and no run yet: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
 rm -f "$G/workflows"
 ok "no workflow: NO CI at once, without waiting" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow runs on main"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
 ok "and without --wait too" "$(sh "$SC/main-ci.sh" 50)" "NO CI main deadbee: no workflow runs on main"
 echo '[{"id":2,"name":"pr","path":".github/workflows/pr.yml","state":"active"},{"id":3,"name":"Dependabot Updates","path":"dynamic/dependabot/dependabot-updates","state":"active"},{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"disabled_manually"}]' >"$G/workflows"
 printf 'name: pr\non: [pull_request, workflow_dispatch]\n' >"$G/workflow-2.yml"

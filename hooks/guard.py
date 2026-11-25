@@ -355,9 +355,13 @@ def is_call(text, at, strings):
     and ends."""
     string = next((start for start, end in strings if start <= at < end), None)
     inside = text[string:at] if string is not None else ""
-    if re.search(r"\s", inside):
+    # Spaces at the start of the string are no other text (' repos/...' still starts with the endpoint).
+    if re.search(r"\s", inside.lstrip()):
         return False
-    word = word_before(text, string - 1 if string is not None else at, strings) + inside
+    if inside != inside.lstrip():
+        word = inside.lstrip()
+    else:
+        word = word_before(text, string - 1 if string is not None else at, strings) + inside
     for made in expanded(word):
         made = folded(made)
         if ENDPOINT_PREFIX.fullmatch(made) or VARIABLE_BEFORE.search(made) or (not inside and "/" not in made):
@@ -448,10 +452,11 @@ def scan(text):
 
 def folded(word):
     """A word with its /./ and dir/../ folded, as a URL client folds them (api.github.com/x/../repos/...); a
-    leading ./ or ../ stays, a local path's own."""
+    leading ./ or ../ stays, a local path's own, and so does a .. after ~ or a variable, whose folder is not
+    known here (~/../repos/... is a local path)."""
     while True:
         fold = re.sub(r"(?<=/)\./", "", word)
-        fold = re.sub(r"(?:(?<=/)|^)(?!\.\.?/)[^/]+/\.\./", "", fold)
+        fold = re.sub(r"(?:(?<=/)|^)(?!\.\.?/)(?![~$])[^/]+/\.\./", "", fold)
         if fold == word:
             return word
         word = fold

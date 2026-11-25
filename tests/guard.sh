@@ -338,6 +338,12 @@ check deny tech-lead 'curl -s https://api.github.com/x/../repos/someone/else/iss
 check deny tech-lead 'curl -s https://api.github.com/./repos/someone/else/issues'
 check deny tech-lead 'curl -s "$API/v3/../repos/someone/else/issues"'
 check allow tech-lead 'tail -1 ~/.local/state/team/../team/repos/someone_else/dispatcher.log'
+check allow tech-lead 'cat ~/../repos/a/b'
+check allow tech-lead 'cat $HOME/../repos/a/b'
+# Only spaces before repos/ in a quoted string are no other text: it still starts with the endpoint.
+check deny tech-lead "echo ' repos/someone/else/issues' | xargs gh api"
+check deny tech-lead "R=' repos/someone/else/issues'; gh api \$R"
+check allow tech-lead 'gh issue comment 3 --body " see repos/a/b"'
 # The word before repos/ is judged as the shell makes it: its backslashes go, its braces expand.
 check deny tech-lead 'gh api /\repos/someone/else/issues'
 check deny tech-lead 'gh api \/repos/someone/else/issues'

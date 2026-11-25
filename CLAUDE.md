@@ -21,7 +21,7 @@ Run these from the checkout's root, and report their results in the pull request
 
 ## Versioning
 
-Every pull request bumps `version` in `.claude-plugin/plugin.json` to the next patch version over the default branch's, and is titled `<version>: <what it changes>`. When another pull request took that number first, rebase and take the next one.
+Every pull request bumps `version` in `.claude-plugin/plugin.json` to the next patch version over the default branch's, and is titled `<version>: <what it changes>`. When the default branch moved, merge it into the branch (as `merge.sh` says: no rebase, no force push) and take the next free number; check the default branch's version again right before `merge.sh`.
 
 ## The repository is public
 

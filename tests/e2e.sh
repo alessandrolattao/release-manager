@@ -327,6 +327,7 @@ ok "and so does the board's summary" "$(jq -r '.checkout.holder' "$R/board.json"
 cd "$ROOT/.claude/worktrees/43-other" || exit 1
 CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null; code=$?
 ok "a second agent queues as it does with take" "$code $(st "$DEV2" state)" "3 others"
+ok "its row names the holder with as-is" "$(st "$DEV2" detail)" "queued for the checkout (held by dev #42 as-is)"
 woken=$(grep -c 'checkout is free' "$S/$DEV2/wake")
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/checkout.sh" give >/dev/null; code=$?

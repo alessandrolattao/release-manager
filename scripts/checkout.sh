@@ -60,6 +60,12 @@ usable() {
 	[ $(($(date +%s) - t)) -le 600 ]
 }
 
+# held_by <session-id>: the holder as comments name it, with as-is after its name when it took the checkout
+# as it is (the lock's fourth line).
+held_by() {
+	printf '%s%s\n' "$(address_of "$1")" "$([ "$(sed -n 4p "$lock" 2>/dev/null)" != as-is ] || echo " as-is")"
+}
+
 # wake_next: drops from the queue who is gone or done, and wakes the first one left.
 wake_next() {
 	: >"$queue.tmp"
@@ -85,9 +91,7 @@ fi
 case "$action" in
 who)
 	if [ -n "$holder" ]; then
-		how=""
-		[ "$(sed -n 4p "$lock")" != as-is ] || how=" as-is"
-		echo "held by $(address_of "$holder")$how since $(date -d "@$(sed -n 2p "$lock")" +%H:%M 2>/dev/null || sed -n 2p "$lock"), on $(sed -n 3p "$lock")"
+		echo "held by $(held_by "$holder") since $(date -d "@$(sed -n 2p "$lock")" +%H:%M 2>/dev/null || sed -n 2p "$lock"), on $(sed -n 3p "$lock")"
 	else
 		echo "free, on $(git -C "$root" rev-parse --abbrev-ref HEAD)"
 	fi
@@ -111,8 +115,8 @@ take)
 	}
 	if [ -n "$holder" ] && [ "$holder" != "$me" ]; then
 		grep -qx "$me" "$queue" || echo "$me" >>"$queue"
-		state_set "$me" others "queued for the checkout (held by $(address_of "$holder"))"
-		echo "QUEUED: $(address_of "$holder") holds the checkout; you are in the queue and the plugin wakes you when it is yours"
+		state_set "$me" others "queued for the checkout (held by $(held_by "$holder"))"
+		echo "QUEUED: $(held_by "$holder") holds the checkout; you are in the queue and the plugin wakes you when it is yours"
 		exit 3
 	fi
 	if [ -z "$as_is" ]; then

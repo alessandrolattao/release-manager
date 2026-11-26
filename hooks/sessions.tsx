@@ -21,6 +21,8 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
 //     (tell.sh). A session outside the team runs nothing.
+//   - a session whose turn ended on the usage limit is alive and waits: it wakes it once the limit has reset,
+//     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
@@ -48,6 +50,8 @@ const UPDATE_START_MS = 30000
 const STUCK_AFTER_S = 20 * 60
 // A wake waits until the model has been stopped for this long.
 const WAKE_QUIET_S = 5
+// What a session stopped on the usage limit is woken with, once the limit has reset.
+const LIMIT_WAKE = 'The usage limit has reset: go on where you stopped.'
 // A tech lead the user comes back to after this long hears that its inbox holds messages.
 const INBOX_PAUSE_S = 15 * 60
 const EXPECT_MS = 15000
@@ -227,6 +231,10 @@ async function markTurn($: EngineInterface, isRunning: boolean): Promise<void> {
     await $.fs.write(`${folder}/idle`, isRunning ? '' : `${now}\n`)
     const status = await readStatus($, folder)
     if (isRunning) {
+      // A turn that starts ends a stop on the usage limit: a turn that stops on it again records a new one.
+      if ((await readText($, `${folder}/limited`)) !== '') {
+        await $.fs.write(`${folder}/limited`, '')
+      }
       if (status.state === 'you' || status.state === 'others') {
         // Woken while it waits: working for this turn, and back to the wait when the turn ends with no
         // script having changed the state (an answer that is not there yet, a look at the issue).
@@ -958,7 +966,10 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (!isBusy) {
-      await wakeUp($, folder, role, status, now)
+      // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
+      if (!(await limitWake($, folder, now))) {
+        await wakeUp($, folder, role, status, now)
+      }
       await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
       await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
     }
@@ -1165,6 +1176,60 @@ async function heardUser($: EngineInterface): Promise<string | undefined> {
   return waiting === 0 ? undefined : `📨 ${waiting} message(s) from other repositories wait in your inbox (inbox.sh). Mention it in one line before answering, do not read them unless the user wants to; answer what the user asked.`
 }
 
+// A turn of the main loop that ended on the usage limit (Claude Code's StopFailure with `rate_limit`): the
+// session is alive and waits for the limit to reset. `limited`, in its folder, holds when it stopped, until the
+// wake or the next turn that starts.
+async function stoppedOnLimit($: EngineInterface): Promise<void> {
+  const folder = await folderOf($)
+  if ((await readText($, `${folder}/role`)) === '') {
+    return
+  }
+  await $.fs.write(`${folder}/limited`, `${Math.floor((await $.clock.now()) / 1000)}\n`)
+}
+
+// "2026-11-26T19:09:59.873694+01:00", as clessidra writes a time, in seconds: its fraction cut to milliseconds,
+// as every JavaScript engine reads it. NaN when it is no time.
+function secondsOf(time: string): number {
+  return Math.floor(Date.parse(time.replace(/(\.\d{3})\d+/, '$1')) / 1000)
+}
+
+// When the usage limit a session stopped on (at `stop`) resets: the plan usage the dispatcher reads for the
+// board (scripts/dispatch.sh, `clessidra --json`, one file per Claude Code config folder), the reset of the
+// window at its limit, the later one when both are. Null when none is known yet: no file, no window at its
+// limit, or a reset not after the stop (a file read before the window started).
+async function resetOf($: EngineInterface, stop: number): Promise<number | null> {
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+  let windows: { outcome?: string; resets_at?: string | null }[] = []
+  try {
+    const usage = JSON.parse(await $.fs.read(`${await rootOf($)}/usage/${config.replace(/\//g, '_')}.json`)) as { windows?: typeof windows }
+    windows = usage.windows ?? []
+  } catch {
+    return null
+  }
+  const resets = windows
+    .filter(w => w.outcome === 'limit_reached')
+    .map(w => secondsOf(w.resets_at ?? ''))
+    .filter(time => Number.isFinite(time))
+  const reset = Math.max(...resets)
+  return resets.length > 0 && reset > stop ? reset : null
+}
+
+// Wakes a session stopped on the usage limit once the limit has reset, once per stop: true when it did.
+async function limitWake($: EngineInterface, folder: string, now: number): Promise<boolean> {
+  const stop = Number(await readText($, `${folder}/limited`))
+  const idleSince = Number(await readText($, `${folder}/idle`))
+  if (!(stop > 0) || !(idleSince > 0)) {
+    return false
+  }
+  const reset = await resetOf($, stop)
+  if (reset === null || now < reset) {
+    return false
+  }
+  await $.fs.write(`${folder}/limited`, '')
+  void $.prompt.submit({ text: LIMIT_WAKE }).catch(err => $.ui.log(`team: ${String(err)}`))
+  return true
+}
+
 async function failedTurn($: EngineInterface, reason: string): Promise<void> {
   const folder = await folderOf($)
   if ((await readText($, `${folder}/role`)) !== '') {
@@ -1262,6 +1327,18 @@ export const register: Register = on => {
       void tick($)
     }
     return result
+  })
+
+  // A turn of the main loop that ended on the usage limit, never a subagent's: woken when the limit resets.
+  on('classic.StopFailure', async ($, e, next) => {
+    if (e.error === 'rate_limit' && e.agent_id === undefined) {
+      try {
+        await stoppedOnLimit($)
+      } catch (err) {
+        $.ui.log(`team: usage limit: ${String(err)}`)
+      }
+    }
+    return next(e)
   })
 
   on('session.append', { door: 'command' }, ($, e, next) => {

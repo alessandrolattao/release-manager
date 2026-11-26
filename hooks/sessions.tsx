@@ -1195,23 +1195,25 @@ function secondsOf(time: string): number {
 
 // When the usage limit a session stopped on (at `stop`) resets: the plan usage the dispatcher reads for the
 // board (scripts/dispatch.sh, `clessidra --json`, one file per Claude Code config folder), the reset of the
-// window at its limit, the later one when both are. Null when none is known yet: no file, no window at its
-// limit, or a reset not after the stop (a file read before the window started).
+// window at its limit, the later one when both are. With no window at its limit (read before the stop, or
+// after a reset that came between the stop and the read), the reset of the most used window, the later one
+// when two are as used. Null when none is known yet: no file, or a reset not after the stop (a file read
+// before the window started).
 async function resetOf($: EngineInterface, stop: number): Promise<number | null> {
   const config = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
-  let windows: { outcome?: string; resets_at?: string | null }[] = []
+  let windows: { outcome?: string; used?: number; resets_at?: string | null }[] = []
   try {
     const usage = JSON.parse(await $.fs.read(`${await rootOf($)}/usage/${config.replace(/\//g, '_')}.json`)) as { windows?: typeof windows }
     windows = usage.windows ?? []
   } catch {
     return null
   }
-  const resets = windows
-    .filter(w => w.outcome === 'limit_reached')
-    .map(w => secondsOf(w.resets_at ?? ''))
-    .filter(time => Number.isFinite(time))
-  const reset = Math.max(...resets)
-  return resets.length > 0 && reset > stop ? reset : null
+  const known = windows
+    .map(w => ({ isAtLimit: w.outcome === 'limit_reached', used: Number(w.used) || 0, reset: secondsOf(w.resets_at ?? '') }))
+    .filter(w => Number.isFinite(w.reset))
+  const atLimit = known.filter(w => w.isAtLimit)
+  const [chosen] = atLimit.length > 0 ? [...atLimit].sort((a, b) => b.reset - a.reset) : [...known].sort((a, b) => b.used - a.used || b.reset - a.reset)
+  return chosen !== undefined && chosen.reset > stop ? chosen.reset : null
 }
 
 // Wakes a session stopped on the usage limit once the limit has reset, once per stop: true when it did.

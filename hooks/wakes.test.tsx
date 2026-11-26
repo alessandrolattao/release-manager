@@ -608,23 +608,32 @@ test("the effort of the session's requests to the model is kept for the summary"
 
 const LIMIT_WAKE = 'The usage limit has reset: go on where you stopped.'
 
-// The plan usage the dispatcher keeps for the board (clessidra --json) for the config folder /home/u/.claude: the
-// 5-hour window at its limit, resetting at `reset` as clessidra writes a time, the weekly one far from it.
-function usage(reset: string): Record<string, string> {
+type Window = { window: string; outcome: string; used: number; resets_at: string }
+
+// The plan usage the dispatcher keeps for the board (clessidra --json) for the config folder /home/u/.claude,
+// with these windows, each reset written as clessidra writes a time.
+function plan(windows: Window[]): Record<string, string> {
   return {
     '_home_u_.claude.json': JSON.stringify({
       account: '/home/u/.claude',
-      windows: [
-        { window: '5h', outcome: 'limit_reached', used: 100, resets_at: reset, runs_out_at: null, short_by_minutes: null },
-        { window: '7d', outcome: 'lasts', used: 40, resets_at: '2027-01-20T09:00:00.000000+01:00', runs_out_at: null, short_by_minutes: null },
-      ],
+      windows: windows.map(w => ({ ...w, runs_out_at: null, short_by_minutes: null })),
     }),
   }
 }
 
-// A minute after NOW (2027-01-15T08:00:00Z), and a minute before it.
+// Times around NOW (2027-01-15T08:00:00Z).
 const IN_A_MINUTE = '2027-01-15T09:01:00.873694+01:00'
+const IN_THREE_MINUTES = '2027-01-15T09:03:00.000000+01:00'
 const A_MINUTE_AGO = '2027-01-15T08:59:00.873694+01:00'
+const NEXT_WEEK = '2027-01-20T09:00:00.000000+01:00'
+
+// The 5-hour window at its limit, resetting at `reset`, the weekly one far from it.
+function usage(reset: string): Record<string, string> {
+  return plan([
+    { window: '5h', outcome: 'limit_reached', used: 100, resets_at: reset },
+    { window: '7d', outcome: 'lasts', used: 40, resets_at: NEXT_WEEK },
+  ])
+}
 
 // A turn of the main loop that ends on an API error, as Claude Code ends it: its StopFailure, then its end.
 async function failingTurn($: Engine, error: 'rate_limit' | 'server_error' = 'rate_limit', agentId?: string): Promise<void> {
@@ -723,6 +732,36 @@ test("no wake for a subagent's turn that ended on the usage limit", async ($, on
 test('no wake from a plan usage read before the window started', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   const { seen } = limited(on, 'dev', usage(A_MINUTE_AGO))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+})
+
+test('with no window at its limit yet, a session stopped on the usage limit is woken at the reset of the most used one', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', plan([
+    { window: '5h', outcome: 'runs_out', used: 60, resets_at: IN_A_MINUTE },
+    { window: '7d', outcome: 'runs_out', used: 97, resets_at: IN_THREE_MINUTES },
+  ]))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+  await clock.advance(70000)
+  expect(seen).toEqual([LIMIT_WAKE])
+  await clock.advance(60000)
+  expect(seen.length).toBe(1)
+})
+
+test('with no window at its limit, no wake when the most used one reset before the stop', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', plan([
+    { window: '5h', outcome: 'runs_out', used: 97, resets_at: A_MINUTE_AGO },
+    { window: '7d', outcome: 'lasts', used: 40, resets_at: IN_A_MINUTE },
+  ]))
 
   await $.session.start(START)
   await failingTurn($)

@@ -100,7 +100,7 @@ That is all an issue needs to exist. An issue already clear gets its technical d
 
 ### The technical analysis: at once for a clear issue, when the user asks for the others
 
-For an issue already clear, write down what was settled. For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only spike sessions you start with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh"`, as "Technical analysis and opinions: spikes" below says: never by a developer, never through an issue or a message. Every analysis or opinion you bring the user, from a spike or your own, reaches them as an artifact page, as that section says. What comes out:
+For an issue already clear, write down what was settled. For the issue the user names, go through the technical choices with them, one at a time, as the rules of the conversation say. The research behind an analysis or an opinion the user asks for (code to read, documentation, options to compare) is done by read-only spike sessions you start with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/spike.sh"`, as "Technical analysis and opinions: spikes" below says: never by a developer, never through an issue or a message. An analysis or an opinion you bring the user, from a spike or your own, is a few lines in the chat; it reaches them as an artifact page only when they ask for one, as that section says. What comes out:
 
 - **Technical decisions in a comment that starts with `## Technical decisions`**, posted with `note.sh`, one decision per line, everything the developer agent needs so that it never has to decide: what to build, where, with which data, what not to touch. The heading is fixed in every language: it is how the developers tell what is decided from what was only discussed. When a decision changes later, write a new `## Technical decisions` comment with the whole updated list and what it replaces: the latest one wins.
 - **Every architectural choice you take on your own goes in that comment too**, under a section `### Decided autonomously`, one line each, always in this format:
@@ -126,7 +126,9 @@ EOF
 
 Run it with the Bash tool in the background, one per question, several at once when they are independent: its end wakes you with the report. A spike runs on the account's default model, as developers and QA agents do; `spike.sh --fable "<topic>"` runs it on Fable, only when the user chose that for this analysis: never on your own, and never for developers or QA agents.
 
-**Every analysis or opinion reaches the user as an artifact page**, never only as chat text, whether it comes from a spike or from you. Build it from the spike's report (the spike writes its report file as always) and publish it with the Artifact tool, its quickstart first, as that tool says. The page, in the language of the conversation:
+**An analysis or an opinion reaches the user as an artifact page only when the user asks for one**, whether it comes from a spike or from you. Otherwise it is a few lines in the chat, pointing to the spike's report file when there is one (the spike writes its report file as always). Never publish a page on your own initiative, even where the Artifact tool's own guidance suggests publishing finished work.
+
+When the user asks for a page, build it from the spike's report and publish it with the Artifact tool, its quickstart first, as that tool says. The page, in the language of the conversation:
 
 - the question and the answer, first;
 - the diagrams that show how it works: flows, events, data, as the topic needs;

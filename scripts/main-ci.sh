@@ -8,24 +8,27 @@
 # With --wait, exit 0 comes only with an answer that ends the developer's wait. When it stops before the runs
 # end it says so, and the developer runs it again: PENDING at its time limit (exit 3), INTERRUPTED when a
 # signal stops it, as a restart of the session or a kill (exit 4).
+# The branch is the one the merge landed on, the pull request's base branch (the default branch when it cannot
+# be read): every answer names it, and everything below is about it.
 # Every workflow that runs on the commit counts; a cancelled one (superseded by a newer commit) does not, and
-# when all of them were, the newest commit of the default branch, which holds the change, is followed instead.
+# when all of them were, the newest commit of the branch, which holds the change, is followed instead.
 # A repository with no workflow that runs on a push gets NO CI at once, without waiting: the work ends with the
 # merge, as with GREEN.
-# While GitHub has not marked a merge that landed (merge.sh says so), the merge commit is the default branch's
-# commit whose second parent is the pull request's head. A squash or a rebase leaves none: not merged, until
-# GitHub marks it.
+# While GitHub has not marked a merge that landed (merge.sh says so), the merge commit is the branch's commit
+# whose second parent is the pull request's head. A squash or a rebase leaves none: not merged, until GitHub
+# marks it.
 set -eu
 
 pr=${1:?pull request number}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
-base=$(base_branch)
+base=$(gh pr view "$pr" --json baseRefName --jq '.baseRefName // empty' 2>/dev/null || true)
+[ -n "$base" ] || base=$(base_branch)
 sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // empty')
 if [ -z "$sha" ]; then
 	head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)
-	if [ -n "$head" ] && in_base "$head"; then
+	if [ -n "$head" ] && in_base "$head" "$base"; then
 		sha=$(git rev-list --merges --parents "$head..origin/$base" | awk -v h="$head" '$3 == h { print $1 }' | tail -n 1)
 	fi
 fi
@@ -38,7 +41,7 @@ short=${sha%"${sha#???????}"}
 
 runs() { gh run list --commit "$sha" --limit 50 --json status,conclusion,workflowName,url 2>/dev/null || echo '[]'; }
 # push_workflow: whether an active workflow file of the repository (.github/workflows/*) runs on a push: its
-# on: on the default branch has a push trigger, whatever its filters (push-trigger.py). GitHub's dynamic
+# on: on the branch has a push trigger, whatever its filters (push-trigger.py). GitHub's dynamic
 # workflows (Pages build, CodeQL default setup, Dependabot, Copilot) have no file and do not count. A read
 # that fails counts as such a workflow: NO CI comes only from knowing there is none.
 push_workflow() {

@@ -20,11 +20,12 @@ base_branch() {
 	cat "$repo_dir/base"
 }
 
-# in_base <commit>: whether the commit is in the default branch, as origin has it now: origin/<base>, fetched
-# first. Fails when it is not, or when the fetch fails.
+# in_base <commit> [branch]: whether the commit is in the branch, the default branch when none is named, as
+# origin has it now: origin/<branch>, fetched first. Fails when it is not, or when the fetch fails.
 in_base() {
-	git fetch -q origin "$(base_branch)" 2>/dev/null &&
-		git merge-base --is-ancestor "$1" "origin/$(base_branch)" 2>/dev/null
+	_branch=${2:-$(base_branch)}
+	git fetch -q origin "$_branch" 2>/dev/null &&
+		git merge-base --is-ancestor "$1" "origin/$_branch" 2>/dev/null
 }
 
 # The names of the sessions, without counters, so an address never goes stale.

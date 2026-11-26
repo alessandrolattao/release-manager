@@ -605,3 +605,177 @@ test("the effort of the session's requests to the model is kept for the summary"
   }
   expect(written).toEqual(['xhigh'])
 })
+
+const LIMIT_WAKE = 'The usage limit has reset: go on where you stopped.'
+
+type Window = { window: string; outcome: string; used: number; resets_at: string }
+
+// The plan usage the dispatcher keeps for the board (clessidra --json) for the config folder /home/u/.claude,
+// with these windows, each reset written as clessidra writes a time.
+function plan(windows: Window[]): Record<string, string> {
+  return {
+    '_home_u_.claude.json': JSON.stringify({
+      account: '/home/u/.claude',
+      windows: windows.map(w => ({ ...w, runs_out_at: null, short_by_minutes: null })),
+    }),
+  }
+}
+
+// Times around NOW (2027-01-15T08:00:00Z).
+const IN_A_MINUTE = '2027-01-15T09:01:00.873694+01:00'
+const IN_THREE_MINUTES = '2027-01-15T09:03:00.000000+01:00'
+const A_MINUTE_AGO = '2027-01-15T08:59:00.873694+01:00'
+const NEXT_WEEK = '2027-01-20T09:00:00.000000+01:00'
+
+// The 5-hour window at its limit, resetting at `reset`, the weekly one far from it.
+function usage(reset: string): Record<string, string> {
+  return plan([
+    { window: '5h', outcome: 'limit_reached', used: 100, resets_at: reset },
+    { window: '7d', outcome: 'lasts', used: 40, resets_at: NEXT_WEEK },
+  ])
+}
+
+// A turn of the main loop that ends on an API error, as Claude Code ends it: its StopFailure, then its end.
+async function failingTurn($: Engine, error: 'rate_limit' | 'server_error' = 'rate_limit', agentId?: string): Promise<void> {
+  await $.turn.start({ text: '', turnId: 't0' })
+  await $.classic.StopFailure({ error, last_assistant_message: 'API Error: Rate limit reached', ...(agentId === undefined ? {} : { agent_id: agentId }) })
+  await $.turn.complete({ answer: '', durationMs: 1000, isAborted: false, turnId: 't0', reason: 'error' })
+}
+
+// A session of that role, idle at its last turn's end, the plan usage given beside its folder.
+function limited(on: On, role: string, plan: Record<string, string>): { seen: string[]; logs: string[]; files: Map<string, string> } {
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const files = folder(on, { role, status: JSON.stringify({ role, issue: 42, state: 'working', detail: 'at work' }), ...plan })
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs)
+  turns(on)
+  // No settings hook beneath: the StopFailure has nothing to answer.
+  on('classic.StopFailure', () => ({}))
+  return { seen, logs, files }
+}
+
+for (const [role, who] of [['dev', 'developer'], ['tech-lead', 'tech lead'], ['qa', 'QA agent']] as const) {
+  test(`a ${who} stopped on the usage limit is woken once the limit has reset: never before, never twice`, async ($, on) => {
+    const clock = mock.clock(on, { now: NOW })
+    const { seen, logs } = limited(on, role, usage(IN_A_MINUTE))
+
+    await $.session.start(START)
+    await failingTurn($)
+    await clock.advance(58000)
+    expect(seen).toEqual([])
+    await clock.advance(4000)
+    expect(seen).toEqual([LIMIT_WAKE])
+    await clock.advance(10000)
+    expect(seen.length).toBe(1)
+    // The turn the wake started, and what follows it: no wake again for the same stop.
+    await wokenTurn($)
+    await clock.advance(60000)
+    expect(seen.length).toBe(1)
+    expect(logs).toEqual([])
+  })
+}
+
+test('a session woken before the limit resets that goes on is not woken at the reset', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', usage(IN_A_MINUTE))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(10000)
+  await wokenTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+})
+
+test('a session stopped on the usage limit again after its wake is woken again at the next reset', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen, files } = limited(on, 'dev', usage(IN_A_MINUTE))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(62000)
+  expect(seen).toEqual([LIMIT_WAKE])
+  // The woken turn stops on the limit again: the file still says the reset that passed, so nothing yet.
+  await failingTurn($)
+  await clock.advance(60000)
+  expect(seen.length).toBe(1)
+  // The dispatcher reads the plan usage again: the window's next reset, five minutes after NOW.
+  files.set('_home_u_.claude.json', usage('2027-01-15T09:05:00.000000+01:00')['_home_u_.claude.json'] ?? '')
+  await clock.advance(120000)
+  expect(seen.length).toBe(1)
+  await clock.advance(60000)
+  expect(seen).toEqual([LIMIT_WAKE, LIMIT_WAKE])
+})
+
+test('no wake for a turn that ended on another API error', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', usage(IN_A_MINUTE))
+
+  await $.session.start(START)
+  await failingTurn($, 'server_error')
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+})
+
+test("no wake for a subagent's turn that ended on the usage limit", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', usage(IN_A_MINUTE))
+
+  await $.session.start(START)
+  await failingTurn($, 'rate_limit', 'a1')
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+})
+
+test('no wake from a plan usage read before the window started', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', usage(A_MINUTE_AGO))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+})
+
+test('with no window at its limit yet, a session stopped on the usage limit is woken at the reset of the most used one', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', plan([
+    { window: '5h', outcome: 'runs_out', used: 60, resets_at: IN_A_MINUTE },
+    { window: '7d', outcome: 'runs_out', used: 97, resets_at: IN_THREE_MINUTES },
+  ]))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+  await clock.advance(70000)
+  expect(seen).toEqual([LIMIT_WAKE])
+  await clock.advance(60000)
+  expect(seen.length).toBe(1)
+})
+
+test('with no window at its limit, no wake when the most used one reset before the stop', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen } = limited(on, 'dev', plan([
+    { window: '5h', outcome: 'runs_out', used: 97, resets_at: A_MINUTE_AGO },
+    { window: '7d', outcome: 'lasts', used: 40, resets_at: IN_A_MINUTE },
+  ]))
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+})
+
+test('no wake with no plan usage to read', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  const { seen, logs } = limited(on, 'dev', {})
+
+  await $.session.start(START)
+  await failingTurn($)
+  await clock.advance(120000)
+  expect(seen).toEqual([])
+  expect(logs).toEqual([])
+})

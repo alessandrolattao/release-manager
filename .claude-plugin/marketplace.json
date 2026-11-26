@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "team",
-      "source": { "source": "github", "repo": "alessandrolattao/team", "ref": "v0.5.2" },
+      "source": { "source": "github", "repo": "alessandrolattao/team", "ref": "v0.5.3" },
       "category": "productivity",
       "tags": ["team", "issues", "agents", "github", "coordination"]
     }

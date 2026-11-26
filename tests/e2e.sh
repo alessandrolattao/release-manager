@@ -136,11 +136,22 @@ case "$*" in
 # the default branch (landed-50).
 "pr view 50 --json mergeCommit --jq .mergeCommit.oid // empty") [ -f "$G/unmarked-50" ] || echo deadbeefcafe ;;
 "pr view 50 --json headRefOid --jq .headRefOid") cat "$G/head-50" 2>/dev/null || echo abc1234567 ;;
+# The branch the pull request merges into: main, or the one in base-50; base-broken, an answer that cannot be read.
+"pr view 50 --json baseRefName --jq .baseRefName // empty")
+	[ ! -f "$G/base-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+	cat "$G/base-50" 2>/dev/null || echo main ;;
+# With superseded-50, every run of the merge commit was cancelled: a newer commit of the branch holds the change.
 "run list --commit "*)
-	if [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
+	if [ "$4" = deadbeefcafe ] && [ -f "$G/superseded-50" ]; then
+		echo '[{"status":"completed","conclusion":"cancelled","workflowName":"ci","url":"u0"}]'
+	elif [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
 "run list "*) echo '[]' ;;
 "workflow list "*) [ ! -f "$G/workflows-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/workflows" 2>/dev/null || true ;;
-"workflow view "*" --yaml --ref main") cat "$G/workflow-$3.yml" 2>/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; } ;;
+# A workflow file as the branch it is read on has it: workflow-<id>.yml on main, workflow-<id>-<branch>.yml on another.
+"workflow view "*" --yaml --ref "*)
+	f="$G/workflow-$3.yml"
+	[ "$6" = main ] || f="$G/workflow-$3-$6.yml"
+	cat "$f" 2>/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; } ;;
 "api graphql "*)
 	case "$*" in
 	*planningStatuses*) echo '[{"id":"S_TODO","name":"Todo"},{"id":"S_PROG","name":"In progress"},{"id":"S_REV","name":"In review"}]' ;;
@@ -1057,28 +1068,33 @@ echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
 ok "a run still going at the limit of --wait: PENDING, and to run it again" "$(within 10 env MAIN_CI_WAIT=0 sh "$SC/main-ci.sh" 50 --wait)" "PENDING main deadbee: 1 run(s) still going after 0 minutes: run main-ci.sh 50 --wait again"
 ok "with exit 3" "$(cat "$T/within.code")" "3"
+# interrupt_wait: main-ci.sh 50 --wait, stopped by a TERM while it waits between two looks. Its output goes in
+# $T/main-ci.out, its exit code (or "still running") in $code, its pause's pid in $spid.
+interrupt_wait() {
+	sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+	mpid=$!
+	n=0
+	spid=""
+	while [ -z "$spid" ] && kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 100 ]; do
+		spid=$(pgrep -P "$mpid" -x sleep 2>/dev/null | head -1)
+		[ -n "$spid" ] || sleep 0.1
+		n=$((n + 1))
+	done
+	kill -TERM "$mpid" 2>/dev/null
+	n=0
+	while kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+	if kill -0 "$mpid" 2>/dev/null; then
+		pkill -P "$mpid" 2>/dev/null
+		kill -KILL "$mpid" 2>/dev/null
+		wait "$mpid" 2>/dev/null
+		code="still running"
+	else
+		wait "$mpid" 2>/dev/null
+		code=$?
+	fi
+}
 # A TERM while it waits between two looks: it says so at once, not at the end of its pause.
-sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
-mpid=$!
-n=0
-spid=""
-while [ -z "$spid" ] && kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 100 ]; do
-	spid=$(pgrep -P "$mpid" -x sleep 2>/dev/null | head -1)
-	[ -n "$spid" ] || sleep 0.1
-	n=$((n + 1))
-done
-kill -TERM "$mpid" 2>/dev/null
-n=0
-while kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
-if kill -0 "$mpid" 2>/dev/null; then
-	pkill -P "$mpid" 2>/dev/null
-	kill -KILL "$mpid" 2>/dev/null
-	wait "$mpid" 2>/dev/null
-	code="still running"
-else
-	wait "$mpid" 2>/dev/null
-	code=$?
-fi
+interrupt_wait
 ok "a TERM during the wait: INTERRUPTED, and to run it again" "$(cat "$T/main-ci.out")" "INTERRUPTED main deadbee: run main-ci.sh 50 --wait again"
 ok "with exit 4" "$code" "4"
 sleep 0.2
@@ -1107,6 +1123,48 @@ echo abc1234567 >"$G/head-50"
 ok "no mergeCommit and the head not in it: not merged, as today" "$(sh "$SC/main-ci.sh" 50)" "#50 is not merged"
 echo "$reviewed" >"$G/head-50"
 rm -f "$G/unmarked-50" "$G/landed-50" "$G/workflows"
+
+echo "== main-ci.sh: a pull request merged into another branch than the default one"
+# A release branch on origin, one commit ahead of main, so its newest commit is not main's.
+git -C "$T/landed" checkout -q -b release
+git -C "$T/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m release
+git -C "$T/landed" push -q origin release
+rtip=$(git -C "$T/landed" rev-parse HEAD)
+echo release >"$G/base-50"
+echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
+printf 'name: ci\non:\n  push:\n    branches: [release]\n' >"$G/workflow-1-release.yml"
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+ok "green: the line names the branch it merged into" "$(sh "$SC/main-ci.sh" 50 | cut -c1-24)" "GREEN release deadbee: t"
+echo '[{"status":"completed","conclusion":"failure","workflowName":"deploy","url":"https://x/run/9"}]' >"$G/runs"
+ok "red too" "$(sh "$SC/main-ci.sh" 50 | head -1)" "RED release deadbee (the merge of #50, or a newer commit holding it)"
+echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2"}]' >"$G/runs"
+ok "and pending" "$(sh "$SC/main-ci.sh" 50)" "PENDING release deadbee: 1 run(s) still going"
+# main's workflow file runs on a push, the release branch's does not.
+printf 'name: ci\non: [pull_request]\n' >"$G/workflow-1-release.yml"
+ok "the workflow files as that branch has them: NO CI on it" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI release deadbee: no workflow runs on release"
+printf 'name: ci\non:\n  push:\n    branches: [release]\n' >"$G/workflow-1-release.yml"
+touch "$G/superseded-50"
+interrupt_wait
+ok "every run cancelled: it follows the newest commit of that branch" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
+rm -f "$G/superseded-50"
+# A merge into the release branch GitHub has not marked yet: the head is in that branch only, not in main.
+git -C "$T/landed" checkout -q -b side main
+git -C "$T/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m side
+side=$(git -C "$T/landed" rev-parse HEAD)
+git -C "$T/landed" checkout -q release
+git -C "$T/landed" -c user.email=t@t -c user.name=t merge -q --no-ff -m "Merge pull request #50" side
+git -C "$T/landed" push -q origin release
+rlanded=$(git -C "$T/landed" rev-parse HEAD)
+touch "$G/unmarked-50"
+echo "$side" >"$G/head-50"
+echo "$rlanded" >"$G/landed-50"
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+ok "no mergeCommit: the merge commit on that branch, by its second parent" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-24)" "GREEN release ${rlanded%"${rlanded#???????}"}: t"
+rm -f "$G/unmarked-50" "$G/landed-50"
+echo "$reviewed" >"$G/head-50"
+touch "$G/base-broken"
+ok "a base branch that cannot be read: the default branch" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main deadbee: t"
+rm -f "$G/base-broken" "$G/base-50" "$G/workflows" "$G/workflow-1-release.yml"
 
 echo "== push-trigger.py: a workflow's on: has a push trigger"
 pt() { printf "$1" | python3 -I "$SC/push-trigger.py"; }

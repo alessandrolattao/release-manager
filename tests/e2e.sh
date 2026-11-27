@@ -201,18 +201,19 @@ case "$*" in
 esac
 EOF
 # A fake claude: the agent list comes from a file, stop and rm are recorded. With --cwd <folder> it lists only the
-# sessions started under that folder, as claude does; one with no cwd started in the main checkout. A plugin
-# update installs, on the account it runs on, each version `publish` lists for that account ("<account folder>
-# <version>" per line, the version's files in releases/<version>) and not installed there yet; each session
-# `reloads` lists for a version it installs ("<session folder> <version>" per line) reloads it at once, as a
-# session between turns does (hooks/sessions.tsx): its `version` reaches it.
+# sessions started under that folder as the real CLI matches them: one in <dir>/.claude/worktrees/<x> by <dir>
+# (`--cwd` on its own folder does not list it), any other by its own cwd; one with no cwd started in the main
+# checkout. A plugin update installs, on the account it runs on, each version `publish` lists for that account
+# ("<account folder> <version>" per line, the version's files in releases/<version>) and not installed there yet;
+# each session `reloads` lists for a version it installs ("<session folder> <version>" per line) reloads it at
+# once, as a session between turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
 agents)
 	under=$(prev=""; for a in "$@"; do [ "$prev" != --cwd ] || printf '%s' "$a"; prev=$a; done)
 	{ cat "$TT/agents.json" 2>/dev/null || echo '[]'; } | jq --arg u "$under" --arg root "$TT/repo" \
-		'[.[] | (.cwd // $root) as $c | select($u == "" or $c == $u or ($c | startswith($u + "/")))]' ;;
+		'[.[] | ((.cwd // $root) | sub("/\\.claude/worktrees/.*$"; "")) as $c | select($u == "" or $c == $u or ($c | startswith($u + "/")))]' ;;
 --bg) echo "$*" >>"$TT/claude.log"; echo "backgrounded · abcd1234 · started" ;;
 plugin)
 	echo "$*" >>"$TT/claude.log"
@@ -494,6 +495,15 @@ ok "posted to the tech lead" "$(head -1 "$G/comments/$last")" "**dev #43 → tec
 ok "through the REST API" "$(sed 's/body=@.*/body=@/' "$G/rest.log")" "api repos/test/repo/issues/43/comments -F body=@"
 ok "and the agent waits on it" "$(st "$DEV2" state)" "others"
 ok "and records whom it waits on" "$(st "$DEV2" waits_on)" "tech lead"
+
+echo "== the fake claude's agent list: --cwd as the real CLI matches a session"
+saved_agents=$(cat "$T/agents.json" 2>/dev/null || echo '[]')
+cat >"$T/agents.json" <<EOF
+[{"id":"oldjob01","cwd":"$ROOT/.claude/worktrees/43-other"},{"id":"besjob01","cwd":"$WT/60-done"},{"id":"rootjob1"}]
+EOF
+listed() { claude agents --json --all --cwd "$1" | jq -r '[.[].id] | join(" ")'; }
+ok "one in an older worktree under the main checkout by the main checkout, one beside it by its own cwd" "$(listed "$ROOT") | $(listed "$ROOT/.claude/worktrees/43-other") | $(listed "$WT") | $(listed "$WT/60-done")" "oldjob01 rootjob1 |  | besjob01 | besjob01"
+printf '%s\n' "$saved_agents" >"$T/agents.json"
 
 echo "== dispatch.sh: done sessions go, dead ones turn red"
 jq '.state = "done" | .since = 1' "$S/$SPK/status" >"$S/$SPK/status.t" && mv "$S/$SPK/status.t" "$S/$SPK/status"

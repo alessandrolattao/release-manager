@@ -843,6 +843,12 @@ CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
 ok "an issue without the label review: merged with no code review pass" "$code $(merged)" "0 merged"
 rm -f "$G/merged-50" "$G/decided-42" "$R/qa/42"
 echo no >"$G/qa-42"
+# Neither a code review nor a QA: nothing checks the decisions, so its comments are not read, and comments that
+# cannot be read refuse nothing.
+touch "$G/comments-broken"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
+ok "an issue with neither review nor qa: merged when its comments cannot be read" "$code $(merged)" "0 merged"
+rm -f "$G/merged-50" "$G/comments-broken"
 echo yes >"$G/review-42"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "one with it and no pass: refused" "$code $(printf '%s' "$out" | grep -c 'issue #42 carries the label review and the code review has not passed the current head: push it, then review.sh request 42$') $(merged)" "1 1 not-merged"

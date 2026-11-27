@@ -3,7 +3,8 @@
 #   - the code review passed, when the issue carries the label review (review.sh): without it, the pull
 #     request merges with no code review;
 #   - the QA passed, when the issue carries the label qa (qa.sh);
-#   - neither was recorded before the issue's latest `## Technical decisions` comment;
+#   - neither was recorded before the issue's latest `## Technical decisions` comment (read only for an issue
+#     with one of the two labels);
 #   - every check of the pull request is green.
 # The review and QA records are keyed by the pull request's issue, since they are taken on the branch before
 # the pull request exists; each counts only for the head it names.
@@ -49,12 +50,21 @@ yes)
 no) ;;
 *) refuse "could not read the labels of #$issue: try again" ;;
 esac
+needed=$(sh "$here/qa.sh" needed "$issue" 2>/dev/null || true)
+case "$needed" in
+yes | no) ;;
+*) refuse "could not read the labels of #$issue: try again" ;;
+esac
 # A review or a QA pass recorded before the issue's latest `## Technical decisions` checked older decisions. The
 # times are UTC in GitHub's own format, so they compare as text; a record of an older version, with no time,
-# is older than any decision.
-decided=$(gh issue view "$issue" --json comments \
-	--jq '[.comments[] | select(.body | startswith("## Technical decisions")) | .createdAt] | max // empty' 2>/dev/null) ||
-	refuse "could not read the comments of #$issue: try again"
+# is older than any decision. An issue with neither a code review nor a QA has nothing to check against them:
+# its comments are not read.
+decided=""
+if [ "$review_needed" = yes ] || [ "$needed" = yes ]; then
+	decided=$(gh issue view "$issue" --json comments \
+		--jq '[.comments[] | select(.body | startswith("## Technical decisions")) | .createdAt] | max // empty' 2>/dev/null) ||
+		refuse "could not read the comments of #$issue: try again"
+fi
 # before_decisions <recorded time>: succeeds when the latest decisions are newer than it.
 before_decisions() {
 	[ -n "$decided" ] || return 1
@@ -67,18 +77,13 @@ before_decisions() {
 if [ "$review_needed" = yes ] && before_decisions "$(cut -f2 "$repo_dir/review/$issue")"; then
 	refuse "the decisions changed after the code review: review.sh request $issue"
 fi
-needed=$(sh "$here/qa.sh" needed "$issue" 2>/dev/null || true)
-case "$needed" in
-yes)
+if [ "$needed" = yes ]; then
 	[ "$(cut -f1,2 "$repo_dir/qa/$issue" 2>/dev/null || true)" = "pass	$head" ] ||
 		refuse "issue #$issue carries the label qa and the QA has not passed this head: qa.sh request $issue"
 	if before_decisions "$(cut -f3 "$repo_dir/qa/$issue")"; then
 		refuse "the decisions changed after the QA: qa.sh request $issue"
 	fi
-	;;
-no) ;;
-*) refuse "could not read the labels of #$issue: try again" ;;
-esac
+fi
 [ "$(printf '%s' "$info" | jq -r .mergeable)" != CONFLICTING ] ||
 	refuse "#$pr conflicts with the default branch: bring it into your branch the way the repository's instructions say (a merge when they say nothing, a rebase with a force push of your own branch only where they ask for it), push, and start over"
 bad=$(checks_not_green "$pr") || refuse "could not read the checks of #$pr: ${bad:-no answer}"

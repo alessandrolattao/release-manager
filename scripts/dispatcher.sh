@@ -5,7 +5,8 @@
 # restart of the machine, a crash), its hooks module starts it again. A stop by hand (this script,
 # /team:dispatcher stop) holds until a start by hand (a click on its row in the board's summary,
 # /team:dispatcher, this script): the tech lead leaves it stopped.
-#   dispatcher.sh [start]   starts it, in the background, unless it already runs
+#   dispatcher.sh [start]   starts it, in the background, unless it already runs; refuses where the user can
+#                           only read the repository (read_only, repo.sh)
 #   dispatcher.sh stop      stops it
 #   dispatcher.sh status    running, stopped, or stopped (by hand)
 #   dispatcher.sh run       the loop itself (start runs it)
@@ -41,6 +42,12 @@ running() {
 
 case "$action" in
 start)
+	# Where the user cannot write, no issue can ever be claimed or merged: it does not start there.
+	ro=$(read_only)
+	[ -z "$ro" ] || {
+		echo "$ro" >&2
+		exit 1
+	}
 	rm -f "$stopped_file"
 	if running; then
 		echo "the dispatcher of $repo_full already runs on this machine (pid $(cat "$pid_file"), team $(cat "$version_file" 2>/dev/null))"

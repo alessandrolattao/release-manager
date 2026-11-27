@@ -13,6 +13,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/launch.sh
 . "$here/launch.sh"
 base=$(base_branch)
+# The branch is fetched from the repository's remote: with none, nothing is claimed or started.
+remote=$(repo_remote) || exit 1
 
 # One developer per issue: a session of it that is not done holds it, alive or not (a dead one is resumed
 # by the dispatcher), and so does one being started right now.
@@ -48,10 +50,10 @@ fi
 }
 
 worktree="$root/.claude/worktrees/$branch"
-git -C "$root" fetch -q origin "$branch"
+git -C "$root" fetch -q "$remote" "$branch"
 if [ ! -d "$worktree" ]; then
 	git -C "$root" worktree add -q "$worktree" "$branch" 2>/dev/null ||
-		git -C "$root" worktree add -q -b "$branch" "$worktree" "origin/$branch"
+		git -C "$root" worktree add -q -b "$branch" "$worktree" "$remote/$branch"
 fi
 
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}|$repo_full|g" \

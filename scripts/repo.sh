@@ -20,12 +20,53 @@ base_branch() {
 	cat "$repo_dir/base"
 }
 
+# repo_of_url <url>: the <owner>/<name> a git remote's URL names, in its SSH (git@<host>:<owner>/<name>,
+# ssh://git@<host>/<owner>/<name>) or HTTPS (https://<host>/<owner>/<name>) form, with or without .git.
+repo_of_url() {
+	printf '%s\n' "$1" | sed -e 's#/*$##' -e 's#\.git$##' -e 's#^.*[:/]\([^:/]*/[^:/]*\)$#\1#'
+}
+
+# repo_remote: the name of the git remote whose fetch URL is $repo_full, the repository gh resolves here (its
+# default, gh repo set-default), whatever it is called: every fetch, pull and remote branch the scripts, the
+# briefs and the hooks module read goes through it. The URL matches on <owner>/<name> alone, so a host from
+# ~/.ssh/config does too; the first such remote, when several are. Written in the repository's state folder,
+# `remote`, for the hooks module. With none it says which repository and how to add the remote, and fails.
+repo_remote() {
+	for _r in $(git -C "$root" remote); do
+		_url=$(git -C "$root" remote get-url "$_r" 2>/dev/null) || continue
+		[ "$(lower "$(repo_of_url "$_url")")" = "$(lower "$repo_full")" ] || continue
+		[ "$(cat "$repo_dir/remote" 2>/dev/null)" = "$_r" ] || {
+			printf '%s\n' "$_r" >"$repo_dir/remote.$$"
+			mv "$repo_dir/remote.$$" "$repo_dir/remote"
+		}
+		echo "$_r"
+		return 0
+	done
+	rm -f "$repo_dir/remote"
+	_web=$(gh repo view --json url --jq .url 2>/dev/null) || _web="https://github.com/$repo_full"
+	echo "no git remote of $root points to $repo_full, the repository gh works on here: add it with git -C $root remote add ${repo_full%%/*} $_web.git, then run this again" >&2
+	return 1
+}
+
 # in_base <commit> [branch]: whether the commit is in the branch, the default branch when none is named, as
-# origin has it now: origin/<branch>, fetched first. Fails when it is not, or when the fetch fails.
+# the repository's remote (repo_remote) has it now: <remote>/<branch>, fetched first. Fails when it is not, or
+# when the fetch fails. With no such remote it ends the script, saying why: called as a command, never in $(...).
 in_base() {
 	_branch=${2:-$(base_branch)}
-	git fetch -q origin "$_branch" 2>/dev/null &&
-		git merge-base --is-ancestor "$1" "origin/$_branch" 2>/dev/null
+	_remote=$(repo_remote) || exit 1
+	git fetch -q "$_remote" "$_branch" 2>/dev/null &&
+		git merge-base --is-ancestor "$1" "$_remote/$_branch" 2>/dev/null
+}
+
+# read_only: the line that says the user cannot write on $repo_full (gh's viewerPermission is not ADMIN,
+# MAINTAIN or WRITE), so nothing of the team's flow (labels, claims, merges) goes through there; nothing when
+# they can.
+read_only() {
+	_perm=$(gh repo view --json viewerPermission --jq .viewerPermission 2>/dev/null) || return 0
+	case "$_perm" in
+	ADMIN | MAINTAIN | WRITE) ;;
+	*) echo "the user can only read $repo_full here, so the plugin's flow cannot run" ;;
+	esac
 }
 
 # The names of the sessions, without counters, so an address never goes stale.

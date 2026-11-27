@@ -16,8 +16,7 @@
 #      (hooks/sessions.tsx).
 # In steps 2 and 3 a dispatcher or a session already on the newest version installed for its account is left
 # alone ("already on <version>"): the version it runs is in dispatcher.version, a session's in its folder's
-# `version` (hooks/sessions.tsx). A session whose `version` was written since the update started reached it
-# during the update, reloaded or waited for: "now on <version>".
+# `version` (hooks/sessions.tsx).
 # After step 1 the newest installed version's own update.sh does the rest, so the restart prompt and every
 # later step are the new version's, whatever version started the update.
 # A process of its own, so it goes on after the session that started it is restarted too.
@@ -62,11 +61,6 @@ esac
 # Not one of the sessions: no session's own variables.
 caller=${CLAUDE_CODE_SESSION_ID:-}
 for v in $(env | grep -o -E '^CLAUDE[A-Z_]*'); do unset "$v"; done
-# When the update started, as the update.sh that started it hands it over (UPDATE_STARTED); now, when it hands
-# over none (an older version) or this run starts it.
-started=${UPDATE_STARTED:-}
-case "$started" in "" | *[!0-9]*) started=$(date +%s) ;; esac
-unset UPDATE_STARTED
 
 # as <config dir> <command...>: on that account; an empty one is the default account (~/.claude).
 as() {
@@ -127,12 +121,10 @@ look() {
 	}
 	have=$(cat "$folder/version" 2>/dev/null || true)
 	behind "$have" "${plugin##*/}" || {
-		# On it since the update started (it reloaded, maybe before step 3 first looked at it), or before.
-		if [ "$(stat -c %Y "$folder/version" 2>/dev/null || echo 0)" -ge "$started" ]; then
-			echo "$name: now on $have"
-		else
-			echo "$name: already on $have"
-		fi
+		case " $waited " in
+		*" $id "*) echo "$name: now on $have" ;;
+		*) echo "$name: already on $have" ;;
+		esac
 		return 0
 	}
 	# One that reloads by itself: waited for, unless its own reload failed (update.sh restart).
@@ -242,7 +234,7 @@ if [ "${2:-}" != --plugin-updated ]; then
 	mine=$(jq -r '.version // ""' "$here/../.claude-plugin/plugin.json" 2>/dev/null || true)
 	if [ -f "$latest/scripts/update.sh" ] && [ "$(basename "$latest")" != "$mine" ]; then
 		echo "continuing with team $(basename "$latest")"
-		exec env CLAUDE_CODE_SESSION_ID="$caller" UPDATE_STARTED="$started" sh "$latest/scripts/update.sh" run --plugin-updated
+		exec env CLAUDE_CODE_SESSION_ID="$caller" sh "$latest/scripts/update.sh" run --plugin-updated
 	fi
 fi
 

@@ -1517,7 +1517,6 @@ echo "$ROOT" >"$S/$ACC/cwd"
 for id in $TL1 $DEV2 $NEW $ACC; do
 	date +%s >"$S/$id/alive"
 	echo 9.9.9 >"$S/$id/version"
-	touch -d '1 minute ago' "$S/$id/version"
 done
 ok "the dispatcher runs 9.9.9" "$(cat "$R/dispatcher.version")" "9.9.9"
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
@@ -1619,10 +1618,7 @@ echo "== update.sh: a session that holds the main checkout restarts only once it
 # the update's first pass has looked at every session (the last one listed has its line).
 release 9.9.12
 echo "$T/config 9.9.12" >>"$T/publish"
-for id in $TL1 $NEW; do
-	echo 9.9.12 >"$S/$id/version"
-	touch -d '1 minute ago' "$S/$id/version"
-done
+for id in $TL1 $NEW; do echo 9.9.12 >"$S/$id/version"; done
 for id in $TL1 $DEV2 $NEW; do date +%s >"$S/$id/alive"; done
 echo $(($(date +%s) - 60)) >"$S/$DEV2/idle"
 cd "$ROOT/.claude/worktrees/43-other" || exit 1
@@ -1659,20 +1655,6 @@ ok "and the log says it still holds the checkout" "$(printf '%s\n' "$out" | tail
 cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
 cd "$ROOT" || exit 1
 rm -f "$S/$TL1/version" "$S/$NEW/version"
-
-echo "== update.sh: one that reached the new version before the update looked at it is now on it"
-# Handed over by the update.sh that started the update a minute ago: the developer reloaded 9.9.12 since, the
-# tech lead and the other developer ran it before.
-for id in $TL1 $DEV2 $NEW; do
-	echo 9.9.12 >"$S/$id/version"
-	date +%s >"$S/$id/alive"
-done
-touch -d '2 minutes ago' "$S/$TL1/version" "$S/$NEW/version"
-: >"$T/claude.log"
-UPDATE_STARTED=$(($(date +%s) - 60)) UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run --plugin-updated >"$T/update.out" 2>&1
-ok "the one that reloaded during the update is now on it, the others already on it" "$(grep ': [a-z]* on 9.9.12$' "$T/update.out" | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43: now on 9.9.12|repo · dev #44 · in review · Title 44: already on 9.9.12|repo · tech lead: already on 9.9.12|"
-ok "and nobody restarts" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
-rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version"
 
 echo "== no write through GitHub's GraphQL API where REST has an endpoint"
 ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"

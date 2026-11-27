@@ -820,6 +820,89 @@ for (const [from, isAnswer] of [['dev #42', true], ['qa #42', false]] as const) 
   })
 }
 
+test('a note still waiting for its request when the process ended is read back as not carried, and a wake delivers its comment', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  // The process that appended the note ended before a request of its loop carried it: the note went with it.
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
+    wake: `${at}\tdev #42 on #42\tQuale tabella?\t${link(301)}\n`,
+    carried: `0\tdev #42 on #42\t${link(301)}\n`,
+    'dispatcher.alive': String(NOW / 1000),
+    'plugin.json': MANIFEST,
+  })
+  const session = mock.session(on)
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs, '9.9.9', [], github([]))
+  turns(on)
+  requests(on)
+
+  // A new process: the turn its resume starts makes the first request.
+  await $.session.start(START)
+  expect(files.get('carried')).toBe('')
+  await $.turn.start({ text: 'go on', turnId: 't1' })
+  await request($)
+  await clock.settle()
+  expect(files.has('seen')).toBe(false)
+  await $.turn.complete({ answer: 'fatto', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+
+  await clock.advance(6000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([`for you on GitHub: dev #42 on #42: Quale tabella? (${link(301)})`])
+  expect(seenLinks(files)).toEqual([link(301)])
+  expect(files.get('wake-read')).toBe('1\n')
+  expect(notes(session)).toEqual([])
+})
+
+test('a note still waiting for its request when the plugin reloads in place is carried by the next request, and no wake delivers it', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'you', detail: 'Come lo chiamiamo?' }),
+    'dispatcher.alive': String(NOW / 1000),
+    'plugin.json': MANIFEST,
+  })
+  const session = mock.session(on)
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs, '9.9.9', [], github([]))
+  turns(on)
+  requests(on)
+
+  await $.session.start(START)
+  // The module before the reload appended the note, which waits in this process for its request.
+  files.set('wake', `${at}\tdev #42 on #42\tQuale tabella?\t${link(301)}\n`)
+  files.set('carried', `0\tdev #42 on #42\t${link(301)}\n`)
+  // The reload: the new module starts in the same process and reads the note back as waiting.
+  await $.session.start(START)
+  expect(files.get('carried')).toBe(`0\tdev #42 on #42\t${link(301)}\n`)
+  await clock.advance(6000)
+  // Holding for the user: no wake, no second note.
+  expect(seen).toEqual([])
+  expect(notes(session)).toEqual([])
+
+  // The user writes in the chat: the first request of that turn carries the note.
+  await $.prompt.submit({ text: 'chiamalo pippo', origin: { kind: 'composer' } } as Submit)
+  await $.turn.start({ text: 'chiamalo pippo', turnId: 't1' })
+  await request($)
+  await clock.settle()
+  expect(seenLinks(files)).toEqual([link(301)])
+  await $.turn.complete({ answer: 'fatto', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+
+  await clock.advance(6000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual(['chiamalo pippo'])
+  expect(files.get('wake-read')).toBe('1\n')
+  expect(files.get('carried')).toBe('')
+})
+
 test('the user writing to a team session ends its wait; the plugin\'s own prompts do not', async ($, on) => {
   mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })

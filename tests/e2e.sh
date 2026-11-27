@@ -1876,6 +1876,20 @@ while [ ! -f "$R/board.json" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); don
 ok "a newer folder marked .orphaned_at is not installed: started from 0.0.1, it goes on with 9.9.9 and stays there" "$out | $(ps -o args= -p "$pid" 2>/dev/null) | $(cat "$R/dispatcher.pid" 2>/dev/null) $(grep -c 'now on team' "$R/dispatcher.log") $(grep -c 'now on team 9.9.20' "$R/dispatcher.log")" "the dispatcher of test/repo runs on this machine (pid $pid, team 9.9.9) | sh $CACHE/9.9.9/scripts/dispatcher.sh run | $pid 1 0"
 sh "$SC/dispatcher.sh" stop >/dev/null
 rm -f "$CACHE/9.9.20/.orphaned_at" "$CACHE/9.9.20"
+# The newest installed, 9.9.30, has a manifest with no version: its own loop never hands over to its own folder,
+# so it does not start itself again and again.
+release 9.9.30
+echo '{"name": "team"}' >"$T/releases/9.9.30/.claude-plugin/plugin.json"
+ln -s "$T/releases/9.9.30" "$CACHE/9.9.30"
+: >"$R/dispatcher.log"
+rm -f "$R/board.json"
+sh "$CACHE/9.9.30/scripts/dispatcher.sh" start >/dev/null 2>&1
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+n=0
+while [ ! -f "$R/board.json" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+ok "one that cannot read its own version stays on its folder and runs its cycle" "$([ -f "$R/board.json" ] && echo yes || echo no) $(cat "$R/dispatcher.pid" 2>/dev/null) $(kill -0 "$pid" 2>/dev/null && echo alive || echo gone) $(grep -c 'now on team' "$R/dispatcher.log") $(pgrep -fc "$CACHE/9.9.30/scripts/dispatcher.sh run")" "yes $pid alive 0 1"
+sh "$SC/dispatcher.sh" stop >/dev/null
+rm -f "$CACHE/9.9.30"
 
 echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
 # 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds

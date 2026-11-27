@@ -13,13 +13,16 @@
 #      version and where its scripts are.
 # In steps 2 and 3 a dispatcher or a session already on the newest version installed for its account is left
 # alone ("already on <version>"): the version it runs is in dispatcher.version, a session's in its folder's
-# `version` (hooks/sessions.tsx).
+# `version` (hooks/sessions.tsx). A session that reached it during the update, waited for or reloaded before
+# step 3 looked at it, is "now on <version>".
 # After step 1 the newest installed version's own update.sh does the rest, so the restart prompt and every
 # later step are the new version's, whatever version started the update.
 # A process of its own, so it goes on after the session that started it is restarted too.
 #   update.sh [start]                starts it in the background; its log: <state>/team/update.log
 #   update.sh run                    the update itself
-#   update.sh run --plugin-updated   steps 2 and 3 only: an older version's update.sh hands over to this one
+#   update.sh run --plugin-updated [<versions>]
+#                                    steps 2 and 3 only: an older version's update.sh hands over to this one,
+#                                    with the version each session ran when the update started
 #   update.sh restart <session id>   restarts that session on the newest version installed, in the background,
 #                                    as step 3 restarts one, its lines in the same log: its hooks module runs it
 #                                    when its reload failed
@@ -95,6 +98,12 @@ gone() {
 # whatever its version (update.sh restart).
 waited=""
 forced=""
+# The version each team session here ran when the update started, "<session id> <version>" per line, as step 1
+# notes it before it updates the plugin; `noted` says it did (an older update.sh may hand over without
+# them). A session on another version then reached the newest one during the update.
+started_on=""
+noted=""
+was() { printf '%s\n' "$started_on" | awk -v id="$1" '$1 == id { print $2 }'; }
 # look <session id>: done with it (0), or to look at again at the next pass (1): one that reloads by itself
 # until its `version` reaches the newest installed, one to restart while it is busy.
 look() {
@@ -113,10 +122,11 @@ look() {
 	}
 	have=$(cat "$folder/version" 2>/dev/null || true)
 	behind "$have" "${plugin##*/}" || {
-		case " $waited " in
-		*" $id "*) echo "$name: now on $have" ;;
-		*) echo "$name: already on $have" ;;
-		esac
+		# Reached during the update: waited for, or on another version when the update started.
+		how=already
+		case " $waited " in *" $id "*) how=now ;; esac
+		[ -z "$noted" ] || [ "$(was "$id")" = "$have" ] || how=now
+		echo "$name: $how on $have"
 		return 0
 	}
 	# One that reloads by itself: waited for, unless its own reload failed (update.sh restart).
@@ -200,6 +210,10 @@ fi
 # log already says the update started.
 if [ "${2:-}" != --plugin-updated ]; then
 	echo "$(date '+%F %T') update starts"
+	started_on=$(for folder in "$sessions_dir"/*/; do
+		[ ! -d "$folder" ] || printf '%s %s\n' "$(basename "$folder")" "$(cat "$folder/version" 2>/dev/null || true)"
+	done)
+	noted=yes
 	accounts=$( { cat "$sessions_dir"/*/config 2>/dev/null; echo; } | sort -u)
 	before=$(installed "$accounts")
 	printf '%s\n' "$accounts" | while IFS= read -r cfg; do
@@ -220,8 +234,11 @@ if [ "${2:-}" != --plugin-updated ]; then
 	mine=$(jq -r '.version // ""' "$here/../.claude-plugin/plugin.json" 2>/dev/null || true)
 	if [ -f "$latest/scripts/update.sh" ] && [ "$(basename "$latest")" != "$mine" ]; then
 		echo "continuing with team $(basename "$latest")"
-		exec env CLAUDE_CODE_SESSION_ID="$caller" sh "$latest/scripts/update.sh" run --plugin-updated
+		exec env CLAUDE_CODE_SESSION_ID="$caller" sh "$latest/scripts/update.sh" run --plugin-updated "$started_on"
 	fi
+elif [ $# -ge 3 ]; then
+	started_on=$3
+	noted=yes
 fi
 
 # 2. The dispatchers that were running here, before the sessions: they do not depend on them, and the sessions

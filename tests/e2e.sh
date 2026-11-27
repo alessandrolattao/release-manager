@@ -189,7 +189,9 @@ esac
 EOF
 # A fake claude: the agent list comes from a file, stop and rm are recorded. A plugin update installs, on
 # the account it runs on, each version `publish` lists for that account ("<account folder> <version>" per
-# line, the version's files in releases/<version>) and not installed there yet.
+# line, the version's files in releases/<version>) and not installed there yet; each session `reloads` lists
+# for a version it installs ("<session folder> <version>" per line) reloads it at once, as a session between
+# turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -205,12 +207,14 @@ plugin)
 		mkdir -p "$home/plugins/cache/team/team"
 		ln -s "$TT/releases/$version" "$home/plugins/cache/team/team/$version"
 		got=$version
+		while read -r folder at; do [ "$at" != "$version" ] || echo "$at" >"$folder/version"; done <"$TT/reloads"
 	done <"$TT/publish"
 	if [ -n "$got" ]; then echo "Plugin \"team\" updated to $got"; else echo "Plugin \"team\" is already at the latest version"; fi ;;
 *) echo "$*" >>"$TT/claude.log" ;;
 esac
 EOF
 : >"$T/publish"
+: >"$T/reloads"
 # release <version>: the plugin's files as that version publishes them, in releases/<version>.
 release() {
 	mkdir -p "$T/releases/$1/.claude-plugin"
@@ -1550,16 +1554,17 @@ ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "up
 
 echo "== update.sh: a new version on the team's account restarts the dispatcher, and no session"
 # 9.9.11 published on the team's account, where the dispatcher and the sessions run 9.9.9. The two developers
-# reload it by themselves a few seconds in; the tech lead, which started the update, reloads like them but has
-# not when the update stops waiting.
+# reload it by themselves: one as soon as it is installed, before the update looks at the sessions, the other
+# a few seconds in; the tech lead, which started the update, reloads like them but has not when the update
+# stops waiting.
 release 9.9.11
 echo "$T/config 9.9.11" >>"$T/publish"
+echo "$S/$DEV2 9.9.11" >"$T/reloads"
 for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 : >"$T/claude.log"
 (
 	sleep 3
-	echo 9.9.11 >"$S/$DEV2/version"
 	echo 9.9.11 >"$S/$NEW/version"
 ) &
 reloader=$!
@@ -1568,7 +1573,7 @@ wait "$reloader"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "the dispatcher restarts on 9.9.11" "$([ -n "$new_pid" ] && [ "$new_pid" != "$pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out") $(cat "$R/dispatcher.version")" "yes 1 9.9.11"
 ok "no session restarts, the one that started the update neither" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
-ok "each session that reached 9.9.11 has its line" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|"
+ok "each session that reached 9.9.11 has its line, the one that reloaded before the update looked at it too" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|') $(grep -c ': already on 9.9.11$' "$T/update.out")" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44| 0"
 ok "the one on another account, already on its newest, is left alone" "$(grep -c '^repo · dev #45 · in progress · Title 45: already on 9.9.10$' "$T/update.out")" "1"
 ok "one still behind when the update stops waiting is reported, last" "$(tail -2 "$T/update.out" | head -1)" "repo · tech lead: still behind after 0 minutes, on 9.9.9"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
@@ -1576,6 +1581,7 @@ sh "$SC/dispatcher.sh" stop >/dev/null
 rm -rf "${S:?}/$ACC" "$T/home/.claude/plugins"
 rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version" "$T/config/plugins/cache/team/team/9.9.11"
 : >"$T/publish"
+: >"$T/reloads"
 
 echo "== update.sh: started by an older version, the newest one restarts the sessions"
 # An older version, whose restart prompt lacks a sentence of the newer one's.

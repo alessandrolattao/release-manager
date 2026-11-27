@@ -1844,6 +1844,13 @@ git init -q --bare -b main "$T/upstream/repo.git"
 git -C "$ROOT" remote set-url origin "$T/upstream/repo.git"
 git -C "$ROOT" fetch -q --prune origin
 git -C "$ROOT" remote add fork "$T/test/repo.git"
+# Every form of a remote's URL names test/repo, whatever its host and case (repo_of_url): that remote is the one.
+for url in git@github.com:test/repo.git ssh://git@github.com/test/repo.git https://github.com/test/repo \
+	https://github.com/test/repo.git/ github-work:test/repo.git git@github.com:Test/Repo.git; do
+	git -C "$ROOT" remote set-url fork "$url"
+	ok "a remote at $url: the repository's" "$(scripts=$SC && . "$SC/repo.sh" && repo_remote 2>&1)" "fork"
+done
+git -C "$ROOT" remote set-url fork "$T/test/repo.git"
 # commit_on <ref>: a new commit on top of the fork's <ref>, pushed there from another clone, so the main
 # checkout knows nothing of it until it fetches.
 commit_on() {

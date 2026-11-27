@@ -190,21 +190,23 @@ test('GitHub is read at most every 5 minutes, and a pull request opened since sh
   mock.env(on, { HOME: '/home/u' })
   const files = seeded(on)
   let listed = '[]'
-  const { asked } = engine(on, argv => (argv[1] === 'api' ? '{"status":"In progress","qa":false}' : listed))
+  const { asked } = engine(on, argv => (argv[1] === 'api' ? '{"status":"In progress","review":false,"qa":false}' : listed))
 
   await $.session.start(START)
   await clock.advance(2000)
   // One issue query and one list of the branch's pull requests, in any state, from the worktree.
   expect(asked.length).toBe(2)
   expect(asked[0]).toMatch(new RegExp(`^${WORKTREE}: gh api graphql .*status \\{ name \\} labels.* -F o=acme -F n=shop -F i=42 `))
+  // The issue query reads the labels review and qa.
+  expect(asked[0]).toContain('review: ([.labels.nodes[].name] | index("review") != null)')
   expect(asked[1]).toBe(`${WORKTREE}: gh pr list --repo acme/shop --head 42-checkout-page --state all --limit 1 --json number,title,url,state,statusCheckRollup`)
-  expect(JSON.parse(files.get('sessions/abc-123/github') ?? '{}')).toEqual({ at: NOW / 1000 + 2, status: 'In progress', qa: false, pr: null })
+  expect(JSON.parse(files.get('sessions/abc-123/github') ?? '{}')).toEqual({ at: NOW / 1000 + 2, status: 'In progress', review: false, qa: false, pr: null })
   await clock.advance(4000)
 
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /^STATUS / }))?.text).toBe('STATUS  In progress')
   expect((await ui.find({ type: 'Text', text: /^PR / }))?.text).toBe('PR      none yet')
-  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review not passed · no QA +║▓$/)
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +no code review · no QA +║▓$/)
   expect((await ui.find({ type: 'Text', text: /║ checkout/ }))?.text).toMatch(/║ checkout +held by dev #7 · you are 2 of 2 in the queue +║▓$/)
   await ui.unmount()
 
@@ -263,7 +265,7 @@ test('a review or a QA outcome counts for the worktree HEAD only', async ($, on)
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
   seeded(on, {
-    'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In review', qa: true, pr: PR }),
+    'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In review', review: true, qa: true, pr: PR }),
     // Both for the head before the last commit.
     'repos/acme_shop/review/42': 'old456\t2026-11-27T09:00:00Z\tthe code holds',
     'repos/acme_shop/qa/42': 'pass\told456',
@@ -274,6 +276,35 @@ test('a review or a QA outcome counts for the worktree HEAD only', async ($, on)
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review not passed · QA needed +║▓$/)
+  await ui.unmount()
+})
+
+test('an issue without the label review shows no code review; one with it, or a read with no label review yet, not passed', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const files = seeded(on, {
+    'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In progress', review: false, qa: false, pr: null }),
+  })
+  engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +no code review · no QA +║▓$/)
+  await ui.unmount()
+
+  // The tech lead added the label review.
+  files.set('sessions/abc-123/github', JSON.stringify({ at: NOW / 1000, status: 'In progress', review: true, qa: false, pr: null }))
+  await clock.advance(4000)
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review not passed · no QA +║▓$/)
+  await ui.unmount()
+
+  // A read an older version kept, with no label review in it.
+  files.set('sessions/abc-123/github', JSON.stringify({ at: NOW / 1000, status: 'In progress', qa: false, pr: null }))
+  await clock.advance(4000)
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review not passed · no QA +║▓$/)
   await ui.unmount()
 })
 

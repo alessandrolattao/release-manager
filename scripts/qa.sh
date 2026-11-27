@@ -1,11 +1,13 @@
 #!/bin/sh
 # QA for a delicate task: an issue with the label `qa` is tested by a separate agent on its developer's
-# branch, in the main checkout, last of all: once the code review passed, before the pull request is opened.
-# The records are keyed by the issue, with the head they are about.
-#   qa.sh request <issue>     the developer, once its branch is pushed and the code review passed on its head
-#                             (review.sh): you wait (purple) and the plugin starts a QA agent on your branch,
-#                             which writes its outcome on the issue. The QA agent of an earlier round, still
-#                             there after a fail, is woken instead with a comment, and goes on where it stopped.
+# branch, in the main checkout, last of all: once the code review passed, when the issue carries the label
+# `review`, before the pull request is opened. The records are keyed by the issue, with the head they are
+# about.
+#   qa.sh request <issue>     the developer, once its branch is pushed and, for a `review` issue, the code
+#                             review passed on its head (review.sh): you wait (purple) and the plugin starts a
+#                             QA agent on your branch, which writes its outcome on the issue. The QA agent of
+#                             an earlier round, still there after a fail, is woken instead with a comment, and
+#                             goes on where it stopped.
 #   qa.sh pass <issue> | fail <issue>   the QA agent: records the outcome for the head it tested, with its time
 #                             (UTC)
 #   qa.sh needed <issue>      prints yes when the issue carries the label qa
@@ -40,11 +42,21 @@ request)
 		exit 1
 	}
 	short=${head%"${head#???????}"}
-	# QA comes at the end: on a head the code review passed.
-	[ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] || {
-		echo "the code review has not passed $branch at $short: review.sh request $issue, then QA once it passed" >&2
+	# QA comes at the end: for an issue with the label review, on a head the code review passed.
+	review_needed=$(sh "$here/review.sh" needed "$issue" 2>/dev/null || true)
+	case "$review_needed" in
+	yes)
+		[ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] || {
+			echo "the code review has not passed $branch at $short: review.sh request $issue, then QA once it passed" >&2
+			exit 1
+		}
+		;;
+	no) ;;
+	*)
+		echo "could not read the labels of #$issue: try again" >&2
 		exit 1
-	}
+		;;
+	esac
 	# The QA agent of an earlier round, still there (it waits after a fail): a comment wakes it, and it tests
 	# the new head. A new one only when none is left.
 	tester=""
@@ -54,8 +66,10 @@ request)
 	if [ -n "$tester" ]; then
 		# Taken by that agent: the dispatcher starts no other one.
 		printf 'testing\t%s\t%s\t%s\t%s\n' "$head" "$issue" "$me" "$branch" >"$record"
-		# The comment sets your wait on it, until its outcome.
-		printf 'QA again on `%s` at %s, where the code review passed. Go on from where you stopped: first what failed, then the criteria you had not reached yet; take the main checkout again (checkout.sh take).\n' "$branch" "$short" |
+		# The comment sets your wait on it, until its outcome. It names the code review only on a `review` issue.
+		where=""
+		[ "$review_needed" != yes ] || where=", where the code review passed"
+		printf 'QA again on `%s` at %s%s. Go on from where you stopped: first what failed, then the criteria you had not reached yet; take the main checkout again (checkout.sh take).\n' "$branch" "$short" "$where" |
 			sh "$here/comment.sh" "$issue" qa >/dev/null
 		echo "QA requested for issue #$issue on $branch at $short: its QA agent ($(address_of "$tester")) is woken to go on"
 	else

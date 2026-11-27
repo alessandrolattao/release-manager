@@ -648,16 +648,22 @@ async function workOf($: EngineInterface, cwd: string, remote: string, base: str
 }
 
 // What a developer last read from GitHub, kept in its session's folder (`github`): when, the issue's own
-// status, whether the issue carries the label qa (null before the first read), and the branch's newest pull
-// request.
-type GithubRead = { at: number; status: string; qa: boolean | null; pr: DevPr | null }
+// status, whether the issue carries the labels review and qa (each null before the first read that has it),
+// and the branch's newest pull request.
+type GithubRead = { at: number; status: string; review: boolean | null; qa: boolean | null; pr: DevPr | null }
 
 async function githubOf($: EngineInterface, folder: string): Promise<GithubRead> {
   try {
     const known = JSON.parse(await $.fs.read(`${folder}/github`)) as Partial<GithubRead>
-    return { at: Number(known.at) || 0, status: known.status ?? '', qa: known.qa ?? null, pr: known.pr ?? null }
+    return {
+      at: Number(known.at) || 0,
+      status: known.status ?? '',
+      review: known.review ?? null,
+      qa: known.qa ?? null,
+      pr: known.pr ?? null,
+    }
   } catch {
-    return { at: 0, status: '', qa: null, pr: null }
+    return { at: 0, status: '', review: null, qa: null, pr: null }
   }
 }
 
@@ -699,17 +705,18 @@ async function readGithub($: EngineInterface, folder: string, cwd: string, repo:
   }
   isReadingGithub = true
   const known = await githubOf($, folder)
-  let { status, qa, pr } = known
+  let { status, review, qa, pr } = known
   try {
     const [owner = '', name = ''] = repo.split('/')
     const asked = await $.process.run(
       ['gh', 'api', 'graphql', '-f', `query=${ISSUE_QUERY}`, '-F', `o=${owner}`, '-F', `n=${name}`, '-F', `i=${issue}`,
-        '--jq', '.data.repository.issue | {status: (.status.name // ""), qa: ([.labels.nodes[].name] | index("qa") != null)}'],
+        '--jq', '.data.repository.issue | {status: (.status.name // ""), review: ([.labels.nodes[].name] | index("review") != null), qa: ([.labels.nodes[].name] | index("qa") != null)}'],
       { cwd, timeoutMs: GITHUB_TIMEOUT_MS },
     )
     if (asked.exitCode === 0) {
-      const answer = JSON.parse(asked.stdout) as { status?: string; qa?: boolean }
+      const answer = JSON.parse(asked.stdout) as { status?: string; review?: boolean; qa?: boolean }
       status = answer.status ?? ''
+      review = answer.review ?? null
       qa = answer.qa ?? null
     }
     if (branch !== '') {
@@ -729,7 +736,7 @@ async function readGithub($: EngineInterface, folder: string, cwd: string, repo:
     $.ui.log(`team: github: ${String(err)}`)
   } finally {
     try {
-      await $.fs.write(`${folder}/github`, `${JSON.stringify({ at: now, status, qa, pr })}\n`)
+      await $.fs.write(`${folder}/github`, `${JSON.stringify({ at: now, status, review, qa, pr })}\n`)
     } catch (err) {
       $.ui.log(`team: github: ${String(err)}`)
     }
@@ -739,8 +746,8 @@ async function readGithub($: EngineInterface, folder: string, cwd: string, repo:
 
 // The reviews of the branch (review.sh, qa.sh), keyed by the issue since they come before the pull request:
 // each outcome counts only for the worktree's HEAD, as merge.sh wants it for the head it merges. "code review
-// passed · QA needed".
-async function reviewOf($: EngineInterface, dir: string, cwd: string, issue: number, qa: boolean | null): Promise<string> {
+// passed · QA needed"; "no code review" for an issue without the label review, as "no QA" without qa.
+async function reviewOf($: EngineInterface, dir: string, cwd: string, issue: number, review: boolean | null, qa: boolean | null): Promise<string> {
   const head = (await gitOf($, cwd, ['rev-parse', 'HEAD'])) ?? ''
   // review/<issue>: "requested <head> ..." once asked, "reviewing <head> ..." once a reviewer took it, then
   // "<head> <time> <summary>" once it passed.
@@ -750,7 +757,9 @@ async function reviewOf($: EngineInterface, dir: string, cwd: string, issue: num
       ? 'code review asked'
       : head !== '' && reviewed === head
         ? 'code review passed'
-        : 'code review not passed'
+        : review === false
+          ? 'no code review'
+          : 'code review not passed'
   // qa/<issue>: "requested <head> <issue> <session> <branch>" once asked, "testing ..." once a QA agent took
   // it, then "pass <head>" or "fail <head>".
   const [outcome = '', tested = ''] = issue === 0 ? [] : (await readText($, `${dir}/qa/${issue}`)).split('\t')
@@ -777,7 +786,7 @@ async function refreshDev($: EngineInterface, folder: string, status: Status, no
   }
   const work = await workOf($, cwd, await readText($, `${dir}/remote`), await readText($, `${dir}/base`))
   const checkout = await checkoutOf($, dir, await $.session.id())
-  const review = await reviewOf($, dir, cwd, status.issue ?? 0, github.qa)
+  const review = await reviewOf($, dir, cwd, status.issue ?? 0, github.review, github.qa)
   const ci = await readText($, `${dir}/ci`)
   const next: Dev = {
     repo,

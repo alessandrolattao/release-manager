@@ -120,6 +120,11 @@ case "$*" in
 	echo "${4#--} $6" >"$G/merged-60" ;;
 "api repos/test/repo --jq "*) cat "$G/merge-methods" 2>/dev/null || echo "merge rebase squash" ;;
 "label list --limit 200 --json name --jq .[].name") echo question ;;
+# Whether an issue carries the label review: review-<n> says, no otherwise; with labels-broken, the labels
+# cannot be read.
+"issue view "*" --json labels --jq "*'"review"'*)
+	[ ! -f "$G/labels-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
+	cat "$G/review-$3" 2>/dev/null || echo no ;;
 "issue view 42 --json labels --jq "*) cat "$G/qa-42" 2>/dev/null || echo no ;;
 "issue view 42 --json comments --jq "*) [ ! -f "$G/comments-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/decided-42" 2>/dev/null || true ;;
 "issue view "*" --json state,labels --jq "*) cat "$G/issue-open" 2>/dev/null || echo false ;;
@@ -697,8 +702,10 @@ CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
 echo "== code review, QA and merge: on the pushed branch, before the pull request"
 stamp='^[0-9]\{4\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$'
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
+# Issue 42 carries the label review: its merge needs a code review pass.
+echo yes >"$G/review-42"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
-ok "no code review: refused" "$code $(printf '%s' "$out" | grep -c 'the code review has not passed the current head: push it, then review.sh request 42$')" "1 1"
+ok "no code review: refused" "$code $(printf '%s' "$out" | grep -c 'issue #42 carries the label review and the code review has not passed the current head: push it, then review.sh request 42$')" "1 1"
 # The developer's work, committed and pushed on its branch: no pull request yet.
 git -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
 reviewed=$(git rev-parse HEAD)
@@ -805,6 +812,24 @@ touch "$G/comments-broken"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "decisions that cannot be read refuse the merge" "$code $(printf '%s' "$out" | grep -c 'could not read the comments of #42') $(merged)" "1 1 not-merged"
 rm -f "$G/comments-broken" "$G/decided-42"
+
+echo "== merge.sh: the code review only for an issue with the label review"
+echo no >"$G/review-42"
+echo no >"$G/qa-42"
+rm -f "$R/review/42" "$R/qa/42" "$G/merged-50"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
+ok "an issue without the label review: merged with no code review pass" "$code $(merged)" "0 merged"
+rm -f "$G/merged-50"
+echo yes >"$G/review-42"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "one with it and no pass: refused" "$code $(printf '%s' "$out" | grep -c 'issue #42 carries the label review and the code review has not passed the current head: push it, then review.sh request 42$') $(merged)" "1 1 not-merged"
+touch "$G/labels-broken"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
+ok "labels that cannot be read refuse the merge" "$code $(printf '%s' "$out" | grep -c 'could not read the labels of #42: try again') $(merged)" "1 1 not-merged"
+rm -f "$G/labels-broken"
+review_passed
+printf 'pass\t%s\n' "$reviewed" >"$R/qa/42"
+echo yes >"$G/qa-42"
 
 echo "== merge.sh: gh pr merge fails"
 # merging <pr>: the developer's state before it merges, so a merge's own shows.
@@ -1006,6 +1031,8 @@ git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/70-qa" 70-qa
 DEV70=22222222-0000-0000-0000-000000000070
 QA70=55555555-0000-0000-0000-000000000070
 cd "$ROOT/.claude/worktrees/70-qa" || exit 1
+# Issue 70 carries the label review: its QA waits for a code review pass.
+echo yes >"$G/review-70"
 sh "$SC/role.sh" "$DEV70" dev 70 70-qa >/dev/null
 date +%s >"$S/$DEV70/alive"
 git -c user.email=t@t -c user.name=t commit -q --allow-empty -m work
@@ -1040,8 +1067,24 @@ ok "and no other QA agent starts" "$(grep -c -- '--name repo · qa #70' "$T/clau
 jq '.state = "done"' "$S/$QA70/status" >"$S/$QA70/status.t" && mv "$S/$QA70/status.t" "$S/$QA70/status"
 CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 >/dev/null
 ok "with the QA agent gone, a new one is asked for" "$(cut -f1,2 "$R/qa/70")" "requested	$fixed"
+# Without the label review, QA waits for no code review: a head with no pass is accepted.
+echo no >"$G/review-70"
+git -c user.email=t@t -c user.name=t commit -q --allow-empty -m again
+git push -q origin 70-qa
+unreviewed=$(git rev-parse HEAD)
+CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 >/dev/null 2>&1; code=$?
+ok "a qa issue without the label review: QA asked with no code review pass" "$code $(cut -f1,2 "$R/qa/70") $(cut -f1 "$R/review/70")" "0 requested	$unreviewed $fixed"
+# A QA agent of a failed round still there is woken by a comment that names no code review.
+jq '.state = "others"' "$S/$QA70/status" >"$S/$QA70/status.t" && mv "$S/$QA70/status.t" "$S/$QA70/status"
+CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 >/dev/null
+last=$(ls -t "$G/comments" | head -1)
+ok "and the QA agent still there is woken with no code review named" "$(head -1 "$G/comments/$last") $(grep -c "^QA again on \`70-qa\` at ${unreviewed%"${unreviewed#???????}"}\. Go on from where you stopped" "$G/comments/$last") $(grep -c 'code review' "$G/comments/$last")" "**dev #70 → qa #70** 1 0"
+touch "$G/labels-broken"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 2>&1); code=$?
+ok "labels that cannot be read refuse the request" "$code | $out" "1 | could not read the labels of #70: try again"
+rm -f "$G/labels-broken"
 cd "$ROOT" || exit 1
-rm -rf "${S:?}/$DEV70" "${S:?}/$QA70" "$R/qa/70" "$R/review/70"
+rm -rf "${S:?}/$DEV70" "${S:?}/$QA70" "$R/qa/70" "$R/review/70" "$G/review-70"
 git -C "$ROOT" worktree remove --force "$ROOT/.claude/worktrees/70-qa"
 
 echo "== review fixes"

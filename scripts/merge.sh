@@ -1,6 +1,7 @@
 #!/bin/sh
 # The developer merges its own pull request, once everything holds for its current head:
-#   - the code review passed (review.sh);
+#   - the code review passed, when the issue carries the label review (review.sh): without it, the pull
+#     request merges with no code review;
 #   - the QA passed, when the issue carries the label qa (qa.sh);
 #   - neither was recorded before the issue's latest `## Technical decisions` comment;
 #   - every check of the pull request is green.
@@ -39,8 +40,15 @@ issue=$(printf '%s' "$info" | jq -r '.closingIssuesReferences[0].number // empty
 [ -n "$issue" ] || issue=$(jq -r '.issue // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 [ -n "$issue" ] || refuse "#$pr closes no issue and this session has none: write Closes #<issue> in its description"
 
-[ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] ||
-	refuse "the code review has not passed the current head: push it, then review.sh request $issue"
+review_needed=$(sh "$here/review.sh" needed "$issue" 2>/dev/null || true)
+case "$review_needed" in
+yes)
+	[ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] ||
+		refuse "issue #$issue carries the label review and the code review has not passed the current head: push it, then review.sh request $issue"
+	;;
+no) ;;
+*) refuse "could not read the labels of #$issue: try again" ;;
+esac
 # A review or a QA pass recorded before the issue's latest `## Technical decisions` checked older decisions. The
 # times are UTC in GitHub's own format, so they compare as text; a record of an older version, with no time,
 # is older than any decision.
@@ -56,7 +64,7 @@ before_decisions() {
 	esac
 	jq -n -e --arg at "$1" --arg decided "$decided" '$decided > $at' >/dev/null
 }
-if before_decisions "$(cut -f2 "$repo_dir/review/$issue")"; then
+if [ "$review_needed" = yes ] && before_decisions "$(cut -f2 "$repo_dir/review/$issue")"; then
 	refuse "the decisions changed after the code review: review.sh request $issue"
 fi
 needed=$(sh "$here/qa.sh" needed "$issue" 2>/dev/null || true)

@@ -1,18 +1,21 @@
 #!/bin/sh
-# The code review of a change: a reviewer, a session of its own (briefs/reviewer.md), reads the code of the
-# developer's pushed branch against the issue and the repository's patterns and standards, before the pull
-# request is opened. The records are keyed by the issue, with the head they are about:
+# The code review of a change, for an issue with the label `review`, which the tech lead adds when the user
+# asks for one: a reviewer, a session of its own (briefs/reviewer.md), reads the code of the developer's
+# pushed branch against the issue and the repository's patterns and standards, before the pull request is
+# opened. The records are keyed by the issue, with the head they are about:
 # "requested <head> <issue> <session> <branch>" once asked, "reviewing ..." once a reviewer took it
 # (start-review.sh), then "<head> <time (UTC)> <summary>" once it passed.
 #   review.sh request <issue>     the developer, once its branch is pushed: you wait (purple) and the plugin
 #                                 starts a reviewer on the pushed head, which writes its outcome on the issue
 #   review.sh pass <issue> "<one line: what the reviewer checked>"
 #                                 the reviewer: records the pass for the head it read
-# merge.sh refuses a pull request whose head has no pass, or a pass recorded before the issue's latest
-# `## Technical decisions`; qa.sh refuses QA on a pushed head with no pass.
+#   review.sh needed <issue>      prints yes when the issue carries the label review
+# For a `review` issue, merge.sh refuses a pull request whose head has no pass, or a pass recorded before the
+# issue's latest `## Technical decisions`, and qa.sh refuses QA on a pushed head with no pass. An issue
+# without the label merges with no code review.
 set -eu
 
-action=${1:?request or pass}
+action=${1:?request, pass or needed}
 issue=${2:?issue number}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
@@ -25,6 +28,9 @@ mkdir -p "$repo_dir/review"
 pushed() { git ls-remote "$remote" "refs/heads/$1" 2>/dev/null | cut -f1; }
 
 case "$action" in
+needed)
+	gh issue view "$issue" --json labels --jq 'if any(.labels[]; .name == "review") then "yes" else "no" end'
+	;;
 request)
 	remote=$(repo_remote) || exit 1
 	# The developer's branch: its session's, else the one checked out here.
@@ -64,7 +70,7 @@ pass)
 	echo "code review passed for issue #$issue at ${head%"${head#???????}"}"
 	;;
 *)
-	echo "usage: review.sh request <issue> | review.sh pass <issue> \"<what the reviewer checked>\"" >&2
+	echo "usage: review.sh request|needed <issue> | review.sh pass <issue> \"<what the reviewer checked>\"" >&2
 	exit 2
 	;;
 esac

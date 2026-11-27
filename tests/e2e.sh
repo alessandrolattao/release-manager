@@ -1035,6 +1035,11 @@ git push -q origin 70-qa
 unreviewed=$(git rev-parse HEAD)
 CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 >/dev/null 2>&1; code=$?
 ok "a qa issue without the label review: QA asked with no code review pass" "$code $(cut -f1,2 "$R/qa/70") $(cut -f1 "$R/review/70")" "0 requested	$unreviewed $fixed"
+# A QA agent of a failed round still there is woken by a comment that names no code review.
+jq '.state = "others"' "$S/$QA70/status" >"$S/$QA70/status.t" && mv "$S/$QA70/status.t" "$S/$QA70/status"
+CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 >/dev/null
+last=$(ls -t "$G/comments" | head -1)
+ok "and the QA agent still there is woken with no code review named" "$(head -1 "$G/comments/$last") $(grep -c "^QA again on \`70-qa\` at ${unreviewed%"${unreviewed#???????}"}\. Go on from where you stopped" "$G/comments/$last") $(grep -c 'code review' "$G/comments/$last")" "**dev #70 → qa #70** 1 0"
 touch "$G/labels-broken"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV70 sh "$SC/qa.sh" request 70 2>&1); code=$?
 ok "labels that cannot be read refuse the request" "$code | $out" "1 | could not read the labels of #70: try again"

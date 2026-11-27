@@ -43,7 +43,8 @@ request)
 	}
 	short=${head%"${head#???????}"}
 	# QA comes at the end: for an issue with the label review, on a head the code review passed.
-	case "$(sh "$here/review.sh" needed "$issue" 2>/dev/null || true)" in
+	review_needed=$(sh "$here/review.sh" needed "$issue" 2>/dev/null || true)
+	case "$review_needed" in
 	yes)
 		[ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] || {
 			echo "the code review has not passed $branch at $short: review.sh request $issue, then QA once it passed" >&2
@@ -65,8 +66,10 @@ request)
 	if [ -n "$tester" ]; then
 		# Taken by that agent: the dispatcher starts no other one.
 		printf 'testing\t%s\t%s\t%s\t%s\n' "$head" "$issue" "$me" "$branch" >"$record"
-		# The comment sets your wait on it, until its outcome.
-		printf 'QA again on `%s` at %s, where the code review passed. Go on from where you stopped: first what failed, then the criteria you had not reached yet; take the main checkout again (checkout.sh take).\n' "$branch" "$short" |
+		# The comment sets your wait on it, until its outcome. It names the code review only on a `review` issue.
+		where=""
+		[ "$review_needed" != yes ] || where=", where the code review passed"
+		printf 'QA again on `%s` at %s%s. Go on from where you stopped: first what failed, then the criteria you had not reached yet; take the main checkout again (checkout.sh take).\n' "$branch" "$short" "$where" |
 			sh "$here/comment.sh" "$issue" qa >/dev/null
 		echo "QA requested for issue #$issue on $branch at $short: its QA agent ($(address_of "$tester")) is woken to go on"
 	else

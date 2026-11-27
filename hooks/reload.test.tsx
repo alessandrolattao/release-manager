@@ -111,6 +111,28 @@ test('a session in a turn reloads only once the turn has ended', async ($, on) =
   expect(reloads(commands)).toEqual(['/reload-plugins --force'])
 })
 
+test('the tick that starts a reload delivers no wake and sets no color: the new module does', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const installed = { [CACHE]: ['1.2.3'] }
+  const { files: all } = files(on, { 'plugin.json': manifest('1.2.3'), name: 'repo · review #42', ...reviewer }, installed)
+  const { commands, prompts } = engine(on)
+  const colors = () => commands.filter(c => c.startsWith('/color'))
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(colors()).toEqual(['/color cyan'])
+  // Between turns for 10 seconds: a wake for it, its state changed, and a newer version installed, all at once.
+  all.set('wake', `${NOW / 1000 + 9}\tcheckout\tthe main checkout is free: take it now with checkout.sh take\t\n`)
+  all.set('status', JSON.stringify({ role: 'review', state: 'others', detail: 'waits for the checkout' }))
+  installed[CACHE].push('1.2.4')
+  await clock.advance(2000)
+  expect(reloads(commands)).toEqual(['/reload-plugins --force'])
+  expect(prompts).toEqual([])
+  expect(all.has('wake-read')).toBe(false)
+  expect(colors()).toEqual(['/color cyan'])
+})
+
 // A QA agent of o/r, and the main checkout's lock as scripts/checkout.sh writes it: holder, since, branch.
 const tester = { role: 'qa', status: JSON.stringify({ role: 'qa', repo: 'o/r', state: 'working', detail: 'testing in the checkout' }) }
 const lock = (holder: string) => `${holder}\n1800000000\n42-x\n`

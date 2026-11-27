@@ -955,22 +955,23 @@ async function holdsCheckout($: EngineInterface, repo: string): Promise<boolean>
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
 // since the restart carries its own prompt. A session that holds its repository's main checkout (holdsCheckout)
 // reloads only once it has given it back: it may be testing there, and a reload restarts the plugins' MCP
-// servers, a browser's signed-in sessions with them.
-async function reloadIfBehind($: EngineInterface, folder: string, status: Status): Promise<void> {
+// servers, a browser's signed-in sessions with them. True when it started a reload.
+async function reloadIfBehind($: EngineInterface, folder: string, status: Status): Promise<boolean> {
   const running = await versionOf($)
   if (running === '') {
-    return
+    return false
   }
   const installed = await installedOf($, folder)
   if (installed === null || installed.version === reloadedTo || !isNewer(installed.version, running)) {
-    return
+    return false
   }
   if (await holdsCheckout($, status.repo ?? '')) {
-    return
+    return false
   }
   reloadedTo = installed.version
   await $.fs.write(`${folder}/reloading`, `${installed.version}\n`)
   void reload($, folder, installed.root)
+  return true
 }
 
 async function reload($: EngineInterface, folder: string, root: string): Promise<void> {
@@ -1086,11 +1087,16 @@ async function tick($: EngineInterface): Promise<void> {
     }
     if (!isBusy) {
       // A newer version installed on the account: the session reloads it. What fails there never keeps the
-      // session from its wakes and its color.
+      // session from its wakes and its color. The tick that starts a reload ends there: no wake is marked
+      // delivered, nor a name or color set, by the module being replaced; the new one does it.
+      let isReloading = false
       try {
-        await reloadIfBehind($, folder, status)
+        isReloading = await reloadIfBehind($, folder, status)
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
+      }
+      if (isReloading) {
+        return
       }
       // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
       if (!(await limitWake($, folder, now))) {

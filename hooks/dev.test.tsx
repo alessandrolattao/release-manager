@@ -183,7 +183,9 @@ test("the work is unknown until a script has found the repository's remote", asy
   await ui.unmount()
 })
 
-test('GitHub is read at most every 5 minutes, and a pull request opened since shows', async ($, on) => {
+// Six minutes of the module's 2-second ticks: seconds of real time, more on a busy machine, past the kit's
+// default 5000 ms there. It gets the time that work takes.
+test('GitHub is read at most every 5 minutes, and a pull request opened since shows', { timeoutMs: 30000 }, async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
   const files = seeded(on)

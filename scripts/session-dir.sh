@@ -4,8 +4,9 @@
 #                                asked, blocked, wake, commented, version (what the hooks module and the
 #                                scripts read and write)
 #   $team_state/repos/<key>/     one folder per repository: the checkout lock, the dispatcher's lock and
-#                                cursor, QA and review records, the board, and `seen` (what reached its tech
-#                                leads: hooks/sessions.tsx, mentions.sh)
+#                                cursor, QA and review records, the board, `seen` (what reached its tech
+#                                leads: hooks/sessions.tsx, mentions.sh), and `base` and `remote` (the default
+#                                branch and the git remote of the repository, repo.sh)
 #   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages
 # The status of a session is one JSON object, written by the scripts and the hooks, never by the model:
 #   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "branch",

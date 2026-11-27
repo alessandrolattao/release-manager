@@ -150,6 +150,8 @@ case "$*" in
 	if [ "$4" = deadbeefcafe ] && [ -f "$G/superseded-50" ]; then
 		echo '[{"status":"completed","conclusion":"cancelled","workflowName":"ci","url":"u0"}]'
 	elif [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
+# The board's CI of the default branch: the commit asked about, in ci-commit.
+"run list --branch "*) printf '%s\n' "$6" >"$G/ci-commit"; echo '[]' ;;
 "run list "*) echo '[]' ;;
 "workflow list "*) [ ! -f "$G/workflows-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/workflows" 2>/dev/null || true ;;
 # A workflow file as the branch it is read on has it: workflow-<id>.yml on main, workflow-<id>-<branch>.yml on another.
@@ -1655,6 +1657,39 @@ echo "$landed" >"$G/landed-50"
 echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
 echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
 ok "main-ci.sh finds a merge GitHub has not marked in the default branch as that remote has it" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main ${landed%"${landed#???????}"}: t"
+ok "the remote's name is written for the hooks module" "$(cat "$R/remote")" "fork"
+rm -f "$R/ci" "$G/ci-commit"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "the board's CI is the default branch's newest commit on that remote" "$(cat "$G/ci-commit" 2>/dev/null)" "$newmain"
+# The code review and the QA find the branch pushed there, and their briefs read it from there.
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/review.sh" request 80 >/dev/null 2>&1; code=$?
+ok "review.sh request finds the branch's head on that remote" "$code $(cut -f1,2 "$R/review/80")" "0 requested${tab}$pushed"
+cd "$ROOT" || exit 1
+REV=99999999-0000-0000-0000-000000000080
+echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$REV\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
+: >"$T/claude.log"
+sh "$SC/start-review.sh" 80 >/dev/null 2>&1; code=$?
+ok "the reviewer's brief reads the change from that remote" "$code $(grep -cF "git fetch -q fork main 80-fork-thing\`, then \`git diff fork/main...$pushed\`" "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "0 1 0"
+CLAUDE_CODE_SESSION_ID=$REV sh "$SC/review.sh" pass 80 "reads the fork" >/dev/null
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/qa.sh" request 80 >/dev/null 2>&1; code=$?
+ok "qa.sh request too" "$code $(cut -f1,2 "$R/qa/80")" "0 requested${tab}$pushed"
+cd "$ROOT" || exit 1
+QAF=77777777-0000-0000-0000-000000000080
+echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$QAF\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
+: >"$T/claude.log"
+sh "$SC/start-qa.sh" 80 >/dev/null 2>&1; code=$?
+ok "and the QA agent's brief" "$code $(grep -cF 'git fetch -q fork main 80-fork-thing`, then `git diff fork/main...fork/80-fork-thing`' "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "0 1 0"
+echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-0000-0000-000000000002","status":"running","state":"working"}]' >"$T/agents.json"
+: >"$T/claude.log"
+echo "Da dove si legge?" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/spike.sh" "fork remote" 1 >/dev/null 2>&1 &
+spk=$!
+n=0
+while ! grep -q -- '--bg' "$T/claude.log" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.5; n=$((n + 1)); done
+kill "$spk" 2>/dev/null
+spk=""
+ok "and a spike's brief" "$(grep -cF 'First run `git fetch -q fork main`, so `fork/main` is' "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "1 0"
 # No remote points to test/repo any more.
 git -C "$ROOT" remote remove fork
 missing="no git remote of $ROOT points to test/repo, the repository gh works on here: add it with git -C $ROOT remote add test https://github.com/test/repo.git, then run this again"
@@ -1668,6 +1703,11 @@ ok "checkout.sh take stops too, before holding the checkout" "$code $(held) | $o
 cd "$ROOT" || exit 1
 out=$(sh "$SC/main-ci.sh" 50 2>&1); code=$?
 ok "and main-ci.sh" "$code | $out" "1 | $missing"
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/review.sh" request 80 2>&1); code=$?
+ok "and review.sh request" "$code | $out" "1 | $missing"
+cd "$ROOT" || exit 1
+ok "and the hooks module's remote is gone" "$([ -f "$R/remote" ] && echo kept || echo gone)" "gone"
 rm -f "$G/unmarked-50" "$G/landed-50" "$G/workflows" "$G/runs"
 git -C "$ROOT" remote set-url origin "$T/test/repo.git"
 

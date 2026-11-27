@@ -3,7 +3,9 @@
 # failed in a way it should not, a step that left a session stuck, a rule of the flow that did not fit.
 # The plugin's repository is public and the projects are not, so the report describes the plugin only:
 # no project or company name, no code, path, issue text, secret or link of the project, nothing the user
-# said in their words. Say what was expected, what happened, which script or step, and how to see it again.
+# said in their words. Say what was expected, what happened, which script or step, and how to see it again,
+# with a test that shows it is real (a command and its output): never an analysis of the plugin's code, a
+# cause or a proposed fix.
 # An open report with the same title gets a comment instead of a second issue. Both go out with the user's
 # GitHub account, so both end with the hidden line note.sh signs with (`<!-- team · <address> -->`): the
 # plugin repository's dispatcher then knows they are not the user's.
@@ -34,7 +36,7 @@ me=${CLAUDE_CODE_SESSION_ID:-none}
 role=$(cat "$sessions_dir/$me/role" 2>/dev/null || echo "?")
 # The session's address, as repo.sh's address_of computes it.
 from=$(jq -r 'if .role == "tech-lead" then "tech lead"
-	elif .role == "dev" or .role == "qa" then .role + " #" + (.issue | tostring)
+	elif .role == "dev" or .role == "review" or .role == "qa" then .role + " #" + (.issue | tostring)
 	elif .role == "spike" then "spike " + (.topic // "")
 	else "team" end' "$sessions_dir/$me/status" 2>/dev/null || echo team)
 

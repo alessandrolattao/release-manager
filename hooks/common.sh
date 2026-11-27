@@ -13,5 +13,5 @@ transcript=$(field transcript_path)
 # shellcheck source=scripts/session-dir.sh
 . "$scripts/session-dir.sh"
 
-# role: tech-lead, dev, qa, spike, or empty for a session outside the team.
+# role: tech-lead, dev, review, qa, spike, or empty for a session outside the team.
 role=$(cat "$sessions_dir/$sid/role" 2>/dev/null || true)

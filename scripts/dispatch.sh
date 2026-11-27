@@ -2,14 +2,14 @@
 # One cycle of the team's dispatcher. dispatcher.sh, a process of its own, runs it every minute; one
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
 #   1. hands each new GitHub comment of the repository (not an edit of an older one) to the session it is
-#      written to, but not to a developer or QA agent started after it, and what another repository's tech
+#      written to, but not to a developer, reviewer or QA agent started after it, and what another repository's tech
 #      lead writes here (a comment or a new issue, signed `<!-- team · tech lead of <owner/name> -->`) to this
 #      repository's tech lead;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      repository's tech lead;
-#   3. marks dead sessions stuck (red, in the agent list too), or done when they are developers or QA agents
-#      whose issue is closed, and removes finished ones with their worktree;
-#   4. resumes dead developer and QA agents, and starts the QA agents asked for;
+#   3. marks dead sessions stuck (red, in the agent list too), or done when they are developers, reviewers or
+#      QA agents whose issue is closed, and removes finished ones with their worktree;
+#   4. resumes dead developers, reviewers and QA agents, and starts the reviewers and QA agents asked for;
 #   5. starts a developer for the next workable issue (no cap: the user decides what is ready);
 #   6. writes the board's summary: checkout, queue, main CI, how long the plan usage lasts.
 #   dispatch.sh      (from the main checkout)
@@ -143,8 +143,8 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 		case "$to" in
 		"@$login") ;;
 		"tech lead"*) targets=$(tech_lead_here) ;;
-		"dev #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
-		"(record)") targets="$(open_of dev "$issue") $(open_of qa "$issue")" ;;
+		"dev #"* | "review #"* | "qa #"*) targets=$(open_of "${to%% *}" "${to#*#}") ;;
+		"(record)") targets="$(open_of dev "$issue") $(open_of review "$issue") $(open_of qa "$issue")" ;;
 		"")
 			# Written on GitHub by the user, without a header: to whoever waits on the user for that issue
 			# (asked there, or in its own chat about it), else to its developer, else to the tech lead.
@@ -158,9 +158,9 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 		esac
 		for id in $targets; do
 			[ "$(address_of "$id")" != "$from" ] || continue
-			# A developer or QA agent reads the issue with all its comments when it starts: one written before its
-			# launch (`started`, role.sh) it has read already.
-			started=$(jq -r 'select(.role == "dev" or .role == "qa") | .started // empty' "$sessions_dir/$id/status" 2>/dev/null || true)
+			# A developer, reviewer or QA agent reads the issue with all its comments when it starts: one written
+			# before its launch (`started`, role.sh) it has read already.
+			started=$(jq -r 'select(.role == "dev" or .role == "review" or .role == "qa") | .started // empty' "$sessions_dir/$id/status" 2>/dev/null || true)
 			[ -z "$started" ] || [ "$created" -ge "$started" ] || continue
 			wake "$id" "$created" "$from on #$issue" "$text" "$link"
 		done
@@ -202,7 +202,7 @@ else
 fi
 
 # 2. Questions an agent left in its own chat, which nobody reads, go to the tech lead on the issue.
-for id in $(sessions_of dev) $(sessions_of qa); do
+for id in $(sessions_of dev) $(sessions_of review) $(sessions_of qa); do
 	asked="$sessions_dir/$id/asked"
 	waiting_in_chat "$id" || continue
 	[ ! -f "$asked.told" ] || continue
@@ -229,13 +229,13 @@ for f in "$sessions_dir"/*/status; do
 	job=$(job_of "$id")
 	dead=false
 	alive "$id" || running "$id" || dead=true
-	# A dead developer or QA agent whose issue is closed is done, even when it died before done.sh, and goes
+	# A dead developer, reviewer or QA agent whose issue is closed is done, even when it died before done.sh, and goes
 	# at once: no turn of its own is left to end. A live one is left alone: it may still follow its merge's CI
 	# and deploy. An issue whose state cannot be read is not closed.
 	closed=false
 	if [ "$state" != done ] && [ "$dead" = true ]; then
 		case "$(jq -r '.role // ""' "$f")" in
-		dev | qa)
+		dev | review | qa)
 			issue=$(jq -r '.issue // ""' "$f")
 			[ -z "$issue" ] || [ "$(gh issue view "$issue" --json state --jq .state 2>/dev/null)" != CLOSED ] || closed=true
 			;;
@@ -277,8 +277,14 @@ for f in "$sessions_dir"/*/status; do
 	fi
 done
 
-# 4. Dead agents come back; QA agents asked for start. A QA record is keyed by its issue.
+# 4. Dead agents come back; reviewers and QA agents asked for start. A review or QA record is keyed by its issue.
 resumed=$(sh "$here/resume-agents.sh" 2>/dev/null | grep -c '^resumed dev ' || true)
+for record in "$repo_dir"/review/*; do
+	[ -f "$record" ] || continue
+	[ "$(cut -f1 "$record")" = requested ] || continue
+	issue=$(basename "$record")
+	[ -n "$(live_of review "$issue")" ] || sh "$here/start-review.sh" "$issue" >/dev/null 2>&1 || true
+done
 for record in "$repo_dir"/qa/*; do
 	[ -f "$record" ] || continue
 	[ "$(cut -f1 "$record")" = requested ] || continue
@@ -377,7 +383,7 @@ elsewhere=$(printf '%s\n' "$queue" | jq -c 'select(.status == "started") | {numb
 		[ -n "$h" ] && [ "$h" != "$myhost" ] || continue
 		jq -c --argjson row "$row" --argjson now "$now" '
 			($now - (.at // $now)) as $quiet
-			| (((.from // "") | test("^(dev|qa) #")) and (.fyi != true)) as $asks
+			| (((.from // "") | test("^(dev|review|qa) #")) and (.fyi != true)) as $asks
 			| {issue: $row.number, title: $row.title, host: .host, since: (.at // $now),
 				stage: (($row.statusName // "in progress") | ascii_downcase),
 				state: (if $quiet > 3600 then "stuck" elif $asks then "others" else "working" end),

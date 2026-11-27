@@ -9,8 +9,10 @@
 #   you          the user, from a tech lead only: a real @mention (GitHub notifies them), the label
 #                question on the issue. The user talks only with the tech leads: other sessions ask a tech lead.
 #   tech lead    the repository's tech lead
-#   dev | qa     the developer or the QA agent of that issue
-#   "<address>"  a session by its address, as "dev #42" or "qa #42"
+#   dev | review | qa
+#                the developer, the reviewer or the QA agent of that issue
+#   "<address>"  a session by its address, as "dev #42", "review #42" or "qa #42"
+# Any other recipient is refused, and nothing is posted. The options may come anywhere among the arguments.
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
 # The status records whom you wait on (waits_on: the address, or "the user"): their comment ends the wait.
 #   --fyi        a reply or a piece of news: nobody owes you an answer, your state does not change, and the
@@ -27,10 +29,11 @@
 # Prints the comment's link.
 set -eu
 
-target=${1:?issue or pull request number}
-to=${2:?you, tech lead, dev, qa or an address}
-shift 2
-fyi="" elsewhere=""
+usage() {
+	echo "usage: comment.sh <issue-or-pr> <you|\"tech lead\"|dev|review|qa|\"dev #<n>\"|\"review #<n>\"|\"qa #<n>\"> [--fyi] [--repo <owner/name>] <<'EOF' ... EOF" >&2
+	exit 2
+}
+target="" to="" fyi="" elsewhere=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--fyi)
@@ -41,12 +44,39 @@ while [ $# -gt 0 ]; do
 		elsewhere=${2:?owner/name of the other repository}
 		shift 2
 		;;
-	*)
+	-*)
 		echo "unknown option '$1'" >&2
-		exit 2
+		usage
+		;;
+	*)
+		if [ -z "$target" ]; then
+			target=$1
+		elif [ -z "$to" ]; then
+			to=$1
+		else
+			echo "one issue or pull request and one recipient: '$1' is one too many" >&2
+			usage
+		fi
+		shift
 		;;
 	esac
 done
+[ -n "$target" ] && [ -n "$to" ] || usage
+# Only a known address: anything else would post a header that wakes nobody.
+case "$to" in
+you | "tech lead" | dev | review | qa) ;;
+"dev #"[0-9]* | "review #"[0-9]* | "qa #"[0-9]*)
+	case "${to#*#}" in *[!0-9]*)
+		echo "unknown recipient '$to'" >&2
+		usage
+		;;
+	esac
+	;;
+*)
+	echo "unknown recipient '$to'" >&2
+	usage
+	;;
+esac
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
@@ -87,7 +117,7 @@ login=$(gh api user --jq .login)
 case "$to" in
 you) address="@$login" ;;
 "tech lead") address="tech lead" ;;
-dev | qa) address="$to #$issue" ;;
+dev | review | qa) address="$to #$issue" ;;
 *) address=$to ;;
 esac
 

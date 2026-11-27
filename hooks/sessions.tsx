@@ -33,7 +33,7 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     issue's own GitHub status, its branch, its pull request with its checks, its work (git in its worktree,
 //     at every refresh), its state, and a summary with the checkout, the reviews, the default branch's CI and
 //     its model. The status and the pull request come from GitHub at most every 5 minutes, cached in the
-//     session's folder (`github`). A QA agent or a spike has none.
+//     session's folder (`github`). A reviewer, a QA agent or a spike has none.
 //   - a tech lead looks every 30 minutes for a newer version of the plugin, published on its repository's
 //     default branch; the board's foot offers it, and a click runs /team:update (scripts/update.sh).
 //   - a tech lead keeps that dispatcher running: stopped (a restart of the machine, a crash), it starts it
@@ -82,7 +82,7 @@ const BACKGROUNDS: Record<string, { bg: string; fg: string }> = {
   stuck: { bg: 'red', fg: 'white' },
   idle: { bg: 'green', fg: 'black' },
 }
-const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, qa: 2, spike: 3 }
+const ORDER: Record<string, number> = { 'tech-lead': 0, dev: 1, review: 2, qa: 3, spike: 4 }
 // What the board writes before how long an agent has been in its state: "waiting 9m", "idle 1h20m".
 const VERBS: Record<string, string> = { you: 'waiting', others: 'waiting', working: 'working', stuck: 'stuck', idle: 'idle' }
 
@@ -572,14 +572,14 @@ async function refreshBoard($: EngineInterface, repo: string): Promise<void> {
   await update($, board, () => ({ repo, rows, summary, dispatcher, updated: now }))
 }
 
-// How comments name a session, as scripts/repo.sh address_of does: "tech lead", "dev #<n>", "qa #<n>",
-// "spike <topic>".
+// How comments name a session, as scripts/repo.sh address_of does: "tech lead", "dev #<n>", "review #<n>",
+// "qa #<n>", "spike <topic>".
 async function addressOf($: EngineInterface, id: string): Promise<string> {
   const status = await readStatus($, `${await rootOf($)}/sessions/${id}`)
   if (status.role === 'tech-lead') {
     return 'tech lead'
   }
-  if (status.role === 'dev' || status.role === 'qa') {
+  if (status.role === 'dev' || status.role === 'review' || status.role === 'qa') {
     return `${status.role} #${status.issue ?? '?'}`
   }
   return status.role === 'spike' ? `spike ${status.topic ?? ''}`.trim() : 'team'
@@ -720,21 +720,29 @@ async function readGithub($: EngineInterface, folder: string, cwd: string, repo:
 }
 
 // The reviews of the branch (review.sh, qa.sh), keyed by the issue since they come before the pull request:
-// each counts only for the worktree's HEAD, as merge.sh wants it for the head it merges. "decision review
+// each outcome counts only for the worktree's HEAD, as merge.sh wants it for the head it merges. "code review
 // passed · QA needed".
 async function reviewOf($: EngineInterface, dir: string, cwd: string, issue: number, qa: boolean | null): Promise<string> {
   const head = (await gitOf($, cwd, ['rev-parse', 'HEAD'])) ?? ''
+  // review/<issue>: "requested <head> ..." once asked, "reviewing <head> ..." once a reviewer took it, then
+  // "<head> <time> <summary>" once it passed.
   const reviewed = issue === 0 ? '' : ((await readText($, `${dir}/review/${issue}`)).split('\t')[0] ?? '')
-  const decision = head !== '' && reviewed === head ? 'decision review passed' : 'decision review not passed'
-  // qa/<issue>: "requested <head> <issue> <session> <branch>" once asked, then "pass <head>" or "fail <head>".
+  const code =
+    reviewed === 'requested' || reviewed === 'reviewing'
+      ? 'code review asked'
+      : head !== '' && reviewed === head
+        ? 'code review passed'
+        : 'code review not passed'
+  // qa/<issue>: "requested <head> <issue> <session> <branch>" once asked, "testing ..." once a QA agent took
+  // it, then "pass <head>" or "fail <head>".
   const [outcome = '', tested = ''] = issue === 0 ? [] : (await readText($, `${dir}/qa/${issue}`)).split('\t')
   let quality = qa === null ? '' : qa ? 'QA needed' : 'no QA'
-  if (outcome === 'requested') {
+  if (outcome === 'requested' || outcome === 'testing') {
     quality = 'QA asked'
   } else if ((outcome === 'pass' || outcome === 'fail') && head !== '' && tested === head) {
     quality = outcome === 'pass' ? 'QA passed' : 'QA failed'
   }
-  return quality === '' ? decision : `${decision} · ${quality}`
+  return quality === '' ? code : `${code} · ${quality}`
 }
 
 // A developer's pane: its own status file, git in its worktree, what it last read from GitHub (asked again
@@ -1045,10 +1053,14 @@ async function noteSeen($: EngineInterface, repo: string, links: string[]): Prom
 // A comment the session already answered. In a tech lead: one of the user's by any later comment of the
 // session on its thread; an agent's only by a comment of the session written to that agent on its thread
 // after the comment reached the tech lead (`seen`), so one never seen is never answered. In any other
-// session: by any later comment of the session on its thread, a note included, whoever it was to.
+// session: never the tech lead's, which is always delivered (a deleted one aside, isGone); anyone else's by
+// any later comment of the session on its thread, a note included, whoever it was to.
 function isAnswered(line: WakeLine, said: Said[], role: string, seen: Seen): boolean {
   const comment = commentOf(line.from)
   if (comment === null || !(line.time > 0)) {
+    return false
+  }
+  if (role !== 'tech-lead' && comment.author === 'tech lead') {
     return false
   }
   if (role === 'tech-lead' && comment.author !== USER) {

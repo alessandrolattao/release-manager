@@ -56,7 +56,7 @@ fi
 
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}|$repo_full|g" \
 	-e "s|{{WORKTREE}}|$worktree|g" -e "s|{{ROOT}}|$root|g" -e "s|{{BASE}}|$base|g" \
-	-e "s|{{SCRIPTS}}|$here|g" -e "s|{{BRIEFS}}|$here/../briefs|g" "$here/../briefs/dev.md")
+	-e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/dev.md")
 
 cd "$worktree"
 name=$(dev_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in progress")

@@ -2,7 +2,7 @@
 # A comment for the record, written to nobody in particular: an issue's `## Technical decisions`, findings, what
 # was settled. It goes out with the user's GitHub account, as every comment of the team, so a hidden last line
 # signs it (`<!-- team · <address> -->`): the plugin then knows it is not the user's, wakes nobody for its
-# author, and tells the developer and the QA agent of that issue. The session's `commented` records it
+# author, and tells the developer, the reviewer and the QA agent of that issue. The session's `commented` records it
 # (session-dir.sh commented_on): a wake for a comment written on that thread before is not delivered; in a
 # tech lead, only for one of the user's.
 #   note.sh <issue-or-pr> [--repo <owner/name>] <<'EOF'

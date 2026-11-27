@@ -1,6 +1,6 @@
 #!/bin/sh
 # The developer merges its own pull request, once everything holds for its current head:
-#   - the decision review passed (review.sh);
+#   - the code review passed (review.sh);
 #   - the QA passed, when the issue carries the label qa (qa.sh);
 #   - neither was recorded before the issue's latest `## Technical decisions` comment;
 #   - every check of the pull request is green.
@@ -40,7 +40,7 @@ issue=$(printf '%s' "$info" | jq -r '.closingIssuesReferences[0].number // empty
 [ -n "$issue" ] || refuse "#$pr closes no issue and this session has none: write Closes #<issue> in its description"
 
 [ "$(cut -f1 "$repo_dir/review/$issue" 2>/dev/null || true)" = "$head" ] ||
-	refuse "no decision review for the current head: run the reviewer (briefs/reviewer.md), then review.sh pass $issue \"...\""
+	refuse "the code review has not passed the current head: push it, then review.sh request $issue"
 # A review or a QA pass recorded before the issue's latest `## Technical decisions` checked older decisions. The
 # times are UTC in GitHub's own format, so they compare as text; a record of an older version, with no time,
 # is older than any decision.
@@ -57,7 +57,7 @@ before_decisions() {
 	jq -n -e --arg at "$1" --arg decided "$decided" '$decided > $at' >/dev/null
 }
 if before_decisions "$(cut -f2 "$repo_dir/review/$issue")"; then
-	refuse "the decisions changed after the review: run the decision review again"
+	refuse "the decisions changed after the code review: review.sh request $issue"
 fi
 needed=$(sh "$here/qa.sh" needed "$issue" 2>/dev/null || true)
 case "$needed" in

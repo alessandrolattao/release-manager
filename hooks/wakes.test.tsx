@@ -463,12 +463,12 @@ test('a queued wake a developer already answered on its thread is not delivered,
     role: 'dev',
     status: JSON.stringify({ role: 'dev', issue: 42, state: 'working', detail: 'at work' }),
     wake: [
-      `${at}\ttech lead on #42\tUsa la tabella users\t${link(101)}`,
+      `${at}\treview #42 on #42\tFAIL: manca il test\t${link(101)}`,
       `${at + 40}\tqa #42 on #42\tLa pagina non carica\t${link(102, 'pull/50')}`,
       '',
     ].join('\n'),
     commented: [
-      // A note on the thread answers the tech lead's comment before it.
+      // A note on the thread answers the reviewer's comment before it.
       `${at + 30}\t42\t`,
       // A comment to the tech lead answers the QA agent's too: a developer's answer is anything it wrote after.
       `${at + 50}\t42\ttech lead`,
@@ -487,6 +487,31 @@ test('a queued wake a developer already answered on its thread is not delivered,
   expect(lookups(runs)).toEqual([])
 })
 
+test('a tech lead line is delivered to a developer that commented after it', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ role: 'dev', issue: 42, state: 'working', detail: 'at work' }),
+    wake: `${at}\ttech lead on #42\tUsa la tabella users\t${link(101)}\n`,
+    // A note and a comment to the tech lead after it: neither drops the tech lead's line.
+    commented: `${at + 30}\t42\t\n${at + 50}\t42\ttech lead\n`,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  const runs = engine(on, logs, '9.9.9', [], github([]))
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([`for you on GitHub: tech lead on #42: Usa la tabella users (${link(101)})`])
+  expect(files.get('wake-read')).toBe('1\n')
+  // Only a deleted comment is dropped: GitHub is asked about it.
+  expect(lookups(runs)).toEqual(['gh api repos/acme/shop/issues/comments/101 --silent'])
+})
+
 test('a queued wake with another comment left is delivered with that one only', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
@@ -497,7 +522,7 @@ test('a queued wake with another comment left is delivered with that one only', 
     status: JSON.stringify({ role: 'dev', issue: 42, state: 'working', detail: 'at work' }),
     wake: [
       `${at + 20}\ttech lead on #42\tcopia cancellata\t${link(101)}`,
-      `${at}\ttech lead on #42\tgià risposto\t${link(102)}`,
+      `${at}\tqa #42 on #42\tgià risposto\t${link(102)}`,
       `${at + 20}\ttech lead on #42\tUsa la tabella users\t${link(103)}`,
       // GitHub failing otherwise tells nothing: the comment stays.
       `${at + 20}\tqa #42 on #42\tLa pagina non carica\t${link(104, 'pull/50')}`,

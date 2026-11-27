@@ -1,6 +1,6 @@
 #!/bin/sh
 # Sets this session's state, which its color and the board show. Most of the time the other scripts set it
-# (comment.sh, checkout.sh, qa.sh, merge.sh, done.sh); call it yourself only for what they do not cover.
+# (comment.sh, checkout.sh, review.sh, qa.sh, merge.sh, done.sh); call it yourself only for what they do not cover.
 #   status.sh working "<what you are doing>" [--for <minutes>]
 #       --for: a wait of yours in the background (CI, a long build) that may last that long; until then a
 #       silent session is not taken for a stuck one

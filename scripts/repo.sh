@@ -30,10 +30,11 @@ in_base() {
 
 # The names of the sessions, without counters, so an address never goes stale.
 # Every name is "<repo> · <role> · <detail>", so the agent list keeps a project's sessions together; a
-# developer's and a QA agent's also say where the issue stands (its stage: in progress, in review).
+# developer's, a reviewer's and a QA agent's also say where the issue stands (its stage: in progress, in review).
 tech_lead_name() { printf '%s · tech lead' "$repo_short"; }
 dev_name() { printf '%s · dev #%s · %s%s' "$repo_short" "$1" "${3:+$3 · }" "$(short_title "$2")"; }
 qa_name() { printf '%s · qa #%s · %s%s' "$repo_short" "$1" "${3:+$3 · }" "$(short_title "$2")"; }
+review_name() { printf '%s · review #%s · %s%s' "$repo_short" "$1" "${3:+$3 · }" "$(short_title "$2")"; }
 spike_name() { printf '%s · spike · %s' "$repo_short" "$1"; }
 # short_title <title>: an issue title cut to about 40 characters at a word, without Markdown marks.
 short_title() {
@@ -42,10 +43,11 @@ short_title() {
 		s = substr($0, 1, max); sub(/ [^ ]*$/, "", s); print s "…"; exit }'
 }
 
-# address_of <session-id>: how comments name the session: "tech lead", "dev #<n>", "qa #<n>", "spike <topic>".
+# address_of <session-id>: how comments name the session: "tech lead", "dev #<n>", "review #<n>", "qa #<n>",
+# "spike <topic>".
 address_of() {
 	jq -r 'if .role == "tech-lead" then "tech lead"
-		elif .role == "dev" or .role == "qa" then .role + " #" + (.issue | tostring)
+		elif .role == "dev" or .role == "review" or .role == "qa" then .role + " #" + (.issue | tostring)
 		elif .role == "spike" then "spike " + (.topic // "")
 		else "team" end' "$sessions_dir/$1/status" 2>/dev/null || echo team
 }

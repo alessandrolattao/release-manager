@@ -3,12 +3,12 @@
 
 export type BoardRow = {
   id: string
-  // What the board shows: "tech lead", "tech lead admin-app", "dev #318", "qa #42", "spike flaky ci".
+  // What the board shows: "tech lead", "tech lead admin-app", "dev #318", "review #42", "qa #42", "spike flaky ci".
   label: string
   role: string
   state: string
   place: string
-  // Where the issue stands, for a developer or a QA agent: in progress, in review.
+  // Where the issue stands, for a developer, a reviewer or a QA agent: in progress, in review.
   stage: string
   detail: string
   since: number

@@ -9,14 +9,15 @@
 #   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages
 # The status of a session is one JSON object, written by the scripts and the hooks, never by the model:
 #   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "branch",
-#    "busy_until", "tested_head", "asked_on", "waits_on", "started"}
+#    "busy_until", "tested_head", "head", "asked_on", "waits_on", "started"}
+# head: the pushed head a reviewer reads, from its request (start-review.sh): review.sh pass records it.
 # asked_on: the issue where the session asked the user on GitHub (comment.sh); absent when it asked in its
 # own chat (hooks/asks.sh), where the user answers it directly.
 # waits_on: whom the session waits on since it wrote to them on GitHub (comment.sh, or dispatch.sh posting a
-# question it left in its chat): the address ("tech lead", "dev #42", "qa #42"), or "the user" for a tech
+# question it left in its chat): the address ("tech lead", "dev #42", "review #42", "qa #42"), or "the user" for a tech
 # lead's question to the user. A comment from them ends the wait (hooks/sessions.tsx); every state_set
 # removes it, and a new wait records its own.
-# started: when a developer or a QA agent was launched (role.sh): the dispatcher wakes it for no comment
+# started: when a developer, a reviewer or a QA agent was launched (role.sh): the dispatcher wakes it for no comment
 # written before.
 # state: working (cyan), others (purple: waits on another agent or the checkout), you (yellow: waits on
 # the user), stuck (red: dead, failing or silent), idle (green: a tech lead waiting for work), done (no

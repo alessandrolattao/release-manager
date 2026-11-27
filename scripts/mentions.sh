@@ -1,7 +1,7 @@
 #!/bin/sh
 # The comments of this repository written to this tech lead in the last days that it has not answered yet:
-# it has not written to their asker ("**tech lead → <asker>**", news or not) on the same thread since the
-# comment reached it. An issue and the pull requests that close it are one thread: a question asked on either
+# it has not written to their asker ("**tech lead → <asker>**", news or not; to another repository's tech lead,
+# comment.sh <n> "tech lead of <owner/name>") on the same thread since the comment reached it. An issue and the pull requests that close it are one thread: a question asked on either
 # is answered on either. News (" · fyi") owes no answer and is left out. The plugin brings the tech lead each
 # one as it arrives, in a wake or in a note carried into its conversation; this is the list to look at again (at
 # the start, after a restart, before saying all is done). Only the team's own account counts, as for the

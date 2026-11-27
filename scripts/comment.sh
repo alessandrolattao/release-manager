@@ -12,6 +12,11 @@
 #   dev | review | qa
 #                the developer, the reviewer or the QA agent of that issue
 #   "<address>"  a session by its address, as "dev #42", "review #42" or "qa #42"
+#   "tech lead of <owner/name>"
+#                from a tech lead only: ANOTHER repository's tech lead, who wrote on this repository's issue
+#                (comment.sh --repo there), answered here: the header says "**tech lead → tech lead of
+#                <owner/name>**", and a line with the comment's link goes to that tech lead's inbox (tell.sh
+#                <owner/name> info), since its dispatcher does not read this repository
 # Any other recipient is refused, and nothing is posted. The options may come anywhere among the arguments.
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
 # The status records whom you wait on (waits_on: the address, or "the user"): their comment ends the wait.
@@ -26,11 +31,11 @@
 # The session's `commented` records it (session-dir.sh commented_on): a wake for a comment written to it
 # before on that thread is not delivered; in a tech lead, only one by the user, or one by the one it writes to
 # that had reached it already (delivered in a wake or listed by mentions.sh).
-# Prints the comment's link.
+# Prints the comment's link; to another repository's tech lead, then what tell.sh prints.
 set -eu
 
 usage() {
-	echo "usage: comment.sh <issue-or-pr> <you|\"tech lead\"|dev|review|qa|\"dev #<n>\"|\"review #<n>\"|\"qa #<n>\"> [--fyi] [--repo <owner/name>] <<'EOF' ... EOF" >&2
+	echo "usage: comment.sh <issue-or-pr> <you|\"tech lead\"|dev|review|qa|\"dev #<n>\"|\"review #<n>\"|\"qa #<n>\"|\"tech lead of <owner/name>\"> [--fyi] [--repo <owner/name>] <<'EOF' ... EOF" >&2
 	exit 2
 }
 target="" to="" fyi="" elsewhere=""
@@ -64,7 +69,7 @@ done
 [ -n "$target" ] && [ -n "$to" ] || usage
 # Only a known address: anything else would post a header that wakes nobody.
 case "$to" in
-you | "tech lead" | dev | review | qa) ;;
+you | "tech lead" | dev | review | qa | "tech lead of "*) ;;
 "dev #"[0-9]* | "review #"[0-9]* | "qa #"[0-9]*)
 	case "${to#*#}" in *[!0-9]*)
 		echo "unknown recipient '$to'" >&2
@@ -95,6 +100,25 @@ if [ "$to" = you ] && [ "$role" != tech-lead ]; then
 	echo "the user talks only with the tech leads: write to the tech lead (comment.sh $target \"tech lead\"), who answers or brings it to the user" >&2
 	exit 2
 fi
+# Another repository's tech lead, answered on this repository's issue: only by a tech lead, and only another
+# repository's, named <owner>/<name>.
+other=""
+case "$to" in "tech lead of "*)
+	other=${to#tech lead of }
+	is_repo_name "$other" || {
+		echo "unknown recipient '$to': another repository's tech lead is \"tech lead of <owner>/<name>\"" >&2
+		usage
+	}
+	[ "$role" = tech-lead ] || {
+		echo "only a tech lead writes to another repository's tech lead: write to your tech lead (comment.sh $target \"tech lead\")" >&2
+		exit 2
+	}
+	[ "$(lower "$other")" != "$(lower "$repo_full")" ] || {
+		echo "$repo_full is this repository: write to its tech lead with comment.sh $target \"tech lead\"" >&2
+		exit 2
+	}
+	;;
+esac
 
 # Another repository: only its tech lead is written to, only by a tech lead, signed with this repository.
 if [ -n "$elsewhere" ]; then
@@ -146,3 +170,5 @@ fi
 		status_set "$me" --arg w "$address" '.waits_on = $w'
 	fi
 }
+# Another repository's dispatcher does not read this one: its tech lead hears of the answer in its inbox.
+[ -z "$other" ] || printf 'Wrote to you on %s#%s%s: %s\n' "$repo_full" "$target" "$marker" "$link" | sh "$here/tell.sh" "$other" info

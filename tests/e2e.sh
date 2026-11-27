@@ -418,6 +418,45 @@ ok "open-issue.sh --repo only from a tech lead" "$code" "2"
 echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/open-issue.sh" "x" @me --repo 'someone/else/milestones#' >/dev/null 2>&1; code=$?
 ok "open-issue.sh --repo only <owner>/<name>" "$code" "2"
 
+echo "== comment.sh to another repository's tech lead, on this repository's issue"
+cd "$ROOT" || exit 1
+box="$T/data/team/inbox/someone_else"
+out=$(echo "Sì, l'endpoint degli ordini è nel piano" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 "tech lead of someone/else"); code=$?
+reply=$(ls -t "$G/comments/42."* | head -1)
+link="https://github.com/test/repo/issues/42#issuecomment-${reply##*.}"
+ok "it writes on this repository's issue" "$code $(repo_of_last "$reply")" "0 test/repo"
+ok "its header names this tech lead and the other repository's" "$(head -1 "$reply")" "**tech lead → tech lead of someone/else**"
+ok "signed as on this repository: no hidden signature" "$(grep -c '<!-- team' "$reply")" "0"
+ok "it prints the comment's link first" "$(printf '%s\n' "$out" | head -1)" "$link"
+ok "it leaves one message in that tech lead's inbox" "$(ls "$box/new" 2>/dev/null | wc -l | tr -d ' ')" "1"
+m=$(ls "$box/new/"* 2>/dev/null | head -1)
+ok "an info from this repository's tech lead, one line with the link" "$(sed -n 's/^Kind: //p' "$m") | $(sed -n 's/^From: //p' "$m") | $(sed -n '5,$p' "$m")" "info | tech lead of test/repo | Wrote to you on test/repo#42: $link"
+ok "and says when no tech lead there reads it yet" "$(printf '%s\n' "$out" | grep -c '^NOT READ YET')" "1"
+ok "the writer waits on that tech lead" "$(st "$TL1" state) | $(st "$TL1" waits_on)" "others | tech lead of someone/else"
+ok "the thread records whom it wrote to" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}tech lead of someone/else"
+# Its answer reached it: the hooks module ended the wait.
+jq -c '.state = "working" | del(.waits_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
+before=$(jq -c '{state, detail, waits_on}' "$S/$TL1/status")
+echo "Fatto dal nostro lato" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 50 "tech lead of someone/else" --fyi >/dev/null
+f=$(ls -t "$G/comments/50."* | head -1)
+ok "--fyi, on a pull request: news in its header" "$(head -1 "$f")" "**tech lead → tech lead of someone/else** · fyi"
+ok "the writer's state does not change" "$(jq -c '{state, detail, waits_on}' "$S/$TL1/status")" "$before"
+ok "recorded on the issue the pull request closes" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}tech lead of someone/else"
+m=$(ls -t "$box/new/"* | head -1)
+ok "its inbox line says it is news" "$(sed -n '5,$p' "$m")" "Wrote to you on test/repo#50 · fyi: https://github.com/test/repo/issues/50#issuecomment-${f##*.}"
+posted=$(ls "$G/comments" | wc -l) left=$(ls "$box/new" | wc -l)
+for to in "tech lead of Test/Repo" "tech lead of someone/else/forks#" "tech lead of someone" "tech lead of "; do
+	echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 "$to" >/dev/null 2>&1; code=$?
+	ok "refused ($to): nothing posted, nothing left in an inbox" "$code $(ls "$G/comments" | wc -l) $(ls "$box/new" | wc -l)" "2 $posted $left"
+done
+echo "x" | CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/comment.sh" 42 "tech lead of someone/else" >/dev/null 2>&1; code=$?
+ok "only a tech lead writes to another repository's tech lead" "$code $(ls "$G/comments" | wc -l) $(ls "$box/new" | wc -l)" "2 $posted $left"
+echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 7 "tech lead of someone/else" --repo someone/else >/dev/null 2>&1; code=$?
+ok "never with --repo: there it is that repository's own tech lead" "$code $(ls "$G/comments" | wc -l)" "2 $posted"
+printf '113\t1795000000\ttester\t42\thttps://x/42#c113\t-\t**tech lead → tech lead of someone/else**\tSì\n' >"$G/repo-comments.tsv"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "the reply wakes nobody here" "$(cat "$S"/*/wake 2>/dev/null | grep -c 'c113')" "0"
+
 echo "== dispatch.sh: what another repository's tech lead writes here"
 {
 	printf '106\t1795000000\ttester\t42\thttps://x/42#c106\ttech lead of someone/else\t**tech lead of someone/else → tech lead**\tServe un endpoint per gli ordini\n'
@@ -1159,6 +1198,18 @@ ok "one seen, then written to, is not" "$(printf '%s\n' "$out" | grep -c 'Second
 ok "one written to before it was seen is" "$(printf '%s\n' "$out" | grep -c '^#48 · dev #48 ·.*Vista dopo?')" "1"
 ok "one older than the record keeps the old rule: a later write answers it" "$(printf '%s\n' "$out" | grep -c 'Vecchia domanda?')" "0"
 ok "what it lists is appended to the record" "$(sed -n '5,$p' "$R/seen" | cut -f2 | sort | tr '\n' ' ')" "https://x/46#20 https://x/48#40 "
+
+echo "== mentions.sh: another repository's tech lead answered on this repository's issue"
+# Its comment (comment.sh --repo there) reached the tech lead at 10:30; the answer is the one comment.sh wrote above.
+printf '%s\t%s\n' "$(epoch 2026-11-24T10:30:00Z)" "https://x/42#50" >>"$R/seen"
+question='{"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/42","html_url":"https://x/42#50","body":"**tech lead of someone/else → tech lead**\n\nServe un endpoint per gli ordini?\n\n<!-- team · tech lead of someone/else -->\n"}'
+printf '[%s]\n' "$question" >"$G/mentions.json"
+out=$(CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/mentions.sh" 2>&1)
+ok "unanswered, it is listed" "$(printf '%s\n' "$out" | grep -c '^#42 · tech lead of someone/else ·.*Serve un endpoint per gli ordini?')" "1"
+jq -n --argjson q "$question" --rawfile b "$reply" \
+	'[$q, {user: {login: "tester"}, created_at: "2026-11-24T11:00:00Z", issue_url: "https://x/42", html_url: "https://x/42#51", body: $b}]' >"$G/mentions.json"
+out=$(CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/mentions.sh" 2>&1)
+ok "answered with comment.sh <n> \"tech lead of <owner/name>\", it is not" "$out" "nothing waits for tech lead"
 
 echo "== claim.sh: one machine per issue"
 cd "$ROOT" || exit 1

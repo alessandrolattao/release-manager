@@ -189,7 +189,9 @@ esac
 EOF
 # A fake claude: the agent list comes from a file, stop and rm are recorded. A plugin update installs, on
 # the account it runs on, each version `publish` lists for that account ("<account folder> <version>" per
-# line, the version's files in releases/<version>) and not installed there yet.
+# line, the version's files in releases/<version>) and not installed there yet; each session `reloads` lists
+# for a version it installs ("<session folder> <version>" per line) reloads it at once, as a session between
+# turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -205,12 +207,14 @@ plugin)
 		mkdir -p "$home/plugins/cache/team/team"
 		ln -s "$TT/releases/$version" "$home/plugins/cache/team/team/$version"
 		got=$version
+		while read -r folder at; do [ "$at" != "$version" ] || echo "$at" >"$folder/version"; done <"$TT/reloads"
 	done <"$TT/publish"
 	if [ -n "$got" ]; then echo "Plugin \"team\" updated to $got"; else echo "Plugin \"team\" is already at the latest version"; fi ;;
 *) echo "$*" >>"$TT/claude.log" ;;
 esac
 EOF
 : >"$T/publish"
+: >"$T/reloads"
 # release <version>: the plugin's files as that version publishes them, in releases/<version>.
 release() {
 	mkdir -p "$T/releases/$1/.claude-plugin"
@@ -1537,16 +1541,17 @@ ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "up
 
 echo "== update.sh: a new version on the team's account restarts the dispatcher, and no session"
 # 9.9.11 published on the team's account, where the dispatcher and the sessions run 9.9.9. The two developers
-# reload it by themselves a few seconds in; the tech lead, which started the update, reloads like them but has
-# not when the update stops waiting.
+# reload it by themselves: one as soon as it is installed, before the update looks at the sessions, the other
+# a few seconds in; the tech lead, which started the update, reloads like them but has not when the update
+# stops waiting.
 release 9.9.11
 echo "$T/config 9.9.11" >>"$T/publish"
+echo "$S/$DEV2 9.9.11" >"$T/reloads"
 for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 : >"$T/claude.log"
 (
 	sleep 3
-	echo 9.9.11 >"$S/$DEV2/version"
 	echo 9.9.11 >"$S/$NEW/version"
 ) &
 reloader=$!
@@ -1555,7 +1560,7 @@ wait "$reloader"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "the dispatcher restarts on 9.9.11" "$([ -n "$new_pid" ] && [ "$new_pid" != "$pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out") $(cat "$R/dispatcher.version")" "yes 1 9.9.11"
 ok "no session restarts, the one that started the update neither" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
-ok "each session that reached 9.9.11 has its line" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|"
+ok "each session that reached 9.9.11 has its line, the one that reloaded before the update looked at it too" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|') $(grep -c ': already on 9.9.11$' "$T/update.out")" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44| 0"
 ok "the one on another account, already on its newest, is left alone" "$(grep -c '^repo · dev #45 · in progress · Title 45: already on 9.9.10$' "$T/update.out")" "1"
 ok "one still behind when the update stops waiting is reported, last" "$(tail -2 "$T/update.out" | head -1)" "repo · tech lead: still behind after 0 minutes, on 9.9.9"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
@@ -1563,6 +1568,7 @@ sh "$SC/dispatcher.sh" stop >/dev/null
 rm -rf "${S:?}/$ACC" "$T/home/.claude/plugins"
 rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version" "$T/config/plugins/cache/team/team/9.9.11"
 : >"$T/publish"
+: >"$T/reloads"
 
 echo "== update.sh: started by an older version, the newest one restarts the sessions"
 # An older version, whose restart prompt lacks a sentence of the newer one's.
@@ -1611,6 +1617,50 @@ ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log"
 ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
 rm -f "$S/$DEV2/version"
+
+echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
+# 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds
+# the main checkout, testing there; the other live sessions run 9.9.12 already. It gives the checkout back once
+# the update's first pass has looked at every session (the last one listed has its line).
+release 9.9.12
+echo "$T/config 9.9.12" >>"$T/publish"
+for id in $TL1 $NEW; do echo 9.9.12 >"$S/$id/version"; done
+for id in $TL1 $DEV2 $NEW; do date +%s >"$S/$id/alive"; done
+echo $(($(date +%s) - 60)) >"$S/$DEV2/idle"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null; code=$?
+ok "the developer holds the checkout" "$code $(sed -n 1p "$R/checkout")" "0 $DEV2"
+cd "$ROOT" || exit 1
+: >"$T/claude.log"
+: >"$T/update.out"
+(
+	n=0
+	until grep -q '^repo · dev #44 · [^:]*: [a-z]* on 9.9.12$' "$T/update.out" || [ "$n" -ge 300 ]; do
+		sleep 0.1
+		n=$((n + 1))
+	done
+	grep -c -- "--resume $DEV2 " "$T/claude.log" >"$T/held-restarts"
+	cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+) &
+giver=$!
+UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+wait "$giver"
+ok "while it holds the checkout it does not restart" "$(cat "$T/held-restarts")" "0"
+ok "once it has given it back it restarts, on the new version" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ') $(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.12 " "$T/claude.log")" "$DEV2  1"
+ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+
+echo "== update.sh restart: one still holding the checkout when the update stops waiting is left on its version"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+date +%s >"$S/$DEV2/alive"
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null
+cd "$ROOT" || exit 1
+: >"$T/claude.log"
+out=$(UPDATE_QUIET=0 UPDATE_GONE=1 UPDATE_WAIT=3 sh "$SC/update.sh" restart "$DEV2" --now 2>&1)
+ok "it does not restart" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
+ok "and the log says it still holds the checkout" "$(printf '%s\n' "$out" | tail -1)" "repo · dev #43 · in progress · Title 43: still holds the checkout after 0 minutes, left on its version"
+cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+cd "$ROOT" || exit 1
+rm -f "$S/$TL1/version" "$S/$NEW/version"
 
 echo "== no write through GitHub's GraphQL API where REST has an endpoint"
 ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"

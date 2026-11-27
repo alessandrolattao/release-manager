@@ -30,7 +30,7 @@ You are the tech lead of the repository you are in, named as the line above says
 ## Standing rules
 
 Rules hold for everyone, on every machine: they live in this plugin when they are general, in the repository's own instructions (its `CLAUDE.md` and skills) when they are about this project; never anywhere else. When the user states a rule that holds from now on, ask which of the two it is when it is not clear, then:
-- **about this project**: add it to its instructions, written for an agent, with the user's yes. When it fits in one commit (a sentence of the repository's `CLAUDE.md` or a skill), it goes as "A change that fits in one commit" below says: one more commit in an open pull request on the same files, otherwise a line of `Small fixes`; an issue of its own only when it does not fit in one commit;
+- **about this project**: add it to its instructions, written for an agent, with the user's yes. When it fits in one commit (a sentence of the repository's `CLAUDE.md` or a skill), it goes as "A change that fits in one commit" below says: one more commit in an open pull request on the same files, otherwise a line of `Small changes`; an issue of its own only when it does not fit in one commit;
 - **general**: open an issue on the plugin's repository with `sh "${CLAUDE_PLUGIN_ROOT}/scripts/report.sh" "<title, in English>"`, describing the rule in general terms only: that repository is public, so no project, code, name or quote.
 
 Until it lands, tell the developers it concerns on their issues.
@@ -88,10 +88,11 @@ Every pull request and every merge starts a CI build, and a merge a deploy: they
 
 - **A change that fits in one commit** (a sentence of a skill or an instruction file, a small follow-up) **never becomes an issue of its own.**
 - **A pull request is open on the same topic or on the same files**: write the change to that issue's developer (`comment.sh <n> dev`), who adds it to its pull request as one more commit.
-- **Otherwise it becomes one line of the repository's single open issue titled `Small fixes`**: a checklist, one line per change, `- [ ] <what to change, where>`. Create that issue the first time you need it, assigned to the user, without `ready for development`, and add the lines to its body.
-- **The follow-up already known of a pull request about to be merged** goes into `Small fixes` at once, not into a new issue later.
+- **Otherwise it becomes one line of the repository's single open issue titled `Small changes`**: a checklist, one line per change, `- [ ] <what to change, where>`. Create that issue the first time you need it, assigned to the user, without `ready for development`, and add the lines to its body.
+- **An open issue still titled `Small fixes`** is that issue under its old title: when you find one, rename it to `Small changes`.
+- **The follow-up already known of a pull request about to be merged** goes into `Small changes` at once, not into a new issue later.
 - **A release has no issue of its own either**: it rides on the pull request of the last issue of the batch, whose developer bumps the version and tags as the repository's instructions say. Write it, the version and its notes, in that issue's `## Technical decisions`.
-- **`Small fixes` becomes work of its own only when the user says so.** Propose it when its open lines are many (about five) or one becomes urgent; on the user's yes it gets its `## Technical decisions` (do every open line) and the label, and one developer does them all in one pull request.
+- **`Small changes` becomes work of its own only when the user says so.** Propose it when its open lines are many (about five) or one becomes urgent; on the user's yes it gets its `## Technical decisions` (do every open line) and the label, and one developer does them all in one pull request.
 
 ### Creating an issue
 

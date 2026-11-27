@@ -21,7 +21,7 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     it runs, it reloads the plugin in place (/reload-plugins), once per version, and does nothing more
 //     between those turns; the new version's module then has the session read its role's rules again, and
 //     wakes it. A reload that fails restarts the session instead (scripts/update.sh restart). A session that
-//     holds the main checkout reloads once it has given it back.
+//     holds the main checkout reloads once it has given it back; a done session neither reloads nor restarts.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -194,9 +194,12 @@ async function readStatus($: EngineInterface, folder: string): Promise<Status> {
   }
 }
 
-// Changes the session's own state the way scripts/session-dir.sh state_set does.
+// Changes the session's own state the way scripts/session-dir.sh state_set does: a done session stays done.
 async function setState($: EngineInterface, folder: string, state: string, detail: string): Promise<void> {
   const status = await readStatus($, folder)
+  if (status.state === 'done' && state !== 'done') {
+    return
+  }
   const now = Math.floor((await $.clock.now()) / 1000)
   if (status.state !== state || status.detail !== detail) {
     status.since = now
@@ -956,10 +959,11 @@ async function holdsCheckout($: EngineInterface, repo: string): Promise<boolean>
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
 // since the restart carries its own prompt. A session that holds its repository's main checkout (holdsCheckout)
 // reloads only once it has given it back: it may be testing there, and a reload restarts the plugins' MCP
-// servers, a browser's signed-in sessions with them. True when it started a reload.
+// servers, a browser's signed-in sessions with them. A done session neither reloads nor restarts: its work is
+// over, and the dispatcher removes it. True when it started a reload.
 async function reloadIfBehind($: EngineInterface, folder: string, status: Status): Promise<boolean> {
   const running = await versionOf($)
-  if (running === '') {
+  if (running === '' || status.state === 'done') {
     return false
   }
   const installed = await installedOf($, folder)
@@ -1011,7 +1015,7 @@ function reloadedText(root: string, version: string, role: string): string {
 }
 
 // At session start, after a reload to this version (`reloading` names it, reloadIfBehind): the prompt that has
-// the session read its role's rules again, once.
+// the session read its role's rules again, once. A session done meanwhile is told nothing: its work is over.
 async function reloadedPrompt($: EngineInterface, folder: string, role: string): Promise<void> {
   try {
     const version = await versionOf($)
@@ -1019,6 +1023,9 @@ async function reloadedPrompt($: EngineInterface, folder: string, role: string):
       return
     }
     await $.fs.write(`${folder}/reloading`, '')
+    if ((await readStatus($, folder)).state === 'done') {
+      return
+    }
     void $.prompt.submit({ text: reloadedText($.plugin.root, version, role) }).catch(err => $.ui.log(`team: ${String(err)}`))
   } catch (err) {
     $.ui.log(`team: reloaded: ${String(err)}`)
@@ -1305,7 +1312,7 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
 // ends. A tech lead that asked the user in its own chat waits on the user, who may answer on GitHub too: as a
 // prompt the user types, the user's comment ends that wait. A comment from anyone else leaves the wait: worked
 // for the turn, back to waiting after it. Each `from` is a wake line's as dispatch.sh writes it, "<author> on
-// #<issue>".
+// #<issue>". A done session waits on nobody, whatever comment.sh recorded after done.sh: it stays done.
 async function answered($: EngineInterface, folder: string, role: string, froms: string[], now: number): Promise<void> {
   const status = await readStatus($, folder)
   const isTechLeadAsking = status.state === 'you' && role === 'tech-lead'
@@ -1331,7 +1338,7 @@ async function answered($: EngineInterface, folder: string, role: string, froms:
 // and whatever it waited on is over (markTurn would otherwise put the wait back when the turn ends). A tech
 // lead the user comes back to after a pause hears, in one line of context, that other repositories left
 // messages in its inbox; the messages never enter the conversation here. The plugin's own wakes, the
-// engine's notifications and the scripts' prompts are not the user.
+// engine's notifications and the scripts' prompts are not the user. A done session stays done.
 async function heardUser($: EngineInterface): Promise<string | undefined> {
   const folder = await folderOf($)
   const role = await readText($, `${folder}/role`)
@@ -1340,6 +1347,9 @@ async function heardUser($: EngineInterface): Promise<string | undefined> {
   }
   const now = Math.floor((await $.clock.now()) / 1000)
   const status = await readStatus($, folder)
+  if (status.state === 'done') {
+    return undefined
+  }
   if (status.state !== 'working' || status.detail !== 'with you') {
     status.since = now
   }

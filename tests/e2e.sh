@@ -522,6 +522,13 @@ DEV60=22222222-0000-0000-0000-000000000060
 before=$(ls "$G/comments" | wc -l)
 (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null)
 ok "a developer with no merged pull request tells nobody" "$(ls "$G/comments" | wc -l)" "$before"
+# Woken after done.sh by a comment written before it, the developer answers the tech lead, without --fyi, and
+# sets its state again: done is final, it stays done and goes as announced.
+echo "Already merged." | (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/comment.sh" 60 "tech lead" >/dev/null)
+last=$(ls -t "$G/comments" | head -1)
+ok "a done developer that writes to the tech lead posts its comment, and stays done" "$(head -1 "$G/comments/$last") $(st "$DEV60" state) $(st "$DEV60" detail)" "**dev #60 → tech lead** done merged"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/status.sh" working "one more look")
+ok "nor does status.sh move it: it says the state it stays in" "$out $(st "$DEV60" state)" "state: done done"
 date +%s >"$S/$DEV60/alive"
 : >"$T/claude.log"
 cat >"$T/agents.json" <<EOF
@@ -1432,6 +1439,17 @@ echo 0.5.7 >"$S/$DEV2/version"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 date +%s >"$S/$NEW/alive"
+# A developer that ran done.sh just now (the dispatcher removes it 2 minutes after), alive, between turns for a
+# minute, on a version too old to reload: its work is over, the update leaves it alone.
+DONE61=77777777-0000-0000-0000-000000000061
+mkdir -p "$S/$DONE61"
+echo dev >"$S/$DONE61/role"
+jq -n --argjson now "$(date +%s)" '{role: "dev", repo: "test/repo", name: "repo · dev #61 · in review · Title 61", issue: 61, state: "done", detail: "merged #61", since: $now}' >"$S/$DONE61/status"
+echo "$T/config" >"$S/$DONE61/config"
+echo "$ROOT" >"$S/$DONE61/cwd"
+echo 0.5.7 >"$S/$DONE61/version"
+date +%s >"$S/$DONE61/alive"
+echo $(($(date +%s) - 60)) >"$S/$DONE61/idle"
 sh "$SC/dispatcher.sh" start >/dev/null 2>&1
 old_pid=$(cat "$R/dispatcher.pid")
 : >"$T/claude.log"
@@ -1490,7 +1508,9 @@ ok "with no flags, which would start a copy" "$(grep -- '--resume' "$T/claude.lo
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"
 ok "before any session" "$(grep -e '^dispatcher ' -e ': backgrounded' "$T/update.out" | head -1 | cut -d: -f1)" "dispatcher test_repo"
+ok "a done session is neither stopped nor restarted, and has no line" "$(grep -c -e "--resume $DONE61" -e "^stop ${DONE61%%-*}" "$T/claude.log") $(grep -c 'dev #61' "$T/update.out") $(st "$DONE61" state)" "0 0 done"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+rm -rf "${S:?}/$DONE61"
 
 echo "== update.sh: a second run right after the first restarts nothing"
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)

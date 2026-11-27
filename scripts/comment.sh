@@ -9,8 +9,9 @@
 #   you          the user, from a tech lead only: a real @mention (GitHub notifies them), the label
 #                question on the issue. The user talks only with the tech leads: other sessions ask a tech lead.
 #   tech lead    the repository's tech lead
-#   dev | qa     the developer or the QA agent of that issue
-#   "<address>"  a session by its address, as "dev #42" or "qa #42"
+#   dev | review | qa
+#                the developer, the reviewer or the QA agent of that issue
+#   "<address>"  a session by its address, as "dev #42", "review #42" or "qa #42"
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
 # The status records whom you wait on (waits_on: the address, or "the user"): their comment ends the wait.
 #   --fyi        a reply or a piece of news: nobody owes you an answer, your state does not change, and the
@@ -28,7 +29,7 @@
 set -eu
 
 target=${1:?issue or pull request number}
-to=${2:?you, tech lead, dev, qa or an address}
+to=${2:?you, tech lead, dev, review, qa or an address}
 shift 2
 fyi="" elsewhere=""
 while [ $# -gt 0 ]; do
@@ -87,7 +88,7 @@ login=$(gh api user --jq .login)
 case "$to" in
 you) address="@$login" ;;
 "tech lead") address="tech lead" ;;
-dev | qa) address="$to #$issue" ;;
+dev | review | qa) address="$to #$issue" ;;
 *) address=$to ;;
 esac
 

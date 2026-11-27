@@ -31,7 +31,7 @@ For the tech lead and the developers of this repository.
 - The user decides when to release, with the tech lead. The tech lead proposes the number (patch for fixes only, minor when something new is in) with the list of pull requests merged since the last `v*` tag.
 - A release has no issue of its own: on the user's yes, it rides on the pull request of the last issue of the batch. The tech lead writes it, the version and that list as its notes, in that issue's `## Technical decisions`.
 - That issue's developer, in its pull request, sets `version` in `.claude-plugin/plugin.json` to `<version>`, and the marketplace's plugin entry in `.claude-plugin/marketplace.json` to `"source": { "source": "github", "repo": "alessandrolattao/team", "ref": "v<version>" }`.
-- After the decision review passes, and before `merge.sh`, the developer tags the pull request's head `v<version>` and pushes the tag, so the tag exists before the marketplace on the default branch names it. Then it merges, and creates the GitHub release (`gh release create v<version>`) with the list of merged pull requests as its notes.
+- After the code review passes, and before `merge.sh`, the developer tags the pull request's head `v<version>` and pushes the tag, so the tag exists before the marketplace on the default branch names it. Then it merges, and creates the GitHub release (`gh release create v<version>`) with the list of merged pull requests as its notes.
 - Until the first release the marketplace keeps `"source": "./"`; the first release switches it to the tag.
 - The board's update check reads `version` on the default branch, which changes only with a release.
 

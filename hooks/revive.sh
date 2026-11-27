@@ -2,7 +2,7 @@
 # After the machine restarts, resumes the tech leads that were running when it went down. A SessionStart
 # hook: the first Claude Code session that starts after a boot does it, any other one exits at once. Each
 # comes back with its own skill (/team:tech-lead), on its own account, as if started again; then its
-# dispatcher resumes the developer and QA agents that died with the machine.
+# dispatcher resumes the developers, reviewers and QA agents that died with the machine.
 # "Running when it went down": its heartbeat (hooks/sessions.tsx writes it every minute) is from before
 # this boot and within 3 minutes of the last heartbeat of that boot. One stopped earlier stays stopped.
 #   revive.sh   (hook payload on stdin, unused)

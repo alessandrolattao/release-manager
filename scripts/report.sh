@@ -34,7 +34,7 @@ me=${CLAUDE_CODE_SESSION_ID:-none}
 role=$(cat "$sessions_dir/$me/role" 2>/dev/null || echo "?")
 # The session's address, as repo.sh's address_of computes it.
 from=$(jq -r 'if .role == "tech-lead" then "tech lead"
-	elif .role == "dev" or .role == "qa" then .role + " #" + (.issue | tostring)
+	elif .role == "dev" or .role == "review" or .role == "qa" then .role + " #" + (.issue | tostring)
 	elif .role == "spike" then "spike " + (.topic // "")
 	else "team" end' "$sessions_dir/$me/status" 2>/dev/null || echo team)
 

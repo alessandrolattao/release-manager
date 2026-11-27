@@ -1,10 +1,10 @@
 #!/bin/sh
 # Records what a session is in the team and gives it its name. The tech lead skill runs it when it starts;
-# the scripts that start developers, QA and spikes run it for the session they start.
-#   role.sh <session-id> tech-lead                          (from the main checkout; one per repository)
-#   role.sh <session-id> dev|qa <issue> [branch] [started]  (from the session's folder)
+# the scripts that start developers, reviewers, QA and spikes run it for the session they start.
+#   role.sh <session-id> tech-lead                                 (from the main checkout; one per repository)
+#   role.sh <session-id> dev|review|qa <issue> [branch] [started]  (from the session's folder)
 #   role.sh <session-id> spike <topic>                      (from the main checkout)
-# started: when the script that started a developer or a QA agent launched it (epoch seconds), recorded once
+# started: when the script that started a developer, a reviewer or a QA agent launched it (epoch seconds), recorded once
 # and never overwritten, so a resume keeps it: the agent read the issue with all its comments after it, so the
 # dispatcher wakes it for none written before (dispatch.sh).
 # From then on the hooks module keeps the session's heartbeat and color, and wakes it between turns when there
@@ -12,7 +12,7 @@
 set -eu
 
 id=${1:?session id}
-role=${2:?tech-lead, dev, qa or spike}
+role=${2:?tech-lead, dev, review, qa or spike}
 arg=${3:-}
 branch=${4:-}
 started=${5:-}
@@ -33,7 +33,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/repo.sh"
 
 # "checkout" is only for the session holding the main checkout's lock (checkout.sh); a session that merely
-# runs in the main checkout's folder (a tech lead, a spike, a QA agent before it takes the lock) has none.
+# runs in the main checkout's folder (a tech lead, a spike, a reviewer, a QA agent before it takes the lock) has none.
 place=""
 case "$(pwd)" in
 "$root/.claude/worktrees/"*) place="worktree $(basename "$(pwd)" | cut -d- -f1)" ;;
@@ -55,13 +55,17 @@ tech-lead)
 		'.role = $r | .repo = $repo | .name = $n | .place = $p | del(.issue) | del(.topic)'
 	state_set "$id" working "with you"
 	;;
-dev | qa)
+dev | review | qa)
 	issue=${arg:?issue number}
 	title=$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)
-	# A developer starts on an issue its machine just took, a QA agent on its developer's branch before the pull
-	# request opens: the issue is in progress for both.
+	# A developer starts on an issue its machine just took, a reviewer and a QA agent on its developer's branch
+	# before the pull request opens: the issue is in progress for all of them.
 	stage="in progress"
-	if [ "$role" = dev ]; then name=$(dev_name "$issue" "$title" "$stage"); else name=$(qa_name "$issue" "$title" "$stage"); fi
+	case "$role" in
+	dev) name=$(dev_name "$issue" "$title" "$stage") ;;
+	review) name=$(review_name "$issue" "$title" "$stage") ;;
+	*) name=$(qa_name "$issue" "$title" "$stage") ;;
+	esac
 	status_set "$id" --arg r "$role" --arg repo "$repo_full" --arg n "$name" --argjson i "$issue" --arg t "$title" \
 		--arg p "$place" --arg b "$branch" --arg s "$stage" --arg st "$started" \
 		'.role = $r | .repo = $repo | .name = $n | .issue = $i | .title = $t | .place = $p | .branch = $b | .stage = $s
@@ -75,7 +79,7 @@ spike)
 	state_set "$id" working "analyzing"
 	;;
 *)
-	echo "usage: role.sh <session-id> tech-lead|dev|qa|spike ..." >&2
+	echo "usage: role.sh <session-id> tech-lead|dev|review|qa|spike ..." >&2
 	exit 2
 	;;
 esac

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Resumes this repository's developer and QA agents whose session died (a restart of the machine, a crash),
+# Resumes this repository's developers, reviewers and QA agents whose session died (a restart of the machine, a crash),
 # each in its own folder, with the conversation it had. The dispatcher runs it; safe to run at any time.
 # It leaves alone a live session, one stopped on purpose (`claude stop`), one that is done, and one whose
 # issue the user parked (closed, or back in the backlog).
@@ -13,7 +13,7 @@ prompt="Your session was cut off by a restart of the machine or a crash, and it 
 unset_args=$(env | grep -o -E '^CLAUDE[A-Z_]*' | grep -v '^CLAUDE_CONFIG_DIR$' | sed 's/^/-u /' | tr '\n' ' ')
 listing=$(claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]')
 
-for id in $(sessions_of dev) $(sessions_of qa); do
+for id in $(sessions_of dev) $(sessions_of review) $(sessions_of qa); do
 	status="$sessions_dir/$id/status"
 	[ "$(jq -r .state "$status")" != done ] || continue
 	alive "$id" && continue

@@ -48,12 +48,16 @@ moves=$(sh "$here/project.sh" "$issue" "$board" 2>/dev/null) || true
 lacks=$(printf '%s\n' "$moves" | grep '^board "' | awk 'NR > 1 { printf "; " } { printf "%s", $0 }') || true
 echo "issue $issue: $name${lacks:+ ($lacks)}"
 printf '%s\n' "$moves" | grep -v -e '^board "' -e '^$' || true
-# The developer and QA agent of the issue on this machine say the new stage in their names.
-for id in $(sessions_of dev "$issue") $(sessions_of qa "$issue"); do
+# The developer, reviewer and QA agent of the issue on this machine say the new stage in their names.
+for id in $(sessions_of dev "$issue") $(sessions_of review "$issue") $(sessions_of qa "$issue"); do
 	f="$sessions_dir/$id/status"
 	[ "$(jq -r .state "$f")" != done ] || continue
 	title=$(jq -r '.title // ""' "$f")
-	if [ "$(jq -r .role "$f")" = dev ]; then new=$(dev_name "$issue" "$title" "$stage"); else new=$(qa_name "$issue" "$title" "$stage"); fi
+	case "$(jq -r .role "$f")" in
+	dev) new=$(dev_name "$issue" "$title" "$stage") ;;
+	review) new=$(review_name "$issue" "$title" "$stage") ;;
+	*) new=$(qa_name "$issue" "$title" "$stage") ;;
+	esac
 	status_set "$id" --arg s "$stage" --arg n "$new" '.stage = $s | .name = $n'
 	want "$id" name "$new"
 done

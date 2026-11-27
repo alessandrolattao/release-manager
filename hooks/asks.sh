@@ -2,7 +2,7 @@
 # Stop: a team session ended its turn asking something in its own chat (a "needs input:" line, a last line
 # that asks, or a request for a go-ahead written without a question mark).
 #   - a tech lead asks the user, who talks to it: its state becomes "waits on you" (yellow);
-#   - a developer or QA agent asks in a chat nobody reads (the user talks only with the tech leads): the
+#   - a developer, reviewer or QA agent asks in a chat nobody reads (the user talks only with the tech leads): the
 #     question is recorded, its state becomes "waits on others", and the dispatcher turns it into a comment
 #     to the repository's tech lead.
 # A turn that asked on GitHub (comment.sh) or that asks nothing changes nothing here.
@@ -11,7 +11,7 @@ set -eu
 
 # shellcheck source=hooks/common.sh
 . "${CLAUDE_PLUGIN_ROOT:?}/hooks/common.sh"
-case "$role" in tech-lead | dev | qa) ;; *) exit 0 ;; esac
+case "$role" in tech-lead | dev | review | qa) ;; *) exit 0 ;; esac
 record="$sessions_dir/$sid/asked"
 rm -f "$record" "$record.told"
 

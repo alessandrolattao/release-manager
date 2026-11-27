@@ -120,7 +120,7 @@ test("a developer's pane shows its issue, status, branch, pull request, work and
   // GitHub read a minute ago: not asked again.
   seeded(on, {
     'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000 - 60, status: 'In review', qa: true, pr: PR }),
-    'repos/acme_shop/review/42': 'abc123def\tthe decisions hold',
+    'repos/acme_shop/review/42': 'abc123def\t2026-11-27T09:00:00Z\tthe code holds',
     'repos/acme_shop/qa/42': 'requested\tabc123def\t42\tabc-123\t42-checkout-page',
   })
   const logs: string[] = []
@@ -160,7 +160,7 @@ test("a developer's pane shows its issue, status, branch, pull request, work and
   // The summary.
   expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^  ╔═+ SUMMARY ═+╗$/)
   expect((await ui.find({ type: 'Text', text: /║ checkout/ }))?.text).toMatch(/║ checkout +held by dev #7 · you are 2 of 2 in the queue +║▓$/)
-  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +decision review passed · QA asked +║▓$/)
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review passed · QA asked +║▓$/)
   expect((await ui.find({ type: 'Text', text: /║ main CI/ }))?.text).toMatch(/║ main CI +green +║▓$/)
   expect((await ui.find({ type: 'Text', text: /║ model/ }))?.text).toMatch(/║ model +Opus 5\.5 +║▓$/)
   expect((await ui.find({ type: 'Text', text: /team 9\.9\.9/ }))?.text.trim()).toBe('team 9.9.9')
@@ -186,7 +186,7 @@ test('GitHub is read at most every 5 minutes, and a pull request opened since sh
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /^STATUS / }))?.text).toBe('STATUS  In progress')
   expect((await ui.find({ type: 'Text', text: /^PR / }))?.text).toBe('PR      none yet')
-  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +decision review not passed · no QA +║▓$/)
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review not passed · no QA +║▓$/)
   expect((await ui.find({ type: 'Text', text: /║ checkout/ }))?.text).toMatch(/║ checkout +held by dev #7 · you are 2 of 2 in the queue +║▓$/)
   await ui.unmount()
 
@@ -247,7 +247,7 @@ test('a review or a QA outcome counts for the worktree HEAD only', async ($, on)
   seeded(on, {
     'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In review', qa: true, pr: PR }),
     // Both for the head before the last commit.
-    'repos/acme_shop/review/42': 'old456\tthe decisions hold',
+    'repos/acme_shop/review/42': 'old456\t2026-11-27T09:00:00Z\tthe code holds',
     'repos/acme_shop/qa/42': 'pass\told456',
   })
   engine(on)
@@ -255,7 +255,7 @@ test('a review or a QA outcome counts for the worktree HEAD only', async ($, on)
   await $.session.start(START)
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +decision review not passed · QA needed +║▓$/)
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review not passed · QA needed +║▓$/)
   await ui.unmount()
 })
 
@@ -265,7 +265,7 @@ test('the review and the QA, taken on the branch, show before the pull request e
   seeded(on, {
     'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In progress', qa: true, pr: null }),
     // Keyed by the issue, for the worktree's HEAD.
-    'repos/acme_shop/review/42': 'abc123def\tthe decisions hold',
+    'repos/acme_shop/review/42': 'abc123def\t2026-11-27T09:00:00Z\tthe code holds',
     'repos/acme_shop/qa/42': 'pass\tabc123def',
   })
   engine(on)
@@ -274,7 +274,25 @@ test('the review and the QA, taken on the branch, show before the pull request e
   await clock.advance(2000)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /^PR / }))?.text).toBe('PR      none yet')
-  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +decision review passed · QA passed +║▓$/)
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review passed · QA passed +║▓$/)
+  await ui.unmount()
+})
+
+test('a code review or a QA asked for and taken shows as asked, whatever head it is on', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  seeded(on, {
+    'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000, status: 'In progress', qa: true, pr: null }),
+    // A reviewer took the request; the QA agent of an earlier round, woken again, took its own.
+    'repos/acme_shop/review/42': 'reviewing\told456\t42\tabc-123\t42-checkout-page',
+    'repos/acme_shop/qa/42': 'testing\told456\t42\tabc-123\t42-checkout-page',
+  })
+  engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /║ review/ }))?.text).toMatch(/║ review +code review asked · QA asked +║▓$/)
   await ui.unmount()
 })
 

@@ -74,6 +74,7 @@ case "$*" in
 # The user's permission on the repository: ADMIN, or the one in permission.
 "repo view --json viewerPermission --jq .viewerPermission") cat "$G/permission" 2>/dev/null || echo ADMIN ;;
 "repo view --json url --jq .url") echo https://github.com/test/repo ;;
+"repo view --json nameWithOwner,owner --jq "*) J='{"nameWithOwner":"test/repo","owner":{"login":"test"}}' answer "$@" ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
 "issue view "*" --json id --jq .id") echo "I_$3" ;;
@@ -181,6 +182,12 @@ case "$*" in
 	cat "$f" 2>/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; } ;;
 "api graphql "*)
 	case "$*" in
+	# The owner, test, is a personal account: GitHub resolves no organization, and gh fails printing its answer.
+	*"organization(login"*)
+		echo '{"data":{"organization":null},"errors":[{"type":"NOT_FOUND","path":["organization"],"message":"Could not resolve to an Organization with the login of '"'test'"'."}]}'
+		echo "gh: Could not resolve to an Organization with the login of 'test'." >&2
+		exit 1 ;;
+	*setIssueFieldValue*) echo "$*" >>"$G/field-sets"; echo '{}' ;;
 	*planningStatuses*) echo '[{"id":"S_TODO","name":"Todo"},{"id":"S_PROG","name":"In progress"},{"id":"S_REV","name":"In review"}]' ;;
 	*setIssueStatus*) printf '%s\n' "$*" | grep -o 'S_[A-Z]*' | head -1 >"$G/status-last"; echo '{}' ;;
 	# The boards: what is sent to add a Status option is kept, and the field comes back with the ids sent.
@@ -1377,6 +1384,10 @@ rm -f "$G/add-status-sent"
 out=$(sh "$SC/project.sh" add-status 3 "in progress" 2>&1); code=$?
 ok "a status the board has already: said, nothing sent" "$code $out $([ -f "$G/add-status-sent" ] && echo sent || echo none)" '0 board 3 "Roadmap" already has "in progress" none'
 rm -f "$G/boards.json" "$G/board.json" "$R/board-asked.3"
+
+echo "== set-fields.sh: a repository of a personal account"
+out=$(sh "$SC/set-fields.sh" 42 High Low 2>&1); code=$?
+ok "it says so in one line, changes nothing and exits 0" "$code | $out | $(cat "$G/field-sets" 2>/dev/null | wc -l | tr -d ' ')" "0 | test has no issue fields: Priority and Effort not set | 0"
 
 echo "== dispatch.sh: takes are no messages; other machines' agents on the board"
 date +%s >"$S/$TL1/alive"

@@ -11,10 +11,11 @@ repo=$(gh repo view --json nameWithOwner,owner --jq '"\(.nameWithOwner) \(.owner
 owner=${repo#* }
 repo=${repo% *}
 
+# A personal account is no organization: gh fails, printing GitHub's answer, which is not the fields.
 # shellcheck disable=SC2016 # GraphQL variables, not shell ones
 fields=$(gh api graphql -f query='query($o: String!) { organization(login: $o) { issueFields(first: 20) {
 	nodes { ... on IssueFieldSingleSelect { id name options { id name } } } } } }' -F o="$owner" \
-	--jq '.data.organization.issueFields.nodes' 2>/dev/null || echo null)
+	--jq '.data.organization.issueFields.nodes' 2>/dev/null) || fields=null
 if [ "$fields" = null ] || [ -z "$fields" ]; then
 	echo "$owner has no issue fields: Priority and Effort not set"
 	exit 0

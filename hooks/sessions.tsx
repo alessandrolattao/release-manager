@@ -11,7 +11,7 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     reaches the prompt box: cyan working, purple waiting on another agent, yellow waiting on the user,
 //     red stuck, none when done; and the name role.sh asked for, with /rename. Their rows are hidden.
 //   - a turn that starts means working; one that ends on an error, or a session silent for 20 minutes
-//     while it should be working, means stuck.
+//     while it should be working, means stuck. A done session is left as it is: done is final.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn.
 //   - it writes `version`, the plugin version it loaded at session start, once the session's folder has a
@@ -33,7 +33,8 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     request: no new turn. One counts as delivered, and `seen`, once a request of the main loop carries it.
 //   - a session whose turn ended on the usage limit is alive and waits: it wakes it once the limit has reset,
 //     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role.
-//   - a prompt the user writes to a team session means working with them, whatever it waited on.
+//   - a prompt the user writes to a team session means working with them, whatever it waited on; a done
+//     session is left as it is.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
 //     starts when it is stopped.

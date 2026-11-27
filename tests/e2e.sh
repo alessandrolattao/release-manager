@@ -293,6 +293,21 @@ ok "--fyi records nobody to wait on" "$(st "$TL1" waits_on)" ""
 ok "the writer records the thread and whom it wrote to" "$(cut -f2,3 "$S/$DEV/commented")" "42${tab}tech lead"
 ok "a comment on a pull request is recorded on the issue it closes" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}dev #42"
 ok "with when it was written" "$(tail -1 "$S/$TL1/commented" | cut -f1 | grep -c -E '^[0-9]{10}$')" "1"
+# The options anywhere among the arguments; an unknown recipient posts nothing.
+echo "Fatto" | sh "$SC/comment.sh" 42 --fyi "tech lead" >/dev/null
+last=$(ls -t "$G/comments" | head -1)
+ok "--fyi before the recipient is the option, not the recipient" "$(head -1 "$G/comments/$last")" "**team → tech lead** · fyi"
+echo "Fatto" | sh "$SC/comment.sh" --fyi 42 "review #42" >/dev/null
+last=$(ls -t "$G/comments" | head -1)
+ok "and before the issue too; a reviewer by its address" "$(head -1 "$G/comments/$last")" "**team → review #42** · fyi"
+before=$(ls "$G/comments" | wc -l)
+: >"$G/rest.log"
+for to in "--fyi" "tech-lead" "dev #" "dev #4x" "spike flaky ci"; do
+	out=$(echo "Fatto" | sh "$SC/comment.sh" 42 "$to" 2>&1); code=$?
+	ok "an unknown recipient ($to): a usage error, nothing posted" "$code $(printf '%s' "$out" | grep -c '^usage: comment.sh') $(ls "$G/comments" | wc -l) $(wc -l <"$G/rest.log" | tr -d ' ')" "2 1 $before 0"
+done
+out=$(echo "Fatto" | sh "$SC/comment.sh" 42 dev qa 2>&1); code=$?
+ok "a second recipient: a usage error" "$code $(printf '%s' "$out" | grep -c 'one too many')" "2 1"
 
 echo "== dispatch.sh: router"
 {

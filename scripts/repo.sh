@@ -12,7 +12,29 @@ repo_key=$(printf '%s' "$repo_full" | tr '/' '_')
 repo_dir="$team_state/repos/$repo_key"
 # The main checkout, from any worktree of it.
 root=$(cd "$(git rev-parse --git-common-dir)/.." && pwd)
+# The developers' worktrees: beside the main checkout, <parent of the main checkout>/<repo folder>.worktrees/<branch>
+# (start-dev.sh), so a tool run in the main checkout that walks its tree never reaches them. Older ones, under the
+# main checkout's .claude/worktrees/, stay there until their issue ends.
+worktrees="$root.worktrees"
 mkdir -p "$repo_dir"
+
+# is_worktree <folder>: whether the folder is a developer's worktree, beside the main checkout or an older one
+# under it.
+is_worktree() {
+	case "$1" in
+	"$worktrees/"* | "$root/.claude/worktrees/"*) return 0 ;;
+	esac
+	return 1
+}
+
+# agents_here: the agent list (claude agents --json --all) of the sessions started in the main checkout, an older
+# worktree under it included, or in a worktree beside it. --cwd takes one folder: one listing for each.
+agents_here() {
+	{
+		claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]'
+		claude agents --json --all --cwd "$worktrees" 2>/dev/null || echo '[]'
+	} | jq -s 'add // []' 2>/dev/null || echo '[]'
+}
 
 # base_branch: the default branch, asked once.
 base_branch() {

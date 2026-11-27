@@ -38,7 +38,7 @@ if [ -z "$login" ]; then
 fi
 now=$(date +%s)
 tab=$(printf '\t')
-listing=$(claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]')
+listing=$(agents_here)
 jobs_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/jobs"
 
 # job_of <session-id>: the short id the agent list knows the session by, if it lists it.
@@ -253,15 +253,13 @@ for f in "$sessions_dir"/*/status; do
 			claude rm "$job" >/dev/null 2>&1 || true
 		fi
 		dir=$(cat "$sessions_dir/$id/cwd" 2>/dev/null || true)
-		case "$(jq -r .role "$f"):$dir" in
-		dev:"$root/.claude/worktrees/"*)
+		if [ "$(jq -r .role "$f")" = dev ] && is_worktree "$dir"; then
 			branch=$(jq -r '.branch // ""' "$f")
 			# Neither goes with work that was not pushed: remove refuses a dirty worktree, -d a branch ahead
 			# of what was pushed and merged.
 			git -C "$root" worktree remove "$dir" >/dev/null 2>&1 || true
 			[ -z "$branch" ] || git -C "$root" branch -d "$branch" >/dev/null 2>&1 || true
-			;;
-		esac
+		fi
 		rm -rf "${sessions_dir:?}/$id"
 		continue
 	fi

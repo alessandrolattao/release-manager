@@ -68,6 +68,7 @@ case "$*" in
 "repo view --json url --jq .url") echo https://github.com/test/repo ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
+"issue view "*" --json id --jq .id") echo "I_$3" ;;
 "api repos/"*"/issues/"*"/comments "*)
 	n=$(echo "$2" | sed -n 's#.*/issues/\([0-9]*\)/comments$#\1#p') id=$(next_id)
 	cat "$(F=body field "$@" | sed 's/^@//')" >"$G/comments/$n.$id"
@@ -170,6 +171,8 @@ case "$*" in
 	*projectsV2*) cat "$G/boards.json" 2>/dev/null || echo '{"data":{"repository":{"projectsV2":{"nodes":[]}}}}' ;;
 	*"projectV2(number"*) cat "$G/board.json" 2>/dev/null || echo null ;;
 	*"issue(number"*) echo I_1 ;;
+	# A "blocked by" relationship added or taken away: the mutation and the two issues, in blocks.
+	*BlockedBy*) printf '%s\n' "$*" | grep -o -e '[a-zA-Z]*BlockedBy(' -e '[ib]=I_[0-9]*' | tr -d '(' | paste -sd' ' >>"$G/blocks"; echo '{}' ;;
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
@@ -192,7 +195,9 @@ esac
 EOF
 # A fake claude: the agent list comes from a file, stop and rm are recorded. A plugin update installs, on
 # the account it runs on, each version `publish` lists for that account ("<account folder> <version>" per
-# line, the version's files in releases/<version>) and not installed there yet.
+# line, the version's files in releases/<version>) and not installed there yet; each session `reloads` lists
+# for a version it installs ("<session folder> <version>" per line) reloads it at once, as a session between
+# turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -208,12 +213,14 @@ plugin)
 		mkdir -p "$home/plugins/cache/team/team"
 		ln -s "$TT/releases/$version" "$home/plugins/cache/team/team/$version"
 		got=$version
+		while read -r folder at; do [ "$at" != "$version" ] || echo "$at" >"$folder/version"; done <"$TT/reloads"
 	done <"$TT/publish"
 	if [ -n "$got" ]; then echo "Plugin \"team\" updated to $got"; else echo "Plugin \"team\" is already at the latest version"; fi ;;
 *) echo "$*" >>"$TT/claude.log" ;;
 esac
 EOF
 : >"$T/publish"
+: >"$T/reloads"
 # release <version>: the plugin's files as that version publishes them, in releases/<version>.
 release() {
 	mkdir -p "$T/releases/$1/.claude-plugin"
@@ -1415,7 +1422,17 @@ ok "an issue without the label is already in the backlog" "$code $out" "0 issue 
 echo "gh: Not Found (HTTP 404)" >"$G/fail-next"
 out=$(sh "$SC/ready.sh" --remove 42 2>&1); code=$?
 ok "any other refusal fails with its error" "$code $out" "1 gh: Not Found (HTTP 404)"
+sh "$SC/ready.sh" 42 >/dev/null
+out=$(sh "$SC/ready.sh" 42 --remove 2>&1); code=$?
+ok "--remove after the issue number takes the label away too" "$code $(grep -c '^42 ready for development$' "$G/labels-added") $out" "0 0 issue 42: back to the backlog"
+: >"$G/rest.log"
+out=$(sh "$SC/ready.sh" 42 extra 2>&1); code=$?
+ok "an argument it does not expect: its usage, and nothing changes" "$code $(printf '%s' "$out" | grep -c '^usage: ready.sh') $(wc -l <"$G/rest.log") $(grep -c '^42 ready for development$' "$G/labels-added")" "2 1 0 0"
 rm -f "$G/decided-42" "$G/fail-next"
+
+echo "== block.sh"
+out=$(sh "$SC/block.sh" 42 43 extra 2>&1); code=$?
+ok "an argument it does not expect: its usage, and no relationship changes" "$code $(printf '%s' "$out" | grep -c '^usage: block.sh') $(cat "$G/blocks" 2>/dev/null | wc -l)" "2 1 0"
 
 echo "== open-issue.sh: a new issue through the REST API"
 url=$(printf 'Il corpo\n' | sh "$SC/open-issue.sh" "Un nuovo tema" @me); code=$?
@@ -1544,16 +1561,17 @@ ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "up
 
 echo "== update.sh: a new version on the team's account restarts the dispatcher, and no session"
 # 9.9.11 published on the team's account, where the dispatcher and the sessions run 9.9.9. The two developers
-# reload it by themselves a few seconds in; the tech lead, which started the update, reloads like them but has
-# not when the update stops waiting.
+# reload it by themselves: one as soon as it is installed, before the update looks at the sessions, the other
+# a few seconds in; the tech lead, which started the update, reloads like them but has not when the update
+# stops waiting.
 release 9.9.11
 echo "$T/config 9.9.11" >>"$T/publish"
+echo "$S/$DEV2 9.9.11" >"$T/reloads"
 for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 : >"$T/claude.log"
 (
 	sleep 3
-	echo 9.9.11 >"$S/$DEV2/version"
 	echo 9.9.11 >"$S/$NEW/version"
 ) &
 reloader=$!
@@ -1562,7 +1580,7 @@ wait "$reloader"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "the dispatcher restarts on 9.9.11" "$([ -n "$new_pid" ] && [ "$new_pid" != "$pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out") $(cat "$R/dispatcher.version")" "yes 1 9.9.11"
 ok "no session restarts, the one that started the update neither" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
-ok "each session that reached 9.9.11 has its line" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|"
+ok "each session that reached 9.9.11 has its line, the one that reloaded before the update looked at it too" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|') $(grep -c ': already on 9.9.11$' "$T/update.out")" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44| 0"
 ok "the one on another account, already on its newest, is left alone" "$(grep -c '^repo · dev #45 · in progress · Title 45: already on 9.9.10$' "$T/update.out")" "1"
 ok "one still behind when the update stops waiting is reported, last" "$(tail -2 "$T/update.out" | head -1)" "repo · tech lead: still behind after 0 minutes, on 9.9.9"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
@@ -1570,6 +1588,7 @@ sh "$SC/dispatcher.sh" stop >/dev/null
 rm -rf "${S:?}/$ACC" "$T/home/.claude/plugins"
 rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version" "$T/config/plugins/cache/team/team/9.9.11"
 : >"$T/publish"
+: >"$T/reloads"
 
 echo "== update.sh: started by an older version, the newest one restarts the sessions"
 # An older version, whose restart prompt lacks a sentence of the newer one's.

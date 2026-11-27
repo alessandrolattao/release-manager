@@ -18,9 +18,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     `role`: at session start, or at the first tick that finds the one role.sh wrote. scripts/update.sh
 //     waits for it to reach the newest version installed.
 //   - between turns, when a newer version of the plugin is installed on the session's account than the one
-//     it runs, it reloads the plugin in place (/reload-plugins), once per version; the new version's module
-//     then has the session read its role's rules again. A reload that fails restarts the session instead
-//     (scripts/update.sh restart).
+//     it runs, it reloads the plugin in place (/reload-plugins), once per version, and does nothing more
+//     between those turns; the new version's module then has the session read its role's rules again, and
+//     wakes it. A reload that fails restarts the session instead (scripts/update.sh restart).
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -1073,25 +1073,23 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (!isBusy) {
-      // A newer version installed on the account: the session reloads it. What fails there never keeps the
-      // session from its wakes and its color.
-      let isReloading = false
+      // A newer version installed on the account: the session reloads it, and these turns' work ends here:
+      // the new version's module delivers the wakes and applies the name and the color, so nothing is marked
+      // read by a module whose prompt never goes out. What fails there never keeps the session from its wakes
+      // and its color.
       try {
-        isReloading = await reloadIfBehind($, folder)
+        if (await reloadIfBehind($, folder)) {
+          return
+        }
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }
-      // The tick that starts a reload ends here: this module is being replaced, so a wake it marked read
-      // (`wake-read`) would have its prompt never go out. The new version's module delivers it, and names and
-      // colors the session.
-      if (!isReloading) {
-        // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
-        if (!(await limitWake($, folder, now))) {
-          await wakeUp($, folder, role, status, now)
-        }
-        await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
-        await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
+      // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
+      if (!(await limitWake($, folder, now))) {
+        await wakeUp($, folder, role, status, now)
       }
+      await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
+      await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
     }
   } catch (err) {
     $.ui.log(`team: ${String(err)}`)

@@ -94,20 +94,30 @@ test('a session behind the newest version installed on its account reloads the p
   expect(prompts).toEqual([])
 })
 
-test('the tick that starts a reload delivers no wake, and names and colors nothing: the new module does', async ($, on) => {
+test('the tick that starts a reload delivers no wake, marks none read and leaves the name and the color to the new module', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
-  // Quiet for a minute, with the main checkout freed for it: a wake the tick would deliver.
-  const wake = `${NOW / 1000 - 30}\tcheckout\tthe main checkout is free: take it now with checkout.sh take\t\n`
-  const { files: all } = files(on, { 'plugin.json': manifest('1.2.3'), ...reviewer, name: 'shop · review #42', idle: `${NOW / 1000 - 60}\n`, wake }, { [CACHE]: ['1.2.3', '1.2.4'] })
+  // A wake due at the third tick, when 1.2.4 has just been installed; nothing newer before.
+  const installed: Record<string, string[]> = { [CACHE]: ['1.2.3'] }
+  const { files: all } = files(
+    on,
+    { 'plugin.json': manifest('1.2.3'), name: 'shop · review #42', wake: `${NOW / 1000}\ttech lead on #42\tRileggi la issue\thttps://x/42#c101\n`, ...reviewer },
+    installed,
+  )
   const { commands, prompts } = engine(on)
 
   await $.session.start(START)
-  await clock.advance(2000)
-  expect(reloads(commands)).toEqual(['/reload-plugins --force'])
-  expect(all.has('wake-read')).toBe(false)
+  await clock.advance(4000)
+  expect(commands).toEqual(['/rename shop · review #42', '/color cyan'])
   expect(prompts).toEqual([])
-  expect(commands.filter(c => c.startsWith('/rename') || c.startsWith('/color'))).toEqual([])
+  // A new name and a new state for the next tick, as role.sh and status.sh write them.
+  all.set('name', 'shop · review #42 · round 2')
+  all.set('status', JSON.stringify({ role: 'review', state: 'others', detail: 'waits for the developer' }))
+  installed[CACHE] = ['1.2.3', '1.2.4']
+  await clock.advance(2000)
+  expect(commands).toEqual(['/rename shop · review #42', '/color cyan', '/reload-plugins --force'])
+  expect(prompts).toEqual([])
+  expect(all.has('wake-read')).toBe(false)
 })
 
 test('a session in a turn reloads only once the turn has ended', async ($, on) => {

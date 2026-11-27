@@ -2,15 +2,36 @@
 # Adds or removes a GitHub "blocked by" relationship between two issues of this repository.
 #   block.sh <issue> <blocking-issue>           issue is blocked by blocking-issue
 #   block.sh --remove <issue> <blocking-issue>  takes the relationship away
+# --remove may come anywhere among the arguments. Any other argument is refused with the usage, and no
+# relationship changes.
 set -eu
 
-mutation=addBlockedBy
-if [ "${1:-}" = --remove ]; then
-	mutation=removeBlockedBy
+usage() {
+	echo "usage: block.sh [--remove] <issue> <blocking-issue>" >&2
+	exit 2
+}
+mutation=addBlockedBy issue="" blocking=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--remove) mutation=removeBlockedBy ;;
+	-*)
+		echo "unknown option '$1'" >&2
+		usage
+		;;
+	*)
+		if [ -z "$issue" ]; then
+			issue=$1
+		elif [ -z "$blocking" ]; then
+			blocking=$1
+		else
+			echo "two issues: '$1' is one too many" >&2
+			usage
+		fi
+		;;
+	esac
 	shift
-fi
-issue=${1:?issue number}
-blocking=${2:?blocking issue number}
+done
+[ -n "$issue" ] && [ -n "$blocking" ] || usage
 
 id() { gh issue view "$1" --json id --jq .id; }
 # shellcheck disable=SC2016 # GraphQL variables, not shell ones

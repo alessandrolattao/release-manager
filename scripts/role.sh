@@ -1,9 +1,12 @@
 #!/bin/sh
 # Records what a session is in the team and gives it its name. The tech lead skill runs it when it starts;
 # the scripts that start developers, QA and spikes run it for the session they start.
-#   role.sh <session-id> tech-lead                (from the main checkout; one per repository)
-#   role.sh <session-id> dev|qa <issue> [branch]  (from the session's folder)
-#   role.sh <session-id> spike <topic>            (from the main checkout)
+#   role.sh <session-id> tech-lead                          (from the main checkout; one per repository)
+#   role.sh <session-id> dev|qa <issue> [branch] [started]  (from the session's folder)
+#   role.sh <session-id> spike <topic>                      (from the main checkout)
+# started: when the script that started a developer or a QA agent launched it (epoch seconds), recorded once
+# and never overwritten, so a resume keeps it: the agent read the issue with all its comments after it, so the
+# dispatcher wakes it for none written before (dispatch.sh).
 # From then on the hooks module keeps the session's heartbeat and color, and wakes it between turns when there
 # is something for it, and hooks/revive.sh resumes a tech lead after the machine restarts.
 set -eu
@@ -12,9 +15,16 @@ id=${1:?session id}
 role=${2:?tech-lead, dev, qa or spike}
 arg=${3:-}
 branch=${4:-}
+started=${5:-}
 case "$id" in
 "" | *[!A-Za-z0-9-]*)
 	echo "invalid session id" >&2
+	exit 2
+	;;
+esac
+case "$started" in
+*[!0-9]*)
+	echo "invalid start time" >&2
 	exit 2
 	;;
 esac
@@ -53,7 +63,9 @@ dev | qa)
 	stage="in progress"
 	if [ "$role" = dev ]; then name=$(dev_name "$issue" "$title" "$stage"); else name=$(qa_name "$issue" "$title" "$stage"); fi
 	status_set "$id" --arg r "$role" --arg repo "$repo_full" --arg n "$name" --argjson i "$issue" --arg t "$title" \
-		--arg p "$place" --arg b "$branch" --arg s "$stage" '.role = $r | .repo = $repo | .name = $n | .issue = $i | .title = $t | .place = $p | .branch = $b | .stage = $s'
+		--arg p "$place" --arg b "$branch" --arg s "$stage" --arg st "$started" \
+		'.role = $r | .repo = $repo | .name = $n | .issue = $i | .title = $t | .place = $p | .branch = $b | .stage = $s
+		| if $st == "" then . else .started //= ($st | tonumber) end'
 	state_set "$id" working "starting"
 	;;
 spike)

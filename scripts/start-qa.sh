@@ -30,8 +30,11 @@ brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}
 
 cd "$root"
 name=$(qa_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in progress")
+# Taken just before the launch: the QA agent reads the issue with all its comments after it, so none written
+# before wakes it (role.sh, dispatch.sh).
+started=$(date +%s)
 id=$(launch "$name" "$brief")
-sh "$here/role.sh" "$id" qa "$issue" "$branch" >/dev/null
+sh "$here/role.sh" "$id" qa "$issue" "$branch" "$started" >/dev/null
 # Taken: the dispatcher starts no other QA agent for this request.
 sed -i '1s/^requested\t/testing\t/' "$record"
 echo "started $name ($id)"

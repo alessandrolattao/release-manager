@@ -409,6 +409,28 @@ ok "a new comment still wakes its reader" "$(grep -c 'c112' "$S/$DEV/wake" 2>/de
 ok "at the time GitHub wrote it" "$(grep 'c112' "$S/$DEV/wake" | cut -f1)" "$(date -u -d 2026-11-25T10:07:00Z +%s)"
 rm -f "$G/repo-comments.json"
 
+echo "== dispatch.sh: a developer or QA agent is not woken for a comment written before its launch"
+DEV47=22222222-0000-0000-0000-000000000047
+QA47=55555555-0000-0000-0000-000000000047
+sh "$SC/role.sh" "$DEV47" dev 47 47-late 1795000100 >/dev/null
+ok "role.sh records when a developer was launched" "$(st "$DEV47" started)" "1795000100"
+sh "$SC/role.sh" "$DEV47" dev 47 47-late 1795000900 >/dev/null
+ok "once: never overwritten" "$(st "$DEV47" started)" "1795000100"
+sh "$SC/role.sh" "$QA47" qa 47 47-late 1795000100 >/dev/null
+sh "$SC/role.sh" "$QA47" qa 47 47-late soon >/dev/null 2>&1; code=$?
+ok "a start time is a number of seconds" "$code" "2"
+{
+	printf '120\t1795000050\ttester\t47\thttps://x/47#c120\ttech lead\t## Technical decisions\t- prima del lancio\n'
+	printf '121\t1795000200\ttester\t47\thttps://x/47#c121\ttech lead\t## Technical decisions\t- dopo il lancio\n'
+	printf '122\t1795000050\ttester\t47\thttps://x/47#c122\t-\t**tech lead → dev #47**\tscritto prima\n'
+	printf '123\t1795000100\ttester\t47\thttps://x/47#c123\t-\t**tech lead → qa #47**\tscritto al lancio\n'
+} >"$G/repo-comments.tsv"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "a comment written before the launch wakes neither" "$(cat "$S/$DEV47/wake" "$S/$QA47/wake" 2>/dev/null | grep -c 'c12[02]')" "0"
+ok "one written after it wakes both" "$(grep -c 'c121' "$S/$DEV47/wake") $(grep -c 'c121' "$S/$QA47/wake")" "1 1"
+ok "one written in the second of the launch wakes it" "$(grep -c 'c123' "$S/$QA47/wake")" "1"
+rm -rf "${S:?}/$DEV47" "${S:?}/$QA47"
+
 echo "== dispatch.sh: a question left in a chat goes to the tech lead after 5 minutes"
 date +%s >"$S/$DEV2/idle"
 printf '%s\n%s\n%s\n%s\n' "$(($(date +%s) - 400))" "Quale porta uso?" 43 "Quale porta uso?" >"$S/$DEV2/asked"
@@ -756,6 +778,7 @@ sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a developer session is launched with its name" "$(grep -c -- '--name repo · dev #44 · in progress · Title 44' "$T/claude.log")" "1"
 ok "on the account's default model" "$(grep -c -- '--bg --model default --name repo · dev #44' "$T/claude.log")" "1"
 ok "its role is recorded" "$(cat "$S/$NEW/role" 2>/dev/null)" "dev"
+ok "with the time taken just before its launch" "$(st "$NEW" started | grep -c -E '^[0-9]{10}$')" "1"
 ok "in its own worktree" "$(st "$NEW" place)" "worktree 44"
 ok "on the issue's branch" "$(git -C "$ROOT/.claude/worktrees/44-new-thing" rev-parse --abbrev-ref HEAD 2>/dev/null)" "44-new-thing"
 ok "the brief names the issue" "$(grep -c 'You are the developer of issue #44 of test/repo' "$T/claude.log")" "1"
@@ -778,6 +801,7 @@ ok "its brief names the issue and the developer's branch, no pull request" "$(gr
 ok "on the account's default model too" "$(grep -c -- '--bg --model default --name repo · qa #42' "$T/claude.log")" "1"
 ok "the request is taken" "$(cut -f1 "$R/qa/42")" "testing"
 ok "its role, issue and branch" "$(st "$QA" role) $(st "$QA" issue) $(st "$QA" branch) $(st "$QA" stage)" "qa 42 42-feature in progress"
+ok "with the time taken just before its launch" "$(st "$QA" started | grep -c -E '^[0-9]{10}$')" "1"
 ok "no place before it takes the lock" "$(st "$QA" place)" ""
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "not started twice" "$(grep -c -- '--name repo · qa #42' "$T/claude.log")" "1"
@@ -820,7 +844,7 @@ sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "the user's answer on GitHub reaches the tech lead who asked there" "$(grep -c 'chiamalo pippo' "$S/$TL1/wake")" "1"
 
 jq -c '.state = "working" | del(.asked_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
-printf '202\t1795000000\ttester\t51\thttps://github.com/test/repo/pull/51#issuecomment-202\t-\trinomina la funzione\t\n' >"$G/repo-comments.tsv"
+printf '202\t%s\ttester\t51\thttps://github.com/test/repo/pull/51#issuecomment-202\t-\trinomina la funzione\t\n' "$(date +%s)" >"$G/repo-comments.tsv"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a comment on a pull request reaches the developer of the issue it closes" "$(grep -c 'rinomina la funzione' "$S/$NEW/wake" 2>/dev/null)" "1"
 
@@ -917,6 +941,33 @@ ok "the tech lead writing to someone else is no answer" "$(printf '%s\n' "$out" 
 ok "an answered one is not" "$(printf '%s\n' "$out" | grep -c '#43')" "0"
 ok "nor one by another account" "$(printf '%s\n' "$out" | grep -c 'finta')" "0"
 ok "nor news that owes no answer" "$(printf '%s\n' "$out" | grep -c '#45')" "0"
+ok "what it lists has reached the tech lead: recorded in seen" "$(cut -f2 "$R/seen" | sort | tr '\n' ' ')" "https://x/42#7 https://x/pull/50#8 "
+ok "with when it was listed" "$(cut -f1 "$R/seen" | grep -c -E '^[0-9]{10}$')" "2"
+
+echo "== mentions.sh: a question is answered only by a write after it reached the tech lead"
+epoch() { date -u -d "$1" +%s; }
+# The record starts at 09:00; the second question was listed at 10:30 and again at 12:00, the third at 10:40.
+{
+	printf '%s\t%s\n' "$(epoch 2026-11-24T09:00:00Z)" "https://x/40#1"
+	printf '%s\t%s\n' "$(epoch 2026-11-24T10:30:00Z)" "https://x/46#21"
+	printf '%s\t%s\n' "$(epoch 2026-11-24T12:00:00Z)" "https://x/46#21"
+	printf '%s\t%s\n' "$(epoch 2026-11-24T10:40:00Z)" "https://x/48#40"
+} >"$R/seen"
+cat >"$G/mentions.json" <<'EOF'
+[{"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/46","html_url":"https://x/46#20","body":"**dev #46 → tech lead**\n\nPrima domanda?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T10:10:00Z","issue_url":"https://x/46","html_url":"https://x/46#21","body":"**dev #46 → tech lead**\n\nSeconda domanda?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T11:00:00Z","issue_url":"https://x/46","html_url":"https://x/46#22","body":"**tech lead → dev #46** · fyi\n\nLe decisioni sono cambiate"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T08:00:00Z","issue_url":"https://x/47","html_url":"https://x/47#30","body":"**dev #47 → tech lead**\n\nVecchia domanda?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T08:30:00Z","issue_url":"https://x/47","html_url":"https://x/47#31","body":"**tech lead → dev #47**\n\nRisposta"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T10:00:00Z","issue_url":"https://x/48","html_url":"https://x/48#40","body":"**dev #48 → tech lead**\n\nVista dopo?"},
+ {"user":{"login":"tester"},"created_at":"2026-11-24T10:20:00Z","issue_url":"https://x/48","html_url":"https://x/48#41","body":"**tech lead → dev #48**\n\nAltro tema"}]
+EOF
+out=$(CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/mentions.sh" 2>&1)
+ok "a question never seen is listed, though the tech lead wrote to its asker after it" "$(printf '%s\n' "$out" | grep -c '^#46 · dev #46 ·.*Prima domanda?')" "1"
+ok "one seen, then written to, is not" "$(printf '%s\n' "$out" | grep -c 'Seconda domanda?')" "0"
+ok "one written to before it was seen is" "$(printf '%s\n' "$out" | grep -c '^#48 · dev #48 ·.*Vista dopo?')" "1"
+ok "one older than the record keeps the old rule: a later write answers it" "$(printf '%s\n' "$out" | grep -c 'Vecchia domanda?')" "0"
+ok "what it lists is appended to the record" "$(sed -n '5,$p' "$R/seen" | cut -f2 | sort | tr '\n' ' ')" "https://x/46#20 https://x/48#40 "
 
 echo "== claim.sh: one machine per issue"
 cd "$ROOT" || exit 1

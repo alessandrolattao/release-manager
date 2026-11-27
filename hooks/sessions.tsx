@@ -20,7 +20,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
-//     (tell.sh). A session outside the team runs nothing.
+//     (tell.sh). A session outside the team runs nothing. In a tech lead it records each comment it delivered
+//     in the repository's `seen`, as scripts/mentions.sh does for each one it lists: a write to the asker
+//     answers a question only once the question has reached the tech lead.
 //   - a session whose turn ended on the usage limit is alive and waits: it wakes it once the limit has reset,
 //     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on.
@@ -1008,17 +1010,52 @@ async function saidOf($: EngineInterface, folder: string): Promise<Said[]> {
     })
 }
 
+// When each comment first reached this repository's tech lead, by link: delivered in a wake (wakeUp) or listed
+// by scripts/mentions.sh, one line of the repository's `seen` each, <time> <link>. Shared by the successive
+// tech lead sessions of the repository on this machine; only ever appended to.
+type Seen = Map<string, number>
+
+async function seenFile($: EngineInterface, repo: string): Promise<string> {
+  return `${await rootOf($)}/repos/${repo.replace('/', '_')}/seen`
+}
+
+async function seenOf($: EngineInterface, repo: string): Promise<Seen> {
+  const seen: Seen = new Map()
+  for (const line of (await readText($, await seenFile($, repo))).split('\n')) {
+    const [time = '', link = ''] = line.split('\t')
+    if (link !== '' && Number(time) > 0 && !seen.has(link)) {
+      seen.set(link, Number(time))
+    }
+  }
+  return seen
+}
+
+// Appends the links that reached the tech lead now to the repository's `seen`. A file that exists but cannot
+// be read is left as it is: written whole, it would lose what it held.
+async function noteSeen($: EngineInterface, repo: string, links: string[]): Promise<void> {
+  const file = await seenFile($, repo)
+  const now = Math.floor((await $.clock.now()) / 1000)
+  let before = (await $.fs.exists(file)) ? await $.fs.read(file) : ''
+  if (before !== '' && !before.endsWith('\n')) {
+    before += '\n'
+  }
+  await $.fs.write(file, `${before}${links.map(link => `${now}\t${link}\n`).join('')}`)
+}
+
 // A comment the session already answered. In a tech lead: one of the user's by any later comment of the
-// session on its thread, an agent's only by a later comment of the session written to that agent. In any
-// other session: by any later comment of the session on its thread, a note included, whoever it was to.
-function isAnswered(line: WakeLine, said: Said[], role: string): boolean {
+// session on its thread; an agent's only by a comment of the session written to that agent on its thread
+// after the comment reached the tech lead (`seen`), so one never seen is never answered. In any other
+// session: by any later comment of the session on its thread, a note included, whoever it was to.
+function isAnswered(line: WakeLine, said: Said[], role: string, seen: Seen): boolean {
   const comment = commentOf(line.from)
   if (comment === null || !(line.time > 0)) {
     return false
   }
-  return said.some(
-    s => s.issue === comment.issue && s.time > line.time && (role !== 'tech-lead' || comment.author === USER || s.to === comment.author),
-  )
+  if (role === 'tech-lead' && comment.author !== USER) {
+    const at = seen.get(line.link)
+    return at !== undefined && said.some(s => s.issue === comment.issue && s.to === comment.author && s.time > at)
+  }
+  return said.some(s => s.issue === comment.issue && s.time > line.time)
 }
 
 // A GitHub comment's link as dispatch.sh writes it (the comment's html_url) as its repository and its id;
@@ -1058,7 +1095,8 @@ async function isGone($: EngineInterface, cwd: string, link: string): Promise<bo
 // Each comment is checked again as it is delivered: one the session already answered on GitHub (isAnswered),
 // then, asking GitHub, one deleted since (isGone), is delivered without a turn; with nothing left, no wake.
 // `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again. A line from
-// the one the session waits on ends that wait before the turn starts (answered).
+// the one the session waits on ends that wait before the turn starts (answered). In a tech lead, the links
+// delivered go to the repository's `seen` once the prompt entered (noteSeen).
 async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
   const idleSince = Number(await readText($, `${folder}/idle`))
   if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
@@ -1082,8 +1120,10 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
     return { time: Number(time), from, link, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
   })
   const said = fresh.length > 0 ? await saidOf($, folder) : []
+  const repo = role === 'tech-lead' ? (status.repo ?? '') : ''
+  const seen = fresh.length > 0 && repo !== '' ? await seenOf($, repo) : new Map<string, number>()
   // First what needs no call to GitHub: the comments answered, and those already found deleted.
-  let kept = fresh.filter(line => !isAnswered(line, said, role) && !gone.has(line.link))
+  let kept = fresh.filter(line => !isAnswered(line, said, role, seen) && !gone.has(line.link))
   const hasUser = () => kept.some(line => commentOf(line.from)?.author === USER)
   if (isInChat && !hasUser()) {
     return
@@ -1113,7 +1153,16 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
     toldInbox = new Set(inbox)
   }
   if (parts.length > 0) {
-    void $.prompt.submit({ text: parts.join('; ') }).catch(err => $.ui.log(`team: ${String(err)}`))
+    // In a tech lead, what the prompt carried has reached it once the prompt entered: `seen`.
+    const links = repo !== '' ? kept.map(line => line.link).filter(link => link !== '') : []
+    void $.prompt
+      .submit({ text: parts.join('; ') })
+      .then(async result => {
+        if (result.drop === undefined && links.length > 0) {
+          await noteSeen($, repo, links)
+        }
+      })
+      .catch(err => $.ui.log(`team: ${String(err)}`))
   }
 }
 

@@ -21,6 +21,7 @@ function folder(on: On, seed: Record<string, string>, inbox: string[] = []): Map
     files.set(name(e.path), e.text)
     return { value: undefined }
   })
+  on('fs.exists', (_$, e) => ({ value: files.has(name(e.path)) }))
   on('fs.list', (_$, e) => ({
     value: e.path.endsWith('/inbox/acme_shop/new') ? inbox.map(n => ({ name: n, kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) : [],
   }))
@@ -321,6 +322,8 @@ test('an agent\'s comment is answered only by a later comment to that agent; the
       `${at}\tcheckout\tthe main checkout is free: take it now with checkout.sh take\t`,
       '',
     ].join('\n'),
+    // Both agents' comments had reached the tech lead (mentions.sh listed them) before its comments below.
+    seen: `${at + 5}\thttps://x/42#c301\n${at + 5}\thttps://x/50#c302\n`,
     commented: [
       // Before the comments: nothing is answered by it.
       `${at - 30}\t42\tdev #42`,
@@ -344,6 +347,64 @@ test('an agent\'s comment is answered only by a later comment to that agent; the
     'for you on GitHub: dev #42 on #42: Quale tabella? (https://x/42#c301); the user on #45: altro tema (https://x/45#c303); checkout: the main checkout is free: take it now with checkout.sh take',
   ])
   expect(files.get('wake-read')).toBe('4\n')
+})
+
+test('a question to the tech lead it wrote to the asker about before the question reached it is still delivered, and then seen', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
+    wake: `${at}\tdev #42 on #42\tQuale tabella?\t${link(301)}\n`,
+    // Written to the developer mid-turn, after the question was asked but before any wake or list showed it.
+    commented: `${at + 30}\t42\tdev #42\n`,
+    seen: `${at - 600}\t${link(200)}\n`,
+    'plugin.json': MANIFEST,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  engine(on, logs, '9.9.9', [], github([]))
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([`for you on GitHub: dev #42 on #42: Quale tabella? (${link(301)})`])
+  // Delivered: it has reached the tech lead now, after what was there already.
+  const [before, added, ...rest] = (files.get('seen') ?? '').split('\n')
+  expect(before).toBe(`${at - 600}\t${link(200)}`)
+  const [time, delivered] = (added ?? '').split('\t')
+  expect(delivered).toBe(link(301))
+  expect(Number(time)).toBeGreaterThanOrEqual(NOW / 1000)
+  expect(rest).toEqual([''])
+})
+
+test('a question to the tech lead mentions.sh listed, then written to, is not delivered', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const at = NOW / 1000 - 120
+  const files = folder(on, {
+    role: 'tech-lead',
+    status: JSON.stringify({ role: 'tech-lead', repo: 'acme/shop', state: 'idle', detail: 'waiting for work' }),
+    wake: `${at}\tdev #42 on #42\tQuale tabella?\t${link(301)}\n`,
+    // Listed by mentions.sh, listed again later: the first time it reached the tech lead counts.
+    seen: `${at + 10}\t${link(301)}\n${at + 60}\t${link(301)}\n`,
+    commented: `${at + 30}\t42\tdev #42\n`,
+    'plugin.json': MANIFEST,
+  })
+  const seen = prompts(on)
+  const logs: string[] = []
+  const runs = engine(on, logs, '9.9.9', [], github([]))
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(logs).toEqual([])
+  expect(seen).toEqual([])
+  expect(files.get('wake-read')).toBe('1\n')
+  expect(lookups(runs)).toEqual([])
+  expect(files.get('seen')).toBe(`${at + 10}\t${link(301)}\n${at + 60}\t${link(301)}\n`)
 })
 
 test('a tech lead waiting in its chat is left alone for the user\'s comment it already answered', async ($, on) => {

@@ -1407,10 +1407,11 @@ ok "or to the login given" "$(sed 's/.*assignees=//' "$G/issues/${url##*/}.meta"
 
 echo "== update.sh"
 cd "$ROOT" || exit 1
-# 9.9.9 published: the update installs it on the team's account. No session has recorded its version, as
-# when an older version started them: each one restarts.
+# 9.9.9 published: the update installs it on the team's account. No session runs a version that reloads it by
+# itself: one recorded 0.5.7, the others none, as when an older version started them. Each one restarts.
 release 9.9.9
 echo "$T/config 9.9.9" >"$T/publish"
+echo 0.5.7 >"$S/$DEV2/version"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 date +%s >"$S/$NEW/alive"
@@ -1456,6 +1457,7 @@ busy=""
 first=no
 [ -s "$T/new-at" ] && [ -s "$T/step3-at" ] && [ $(($(cat "$T/new-at") - $(cat "$T/step3-at"))) -lt 10 ] && first=yes
 ok "a session between turns restarts in the first pass, though its transcript keeps changing" "$first" "yes"
+ok "one on a version too old to reload restarts as one with none recorded" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 " "$T/claude.log")" "1"
 ok "one in a turn waits for the next pass, though its transcript is an hour old" "$(grep -o -e "--resume $DEV2 " -e "--resume $NEW " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$NEW $DEV2 "
 fallback=no
 [ -s "$T/tl1-at" ] && [ -s "$T/dev2-at" ] && [ $(($(cat "$T/tl1-at") - $(cat "$T/dev2-at"))) -ge 5 ] && [ $(($(cat "$T/tl1-at") - $(cat "$T/dev2-at"))) -lt 20 ] && fallback=yes
@@ -1486,9 +1488,10 @@ ok "no session restarts" "$(grep -c -- '--resume' "$T/claude.log")" "0"
 ok "nor the dispatcher" "$(cat "$R/dispatcher.pid" 2>/dev/null) $(grep -c '^dispatcher ' "$T/update.out")" "$pid 0"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
 
-echo "== update.sh: a new version on one account restarts only the sessions behind it"
+echo "== update.sh: a new version on one account: the session behind it reloads it, and none restarts"
 # The default account has 9.9.9 too, and 9.9.10 is published there alone. Its session runs 9.9.9; the team's
 # account stays on 9.9.9, where its sessions, restarted by the first run, and the dispatcher run it already.
+# The session behind reloads it by itself (hooks/sessions.tsx): its `version` reaches 9.9.10 a few seconds in.
 ACC=55555555-0000-0000-0000-000000000045
 mkdir -p "$T/home/.claude/plugins/cache/team/team" "$S/$ACC"
 ln -s "$T/releases/9.9.9" "$T/home/.claude/plugins/cache/team/team/9.9.9"
@@ -1505,16 +1508,47 @@ done
 ok "the dispatcher runs 9.9.9" "$(cat "$R/dispatcher.version")" "9.9.9"
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 : >"$T/claude.log"
+(
+	sleep 3
+	echo 9.9.10 >"$S/$ACC/version"
+) &
+reloader=$!
 CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+wait "$reloader"
 ok "the default account gets 9.9.10" "$(grep -c '^account .*/home/.claude: Plugin "team" updated to 9.9.10$' "$T/update.out")" "1"
-ok "only its session restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$ACC "
-ok "on 9.9.10" "$(grep -c -- "--bg --resume $ACC The team plugin was updated to 9.9.10 " "$T/claude.log")" "1"
+ok "no session restarts" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
+ok "the update waits for the session behind to reach 9.9.10, and says so" "$(grep -c '^repo · dev #45 · in progress · Title 45: now on 9.9.10$' "$T/update.out")" "1"
 ok "every session already on its account's newest version is left alone, with its line" "$(grep ': already on 9.9.9$' "$T/update.out" | grep -v '^dispatcher ' | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|repo · tech lead|"
 ok "and so is the dispatcher" "$(cat "$R/dispatcher.pid" 2>/dev/null) $(grep '^dispatcher ' "$T/update.out")" "$pid dispatcher test_repo: already on 9.9.9"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+
+echo "== update.sh: a new version on the team's account restarts the dispatcher, and no session"
+# 9.9.11 published on the team's account, where the dispatcher and the sessions run 9.9.9. The two developers
+# reload it by themselves a few seconds in; the tech lead, which started the update, reloads like them but has
+# not when the update stops waiting.
+release 9.9.11
+echo "$T/config 9.9.11" >>"$T/publish"
+for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+: >"$T/claude.log"
+(
+	sleep 3
+	echo 9.9.11 >"$S/$DEV2/version"
+	echo 9.9.11 >"$S/$NEW/version"
+) &
+reloader=$!
+CLAUDE_CODE_SESSION_ID=$TL1 UPDATE_QUIET=0 UPDATE_GONE=1 UPDATE_WAIT=5 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+wait "$reloader"
+new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+ok "the dispatcher restarts on 9.9.11" "$([ -n "$new_pid" ] && [ "$new_pid" != "$pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out") $(cat "$R/dispatcher.version")" "yes 1 9.9.11"
+ok "no session restarts, the one that started the update neither" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
+ok "each session that reached 9.9.11 has its line" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|"
+ok "the one on another account, already on its newest, is left alone" "$(grep -c '^repo · dev #45 · in progress · Title 45: already on 9.9.10$' "$T/update.out")" "1"
+ok "one still behind when the update stops waiting is reported, last" "$(tail -2 "$T/update.out" | head -1)" "repo · tech lead: still behind after 0 minutes, on 9.9.9"
+ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
 sh "$SC/dispatcher.sh" stop >/dev/null
 rm -rf "${S:?}/$ACC" "$T/home/.claude/plugins"
-rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version"
+rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version" "$T/config/plugins/cache/team/team/9.9.11"
 : >"$T/publish"
 
 echo "== update.sh: started by an older version, the newest one restarts the sessions"
@@ -1544,6 +1578,26 @@ ok "the restarted sessions get the newer prompt" "$(grep -- "--bg --resume $TL1 
 ok "the plugin is updated once on each account" "$(grep -c 'plugin update team@team' "$T/claude.log")" "2"
 ok "the one that started the update restarts last" "$(grep -- '--bg --resume' "$T/claude.log" | tail -1 | cut -d' ' -f3)" "$TL1"
 ok "and the log says once that the update starts, and that it is done" "$(grep -c 'update starts$' "$T/update.out") $(tail -1 "$T/update.out" | cut -c21-)" "1 update done"
+
+echo "== update.sh restart: a session whose reload failed restarts, in the background, its lines in the update's log"
+# A developer on a version that reloads by itself, behind 9.9.9: its reload failed, and its module runs this.
+ulog="$T/state/team/update.log"
+echo "an earlier update's line" >"$ulog"
+echo 9.9.8 >"$S/$DEV2/version"
+echo $(($(date +%s) - 60)) >"$S/$DEV2/idle"
+: >"$T/claude.log"
+out=$(UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" restart "$DEV2" 2>&1)
+code=$?
+ok "it answers at once, with nothing to say" "$code [$out]" "0 []"
+n=0
+until grep -q ': backgrounded' "$ulog" || [ "$n" -ge 100 ]; do
+	sleep 0.1
+	n=$((n + 1))
+done
+ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$DEV2 "
+ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
+ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
+rm -f "$S/$DEV2/version"
 
 echo "== no write through GitHub's GraphQL API where REST has an endpoint"
 ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"

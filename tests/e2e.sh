@@ -62,6 +62,14 @@ answer() {
 next_id() { n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"; echo "$n"; }
 case "$*" in
 "repo view --json nameWithOwner --jq .nameWithOwner") echo test/repo ;;
+# A repository by its name, as GitHub spells it whatever the case asked: test/repo and someone/else; any
+# other, GitHub does not know.
+"repo view "*" --json nameWithOwner --jq .nameWithOwner")
+	r=$(printf '%s' "$3" | tr '[:upper:]' '[:lower:]')
+	case "$r" in
+	test/repo | someone/else) echo "$r" ;;
+	*) echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2; exit 1 ;;
+	esac ;;
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
 # The user's permission on the repository: ADMIN, or the one in permission.
 "repo view --json viewerPermission --jq .viewerPermission") cat "$G/permission" 2>/dev/null || echo ADMIN ;;
@@ -449,8 +457,16 @@ ok "the writer's state does not change" "$(jq -c '{state, detail, waits_on}' "$S
 ok "recorded on the issue the pull request closes" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}tech lead of someone/else"
 m=$(ls -t "$box/new/"* | head -1)
 ok "its inbox line says it is news" "$(sed -n '5,$p' "$m")" "Wrote to you on test/repo#50 · fyi: https://github.com/test/repo/issues/50#issuecomment-${f##*.}"
+# Named in another case than GitHub's: written as GitHub spells it, so that tech lead's name matches.
+jq -c '.state = "working" | del(.waits_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
+echo "Sì" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 "tech lead of Someone/Else" >/dev/null
+f=$(ls -t "$G/comments/42."* | head -1)
+ok "another case: its header names the repository as GitHub spells it" "$(head -1 "$f")" "**tech lead → tech lead of someone/else**"
+ok "the writer waits on that tech lead by that name" "$(st "$TL1" waits_on)" "tech lead of someone/else"
+ok "the thread records that name" "$(tail -1 "$S/$TL1/commented" | cut -f3)" "tech lead of someone/else"
+ok "the line goes to the inbox that tech lead reads" "$(ls "$box/new" | wc -l | tr -d ' ') $(ls "$T/data/team/inbox")" "3 someone_else"
 posted=$(ls "$G/comments" | wc -l) left=$(ls "$box/new" | wc -l)
-for to in "tech lead of Test/Repo" "tech lead of someone/else/forks#" "tech lead of someone" "tech lead of "; do
+for to in "tech lead of Test/Repo" "tech lead of someone/else/forks#" "tech lead of someone" "tech lead of " "tech lead of nobody/here"; do
 	echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 "$to" >/dev/null 2>&1; code=$?
 	ok "refused ($to): nothing posted, nothing left in an inbox" "$code $(ls "$G/comments" | wc -l) $(ls "$box/new" | wc -l)" "2 $posted $left"
 done

@@ -14,7 +14,9 @@
 # when all of them were, the newest commit of the branch, which holds the change, is followed instead.
 # A repository with no workflow that runs on a push gets NO CI at once, without waiting: the work ends with the
 # merge, as with GREEN. With --wait, so does a merge commit with no run 5 minutes after the merge, whatever the
-# workflow files say (a push trigger whose filters leave this push out): none will start.
+# workflow files say (a push trigger whose filters leave this push out): none will start. The same holds for the
+# newest commit it follows once every run of the merge commit was cancelled, 5 minutes after it started
+# following it.
 # While GitHub has not marked a merge that landed (merge.sh says so), the merge commit is the branch's commit
 # whose second parent is the pull request's head. A squash or a rebase leaves none: not merged, until GitHub
 # marks it.
@@ -93,11 +95,17 @@ fi
 if [ "${2:-}" = --wait ]; then
 	minutes=${MAIN_CI_WAIT:-45}
 	end=$(($(date +%s) + minutes * 60))
+	# since: when the 5 minutes (grace) for a first run of the commit followed start: the merge for the merge
+	# commit, the moment it starts following it for a newer one.
+	grace=$((${MAIN_CI_NO_RUN:-5} * 60))
+	since=$merged
 	while [ "$(date +%s)" -lt "$end" ]; do
 		seen=yes
 		list=$(runs) || seen=""
 		if superseded "$list"; then
-			sha=$(git ls-remote origin "refs/heads/$base" | cut -f1)
+			newest=$(git ls-remote origin "refs/heads/$base" | cut -f1)
+			[ "$newest" = "$sha" ] || since=$(date +%s)
+			sha=$newest
 			pause
 			continue
 		fi
@@ -105,10 +113,14 @@ if [ "${2:-}" = --wait ]; then
 		pending=$(printf '%s' "$list" | jq '[.[] | select(.status != "completed")] | length')
 		# Runs may take a moment to appear after a merge; once a minute, to spare the API.
 		[ "$total" -gt 0 ] && [ "$pending" -eq 0 ] && break
-		# No run of the merge commit 5 minutes after the merge: none will start. Runs that cannot be read are not
-		# known to be none, and a newer commit followed is no longer the merge commit: it waits for them.
-		if [ -n "$seen" ] && [ "$total" -eq 0 ] && [ "$sha" = "$merge" ] && [ "$(date +%s)" -ge $((merged + 300)) ]; then
-			echo "NO CI $base $short: no workflow run started for this merge"
+		# No run of the commit followed 5 minutes after since: none will start. Runs that cannot be read are not
+		# known to be none: it waits for them.
+		if [ -n "$seen" ] && [ "$total" -eq 0 ] && [ "$(date +%s)" -ge $((since + grace)) ]; then
+			if [ "$sha" = "$merge" ]; then
+				echo "NO CI $base $short: no workflow run started for this merge"
+			else
+				echo "NO CI $base ${sha%"${sha#???????}"}: the merge's runs were cancelled and the newest commit started none"
+			fi
 			exit 0
 		fi
 		pause

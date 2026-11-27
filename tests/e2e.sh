@@ -1365,10 +1365,17 @@ printf 'name: ci\non:\n  push:\n    branches: [release]\n' >"$G/workflow-1-relea
 touch "$G/superseded-50"
 interrupt_wait
 ok "every run cancelled: it follows the newest commit of that branch" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
-# The merge commit has runs, the newest commit none yet: 5 minutes after the merge it still waits for that one.
+# The merge commit has runs, the newest commit none yet: its 5 minutes start when it is followed, not at the merge.
 ago 360 >"$G/merged-at-50"
 interrupt_wait 2
-ok "and 5 minutes after the merge, with no run of that commit yet: it waits for it" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
+ok "and 5 minutes after the merge, the newest commit just followed with no run yet: it waits for it" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
+# Its 5 minutes over (none, here): none will start for it.
+MAIN_CI_NO_RUN=0 sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+spid=$(nap_of "$mpid")
+[ -z "$spid" ] || kill "$spid" 2>/dev/null
+ended "$mpid"
+ok "the newest commit with no run 5 minutes after it is followed: NO CI, and why" "$code $(cat "$T/main-ci.out")" "0 NO CI release ${rtip%"${rtip#???????}"}: the merge's runs were cancelled and the newest commit started none"
 rm -f "$G/superseded-50" "$G/merged-at-50"
 # A merge into the release branch GitHub has not marked yet: the head is in that branch only, not in main.
 git -C "$T/landed" checkout -q -b side main

@@ -831,11 +831,18 @@ rm -f "$G/comments-broken" "$G/decided-42"
 
 echo "== merge.sh: the code review only for an issue with the label review"
 echo no >"$G/review-42"
-echo no >"$G/qa-42"
+echo yes >"$G/qa-42"
 rm -f "$R/review/42" "$R/qa/42" "$G/merged-50"
+# With its decisions, as every issue has them, read for its QA, passed after them: a code review it never had
+# is not older than them.
+date -u +%Y-%m-%dT%H:%M:%SZ >"$G/decided-42"
+sleep 1
+printf 'requested\t%s\t42\t%s\t42-feature\n' "$reviewed" "$DEV" >"$R/qa/42"
+sh "$SC/qa.sh" pass 42 >/dev/null
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
 ok "an issue without the label review: merged with no code review pass" "$code $(merged)" "0 merged"
-rm -f "$G/merged-50"
+rm -f "$G/merged-50" "$G/decided-42" "$R/qa/42"
+echo no >"$G/qa-42"
 echo yes >"$G/review-42"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "one with it and no pass: refused" "$code $(printf '%s' "$out" | grep -c 'issue #42 carries the label review and the code review has not passed the current head: push it, then review.sh request 42$') $(merged)" "1 1 not-merged"

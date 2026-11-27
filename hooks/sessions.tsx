@@ -945,19 +945,20 @@ let reloadedTo = ''
 // its own version there, has the session read its role's rules again (reloadedPrompt). The call resolves only
 // when the reload did not work (no `Reloaded:` line), or it rejects: then the session restarts instead, as the
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
-// since the restart carries its own prompt.
-async function reloadIfBehind($: EngineInterface, folder: string): Promise<void> {
+// since the restart carries its own prompt. True when it started a reload.
+async function reloadIfBehind($: EngineInterface, folder: string): Promise<boolean> {
   const running = await versionOf($)
   if (running === '') {
-    return
+    return false
   }
   const installed = await installedOf($, folder)
   if (installed === null || installed.version === reloadedTo || !isNewer(installed.version, running)) {
-    return
+    return false
   }
   reloadedTo = installed.version
   await $.fs.write(`${folder}/reloading`, `${installed.version}\n`)
   void reload($, folder, installed.root)
+  return true
 }
 
 async function reload($: EngineInterface, folder: string, root: string): Promise<void> {
@@ -1074,17 +1075,23 @@ async function tick($: EngineInterface): Promise<void> {
     if (!isBusy) {
       // A newer version installed on the account: the session reloads it. What fails there never keeps the
       // session from its wakes and its color.
+      let isReloading = false
       try {
-        await reloadIfBehind($, folder)
+        isReloading = await reloadIfBehind($, folder)
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }
-      // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
-      if (!(await limitWake($, folder, now))) {
-        await wakeUp($, folder, role, status, now)
+      // The tick that starts a reload ends here: this module is being replaced, so a wake it marked read
+      // (`wake-read`) would have its prompt never go out. The new version's module delivers it, and names and
+      // colors the session.
+      if (!isReloading) {
+        // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
+        if (!(await limitWake($, folder, now))) {
+          await wakeUp($, folder, role, status, now)
+        }
+        await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
+        await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
       }
-      await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
-      await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
     }
   } catch (err) {
     $.ui.log(`team: ${String(err)}`)

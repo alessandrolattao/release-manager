@@ -94,6 +94,22 @@ test('a session behind the newest version installed on its account reloads the p
   expect(prompts).toEqual([])
 })
 
+test('the tick that starts a reload delivers no wake, and names and colors nothing: the new module does', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  // Quiet for a minute, with the main checkout freed for it: a wake the tick would deliver.
+  const wake = `${NOW / 1000 - 30}\tcheckout\tthe main checkout is free: take it now with checkout.sh take\t\n`
+  const { files: all } = files(on, { 'plugin.json': manifest('1.2.3'), ...reviewer, name: 'shop · review #42', idle: `${NOW / 1000 - 60}\n`, wake }, { [CACHE]: ['1.2.3', '1.2.4'] })
+  const { commands, prompts } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  expect(reloads(commands)).toEqual(['/reload-plugins --force'])
+  expect(all.has('wake-read')).toBe(false)
+  expect(prompts).toEqual([])
+  expect(commands.filter(c => c.startsWith('/rename') || c.startsWith('/color'))).toEqual([])
+})
+
 test('a session in a turn reloads only once the turn has ended', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })

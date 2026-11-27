@@ -27,14 +27,16 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
 //     (tell.sh). A session outside the team runs nothing. In a tech lead it records each comment it delivered
 //     in the repository's `seen`, as scripts/mentions.sh does for each one it lists: a write to the asker
-//     answers a question only once the question has reached the tech lead.
+//     answers a question only once the question has reached the tech lead. A done session is never woken: the
+//     lines that wait for it are dropped.
 //   - in a tech lead that holds for the user in its chat, or is busy in a turn, the agents' comments written to
 //     it go into the conversation as a note instead ($.session.append), which the model reads at its next
 //     request: no new turn. One counts as delivered, and `seen`, once a request of the main loop carries it. A
 //     note still waiting for its request when the process ends goes with it: the new process reads it back as
 //     not carried, and a wake delivers its comment.
 //   - a session whose turn ended on the usage limit is alive and waits: it wakes it once the limit has reset,
-//     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role.
+//     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role; a done
+//     one, never.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on; a done
 //     session is left as it is.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
@@ -1131,8 +1133,11 @@ async function tick($: EngineInterface): Promise<void> {
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }
-      // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
-      if (!(await limitWake($, folder, now))) {
+      // A done session is never woken: its work is over and it is about to go, so the lines waiting in `wake`
+      // are dropped. The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
+      if (status.state === 'done') {
+        await dropWakes($, folder)
+      } else if (!(await limitWake($, folder, now))) {
         await wakeUp($, folder, role, status, now)
       }
       await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
@@ -1280,6 +1285,14 @@ async function unreadOf($: EngineInterface, folder: string): Promise<{ count: nu
     return { time: Number(time), from, link, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
   })
   return { count: lines.length, unread }
+}
+
+// A done session's lines in `wake` no wake has read: marked read (`wake-read`), never delivered.
+async function dropWakes($: EngineInterface, folder: string): Promise<void> {
+  const { count, unread } = await unreadOf($, folder)
+  if (unread.length > 0) {
+    await $.fs.write(`${folder}/wake-read`, `${count}\n`)
+  }
 }
 
 // Those lines' comments a wake checks again as it delivers them, asking GitHub: without the ones deleted since

@@ -63,6 +63,9 @@ next_id() { n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/ne
 case "$*" in
 "repo view --json nameWithOwner --jq .nameWithOwner") echo test/repo ;;
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
+# The user's permission on the repository: ADMIN, or the one in permission.
+"repo view --json viewerPermission --jq .viewerPermission") cat "$G/permission" 2>/dev/null || echo ADMIN ;;
+"repo view --json url --jq .url") echo https://github.com/test/repo ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
 "api repos/"*"/issues/"*"/comments "*)
@@ -168,6 +171,7 @@ case "$*" in
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
+"issue develop 80 --list") echo "80-fork-thing	https://x" ;;
 # The plugin's own repository, for report.sh. The REST listing has an issue as soon as it is opened, and a
 # pull request among the issues it lists; the search index behind `gh issue list --label` has not seen it yet.
 "api repos/"*"/issues?labels=flow-report&state=open&per_page=100")
@@ -226,9 +230,11 @@ JSON
 EOF
 chmod +x "$T/bin/gh" "$T/bin/claude" "$T/bin/clessidra"
 
-# A real repository with an origin, a branch for issue 42 and its worktree.
-git init -q --bare -b main "$T/origin.git"
-git clone -q "$T/origin.git" "$T/repo" 2>/dev/null
+# A real repository with an origin, a branch for issue 42 and its worktree. Its URL ends in test/repo, the
+# repository gh resolves.
+mkdir -p "$T/test"
+git init -q --bare -b main "$T/test/repo.git"
+git clone -q "$T/test/repo.git" "$T/repo" 2>/dev/null
 ROOT="$T/repo"
 git -C "$ROOT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$ROOT" push -q origin main
@@ -251,6 +257,13 @@ cd "$ROOT" || exit 1
 sh "$SC/role.sh" "$TL1" tech-lead "" >/dev/null
 date +%s >"$S/$TL1/alive"
 ok "tech lead name" "$(cat "$S/$TL1/name")" "repo · tech lead"
+ok "where the user can write, only its name" "$(sh "$SC/role.sh" "$TL1" tech-lead)" "repo · tech lead"
+echo READ >"$G/permission"
+out=$(sh "$SC/role.sh" "$TL1" tech-lead); code=$?
+ok "where the user can only read, a line says so before the name" "$code | $out" "0 | the user can only read test/repo here, so the plugin's flow cannot run
+repo · tech lead"
+ok "and the tech lead is recorded all the same" "$(st "$TL1" role) $(st "$TL1" repo)" "tech-lead test/repo"
+rm -f "$G/permission"
 out=$(sh "$SC/role.sh" "$TL2" tech-lead)
 ok "a second tech lead for the repository is refused" "$(printf '%s' "$out" | grep -c 'already has a tech lead') $([ -f "$S/$TL2/status" ] && echo registered || echo not-registered)" "1 not-registered"
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
@@ -721,7 +734,7 @@ merging 50
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "it fails and the head is not in the default branch: it fails as today, with gh's error" "$code | $out | $(st "$DEV" detail)" "1 | HTTP 502: Bad Gateway | merging #50"
 # The merge landed all the same: the default branch holds its merge commit, the head as its second parent.
-git clone -q "$T/origin.git" "$T/landed" 2>/dev/null
+git clone -q "$T/test/repo.git" "$T/landed" 2>/dev/null
 git -C "$T/landed" -c user.email=t@t -c user.name=t merge -q --no-ff -m "Merge pull request #50" "$reviewed"
 git -C "$T/landed" push -q origin main
 landed=$(git -C "$T/landed" rev-parse HEAD)
@@ -1014,6 +1027,11 @@ ok "the one started right after keeps its pid file" "$([ -n "$pid" ] && kill -0 
 sh "$SC/dispatcher.sh" stop >/dev/null
 n=0
 while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); done
+echo READ >"$G/permission"
+out=$(sh "$SC/dispatcher.sh" start 2>&1); code=$?
+ok "where the user can only read, a start is refused with the line role.sh prints" "$code | $out" "1 | the user can only read test/repo here, so the plugin's flow cannot run"
+ok "and nothing starts or changes" "$([ -f "$R/dispatcher.pid" ] && echo pid || echo no-pid) $(sh "$SC/dispatcher.sh" status)" "no-pid stopped (by hand)"
+rm -f "$G/permission"
 
 echo "== mentions.sh"
 now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -1598,6 +1616,60 @@ ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log"
 ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
 rm -f "$S/$DEV2/version"
+
+echo "== a fork's checkout: the remote of the repository gh resolves, whatever its name"
+cd "$ROOT" || exit 1
+# origin is another repository (the one a fork comes from); test/repo, the one gh resolves, is the remote fork.
+mkdir -p "$T/upstream"
+git init -q --bare -b main "$T/upstream/repo.git"
+git -C "$ROOT" remote set-url origin "$T/upstream/repo.git"
+git -C "$ROOT" fetch -q --prune origin
+git -C "$ROOT" remote add fork "$T/test/repo.git"
+# commit_on <ref>: a new commit on top of the fork's <ref>, pushed there from another clone, so the main
+# checkout knows nothing of it until it fetches.
+commit_on() {
+	c=$(git -C "$T/landed" -c user.email=t@t -c user.name=t commit-tree -p "$1" -m "on the fork" "$1^{tree}")
+	git -C "$T/landed" push -q origin "$c:refs/heads/$2"
+	echo "$c"
+}
+forked=$(commit_on main 80-fork-thing)
+FRK=88888888-0000-0000-0000-000000000080
+cat >"$T/agents.json" <<EOF
+[{"id":"abcd1234","sessionId":"$FRK","name":"repo · dev #80","status":"running","state":"working"}]
+EOF
+out=$(sh "$SC/start-dev.sh" 80 2>&1); code=$?
+ok "start-dev.sh fetches the issue's branch from that remote" "$code $(git -C "$ROOT/.claude/worktrees/80-fork-thing" rev-parse HEAD 2>/dev/null)" "0 $forked"
+ok "and the worktree's branch follows it there" "$(git -C "$ROOT/.claude/worktrees/80-fork-thing" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)" "fork/80-fork-thing"
+date +%s >"$S/$FRK/alive"
+pushed=$(commit_on "$forked" 80-fork-thing)
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take >/dev/null 2>&1; code=$?
+ok "checkout.sh take puts the main checkout on the branch as that remote has it" "$code $(git -C "$ROOT" rev-parse HEAD)" "0 $pushed"
+newmain=$(git -C "$T/landed" rev-parse main)
+newmain=$(commit_on "$newmain" main)
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" give >/dev/null 2>&1; code=$?
+ok "and give pulls the default branch from it" "$code $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(git -C "$ROOT" rev-parse HEAD)" "0 main $newmain"
+cd "$ROOT" || exit 1
+touch "$G/unmarked-50"
+echo "$landed" >"$G/landed-50"
+echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+ok "main-ci.sh finds a merge GitHub has not marked in the default branch as that remote has it" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main ${landed%"${landed#???????}"}: t"
+# No remote points to test/repo any more.
+git -C "$ROOT" remote remove fork
+missing="no git remote of $ROOT points to test/repo, the repository gh works on here: add it with git -C $ROOT remote add test https://github.com/test/repo.git, then run this again"
+before=$(ls "$G/comments" | wc -l)
+out=$(sh "$SC/start-dev.sh" 81 2>&1); code=$?
+ok "with no remote on it, start-dev.sh stops, saying which repository and how to add the remote" "$code | $out" "1 | $missing"
+ok "before claiming the issue" "$(ls "$G/comments" | grep -c '^81\.') $(ls "$G/comments" | wc -l)" "0 $before"
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take 2>&1); code=$?
+ok "checkout.sh take stops too, before holding the checkout" "$code $(held) | $out" "1 free | $missing"
+cd "$ROOT" || exit 1
+out=$(sh "$SC/main-ci.sh" 50 2>&1); code=$?
+ok "and main-ci.sh" "$code | $out" "1 | $missing"
+rm -f "$G/unmarked-50" "$G/landed-50" "$G/workflows" "$G/runs"
+git -C "$ROOT" remote set-url origin "$T/test/repo.git"
 
 echo "== no write through GitHub's GraphQL API where REST has an endpoint"
 ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"

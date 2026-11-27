@@ -16,7 +16,11 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     the last turn ended, empty during a turn.
 //   - it writes `version`, the plugin version it loaded at session start, once the session's folder has a
 //     `role`: at session start, or at the first tick that finds the one role.sh wrote. scripts/update.sh
-//     restarts only the sessions behind the newest version installed.
+//     waits for it to reach the newest version installed.
+//   - between turns, when a newer version of the plugin is installed on the session's account than the one
+//     it runs, it reloads the plugin in place (/reload-plugins), once per version; the new version's module
+//     then has the session read its role's rules again. A reload that fails restarts the session instead
+//     (scripts/update.sh restart).
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -863,7 +867,7 @@ async function checkLatest($: EngineInterface, nowMs: number): Promise<void> {
 
 // A click on update at the board's foot: /team:update, detached (scripts/update.sh start). It updates the
 // plugin on every account of this machine and restarts on the new version every running dispatcher, then
-// every live team session, each once it is quiet, this session last.
+// waits for every live team session to reload it (reloadIfBehind).
 async function startUpdate($: EngineInterface): Promise<void> {
   if (isStartingUpdate) {
     return
@@ -911,6 +915,97 @@ async function noteVersion($: EngineInterface, folder: string): Promise<void> {
     versionFolder = folder
   } catch (err) {
     $.ui.log(`team: version: ${String(err)}`)
+  }
+}
+
+// The newest version of the plugin installed on the session's account and its folder, as scripts/update.sh
+// reads it: the newest of the version folders in <config>/plugins/cache/team/team, <config> the folder the
+// session's `config` names (empty: ~/.claude). Null when none is.
+async function installedOf($: EngineInterface, folder: string): Promise<{ version: string; root: string } | null> {
+  const config = (await readText($, `${folder}/config`)) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+  const cache = `${config}/plugins/cache/team/team`
+  let versions: string[]
+  try {
+    versions = (await $.fs.list(cache)).filter(entry => entry.kind !== 'file' && /^\d+(\.\d+)*$/.test(entry.name)).map(entry => entry.name)
+  } catch {
+    return null
+  }
+  const newest = versions.reduce((best, version) => (best === '' || isNewer(version, best) ? version : best), '')
+  return newest === '' ? null : { version: newest, root: `${cache}/${newest}` }
+}
+
+// The version this module reloaded the session to, or fell back to a restart for: once per version.
+let reloadedTo = ''
+
+// A newer version of the plugin installed on the session's account than the one it runs: the session reloads
+// the plugin in place, once per version, with /reload-plugins (queued by the engine until the session is idle;
+// --force, so a reload that drops the prompt cache is not skipped). A reload that works replaces this module
+// and its call never resolves, so `reloading` names the version beforehand: the new version's module, finding
+// its own version there, has the session read its role's rules again (reloadedPrompt). The call resolves only
+// when the reload did not work (no `Reloaded:` line), or it rejects: then the session restarts instead, as the
+// update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
+// since the restart carries its own prompt.
+async function reloadIfBehind($: EngineInterface, folder: string): Promise<void> {
+  const running = await versionOf($)
+  if (running === '') {
+    return
+  }
+  const installed = await installedOf($, folder)
+  if (installed === null || installed.version === reloadedTo || !isNewer(installed.version, running)) {
+    return
+  }
+  reloadedTo = installed.version
+  await $.fs.write(`${folder}/reloading`, `${installed.version}\n`)
+  void reload($, folder, installed.root)
+}
+
+async function reload($: EngineInterface, folder: string, root: string): Promise<void> {
+  let text = ''
+  try {
+    text = ((await $.command.run({ command: 'reload-plugins', args: '--force' })).text ?? '').trim()
+  } catch (err) {
+    $.ui.log(`team: /reload-plugins: ${String(err)}`)
+  }
+  if (text.startsWith('Reloaded:')) {
+    return
+  }
+  try {
+    await $.fs.write(`${folder}/reloading`, '')
+    const cwd = (await readText($, `${folder}/cwd`)) || (await $.session.cwd())
+    const ran = await $.process.run(['sh', `${root}/scripts/update.sh`, 'restart', await $.session.id()], { cwd, timeoutMs: UPDATE_START_MS })
+    if (ran.exitCode !== 0) {
+      $.ui.log(`team: restart: ${(ran.stderr || ran.stdout).trim()}`)
+    }
+  } catch (err) {
+    $.ui.log(`team: restart: ${String(err)}`)
+  }
+}
+
+// What the session is told once it reloaded the plugin: today's restart prompt (scripts/update.sh) less what
+// only a restart needs, since its background commands and subagents go on.
+function reloadedText(root: string, version: string, role: string): string {
+  const told = role === 'tech-lead' ? `${root}/skills/tech-lead/SKILL.md` : `${root}/briefs/${role === 'review' ? 'reviewer' : role}.md`
+  const waiting =
+    role === 'tech-lead'
+      ? "If you were waiting for the user's answer, end your turn with that question again, whole, with its options, in its last line."
+      : role === 'spike'
+        ? 'Go on with your analysis.'
+        : `If you are waiting for something (another agent, the checkout, CI), declare it with sh "${root}/scripts/status.sh" <others|working> "<what you wait for>" [--for <minutes>] and end your turn.`
+  return `The team plugin was updated to ${version} and this session reloaded it in place. Its scripts are now in ${root}/scripts: use this path from now on. Your role's rules may have changed: read ${told} again now, whole, and follow it from here on (its {{...}} placeholders stand for what you already know: your issue, branch, worktree, repository). Then go on from where you were. ${waiting}`
+}
+
+// At session start, after a reload to this version (`reloading` names it, reloadIfBehind): the prompt that has
+// the session read its role's rules again, once.
+async function reloadedPrompt($: EngineInterface, folder: string, role: string): Promise<void> {
+  try {
+    const version = await versionOf($)
+    if (version === '' || (await readText($, `${folder}/reloading`)) !== version) {
+      return
+    }
+    await $.fs.write(`${folder}/reloading`, '')
+    void $.prompt.submit({ text: reloadedText($.plugin.root, version, role) }).catch(err => $.ui.log(`team: ${String(err)}`))
+  } catch (err) {
+    $.ui.log(`team: reloaded: ${String(err)}`)
   }
 }
 
@@ -976,6 +1071,13 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (!isBusy) {
+      // A newer version installed on the account: the session reloads it. What fails there never keeps the
+      // session from its wakes and its color.
+      try {
+        await reloadIfBehind($, folder)
+      } catch (err) {
+        $.ui.log(`team: reload: ${String(err)}`)
+      }
       // The usage limit's wake goes alone: what else waits reaches the turn it starts at its end.
       if (!(await limitWake($, folder, now))) {
         await wakeUp($, folder, role, status, now)
@@ -1320,11 +1422,14 @@ function emptied(content: readonly ApiContentBlock[]): ApiContentBlock[] {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    // The version loaded now, kept for the session's `version`: in a team session's folder alone.
+    // The version loaded now, kept for the session's `version`: in a team session's folder alone. Loaded by a
+    // reload to it, the session is told to read its role's rules again.
     await versionOf($)
     const folder = await folderOf($)
-    if ((await readText($, `${folder}/role`)) !== '') {
+    const role = await readText($, `${folder}/role`)
+    if (role !== '') {
       await noteVersion($, folder)
+      await reloadedPrompt($, folder, role)
     }
     await $.command.register({ name: 'team', description: 'Open the team pane: the project, its agents by state, the summary' })
     if (!isBusy) {

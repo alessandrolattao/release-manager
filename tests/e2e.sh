@@ -282,7 +282,7 @@ ok "tech lead name" "$(cat "$S/$TL1/name")" "repo · tech lead"
 ok "where the user can write, only its name" "$(sh "$SC/role.sh" "$TL1" tech-lead)" "repo · tech lead"
 echo READ >"$G/permission"
 out=$(sh "$SC/role.sh" "$TL1" tech-lead); code=$?
-ok "where the user can only read, a line says so before the name" "$code | $out" "0 | the user can only read test/repo here, so the plugin's flow cannot run
+ok "where the user can only read, a line says so before the name, for the tech lead to tell the user" "$code | $out" "0 | the user can only read test/repo here, so the plugin's flow cannot run. Tell the user in one line.
 repo · tech lead"
 ok "and the tech lead is recorded all the same" "$(st "$TL1" role) $(st "$TL1" repo)" "tech-lead test/repo"
 rm -f "$G/permission"
@@ -1094,7 +1094,7 @@ n=0
 while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); done
 echo READ >"$G/permission"
 out=$(sh "$SC/dispatcher.sh" start 2>&1); code=$?
-ok "where the user can only read, a start is refused with the line role.sh prints" "$code | $out" "1 | the user can only read test/repo here, so the plugin's flow cannot run"
+ok "where the user can only read, a start is refused with the read-only line (read_only)" "$code | $out" "1 | the user can only read test/repo here, so the plugin's flow cannot run"
 ok "and nothing starts or changes" "$([ -f "$R/dispatcher.pid" ] && echo pid || echo no-pid) $(sh "$SC/dispatcher.sh" status)" "no-pid stopped (by hand)"
 rm -f "$G/permission"
 
@@ -1988,6 +1988,12 @@ ok "before claiming the issue" "$(ls "$G/comments" | grep -c '^81\.') $(ls "$G/c
 cd "$WT/80-fork-thing" || exit 1
 out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take 2>&1); code=$?
 ok "checkout.sh take stops too, before holding the checkout" "$code $(held) | $out" "1 free | $missing"
+# take --as-is fetches nothing, and give works without the remote too: a checkout taken as-is is never left locked.
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take --as-is 2>&1); code=$?
+ok "checkout.sh take --as-is holds it all the same" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD)" "0 held main"
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" give 2>&1); code=$?
+ok "and give gives it back, on the default branch, with nothing to pull from" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) | $out" "0 free main | given back: the checkout is on main"
+ok "and the giver is back in its worktree" "$(st "$FRK" place) | $(st "$FRK" detail)" "worktree 80 | gave the checkout back"
 cd "$ROOT" || exit 1
 out=$(sh "$SC/main-ci.sh" 50 2>&1); code=$?
 ok "and main-ci.sh" "$code | $out" "1 | $missing"

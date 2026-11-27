@@ -2,14 +2,16 @@
 # The comments of this repository written to this tech lead in the last days that it has not answered yet:
 # it has not written to their asker ("**tech lead → <asker>**", news or not) on the same thread since the
 # comment reached it. An issue and the pull requests that close it are one thread: a question asked on either
-# is answered on either. News (" · fyi") owes no answer and is left out. The plugin wakes the tech lead with
-# each one as it arrives; this is the list to look at again (at the start, after a restart, before saying all
-# is done). Only the team's own account counts, as for the dispatcher.
-# A comment reaches the tech lead when the plugin delivers it in a wake (hooks/sessions.tsx) or when this list
-# prints it: each one is then recorded, one line `<time> <link>` of the repository's `seen`, shared by the
-# successive tech lead sessions on this machine. One never seen is always listed, whatever was written to its
-# asker since; one older than the first line of `seen`, written before anything was recorded, is answered by
-# any later write to its asker on its thread.
+# is answered on either. News (" · fyi") owes no answer and is left out. The plugin brings the tech lead each
+# one as it arrives, in a wake or in a note carried into its conversation; this is the list to look at again (at
+# the start, after a restart, before saying all is done). Only the team's own account counts, as for the
+# dispatcher.
+# A comment reaches the tech lead when the plugin delivers it in a wake, when a request of its conversation
+# carries the note that holds it (hooks/sessions.tsx), or when this list prints it: each one is then recorded,
+# one line `<time> <link>` of the repository's `seen`, shared by the successive tech lead sessions on this
+# machine. One never seen is always listed, whatever was written to its asker since; one older than the first
+# line of `seen`, written before anything was recorded, is answered by any later write to its asker on its
+# thread.
 #   mentions.sh [days]    (default 7; from a tech lead session)
 set -eu
 

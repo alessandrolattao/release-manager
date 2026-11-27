@@ -16,8 +16,8 @@
 # own chat (hooks/asks.sh), where the user answers it directly.
 # waits_on: whom the session waits on since it wrote to them on GitHub (comment.sh, or dispatch.sh posting a
 # question it left in its chat): the address ("tech lead", "dev #42", "review #42", "qa #42"), or "the user" for a tech
-# lead's question to the user. A comment from them ends the wait (hooks/sessions.tsx); every state_set
-# removes it, and a new wait records its own.
+# lead's question to the user. A comment from them ends the wait (hooks/sessions.tsx); a state_set removes
+# it, except on a done session, which it leaves as it is; a new wait records its own.
 # started: when a developer, a reviewer or a QA agent was launched (role.sh): the dispatcher wakes it for no comment
 # written before.
 # state: working (cyan), others (purple: waits on another agent or the checkout), you (yellow: waits on

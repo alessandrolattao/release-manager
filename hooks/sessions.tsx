@@ -11,7 +11,7 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     reaches the prompt box: cyan working, purple waiting on another agent, yellow waiting on the user,
 //     red stuck, none when done; and the name role.sh asked for, with /rename. Their rows are hidden.
 //   - a turn that starts means working; one that ends on an error, or a session silent for 20 minutes
-//     while it should be working, means stuck.
+//     while it should be working, means stuck. A done session is left as it is: done is final.
 //   - it writes `alive` every minute (the heartbeat the scripts and hooks/revive.sh read) and `idle`, when
 //     the last turn ended, empty during a turn.
 //   - it writes `version`, the plugin version it loaded at session start, once the session's folder has a
@@ -30,10 +30,13 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     answers a question only once the question has reached the tech lead.
 //   - in a tech lead that holds for the user in its chat, or is busy in a turn, the agents' comments written to
 //     it go into the conversation as a note instead ($.session.append), which the model reads at its next
-//     request: no new turn. One counts as delivered, and `seen`, once a request of the main loop carries it.
+//     request: no new turn. One counts as delivered, and `seen`, once a request of the main loop carries it. A
+//     note still waiting for its request when the process ends goes with it: the new process reads it back as
+//     not carried, and a wake delivers its comment.
 //   - a session whose turn ended on the usage limit is alive and waits: it wakes it once the limit has reset,
 //     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role.
-//   - a prompt the user writes to a team session means working with them, whatever it waited on.
+//   - a prompt the user writes to a team session means working with them, whatever it waited on; a done
+//     session is left as it is.
 //   - in a tech lead it draws the board (/team opens it): the agents of the repository by state, and a
 //     summary with the dispatcher, a process of its own (scripts/dispatcher.sh), which a click on its row
 //     starts when it is stopped.
@@ -111,6 +114,9 @@ const latest = atom({ plugin: 'team', key: 'latest' } as const, '')
 const model = atom({ plugin: 'team', key: 'model' } as const, '')
 // The effort its last request to the model carried ('' before the first, or on a model without effort).
 const effort = atom({ plugin: 'team', key: 'effort' } as const, '')
+// Whether the module already started in this process: a reload keeps it, a new process (a restart, a resume)
+// starts without it.
+const loaded = atom({ plugin: 'team', key: 'loaded' } as const, false)
 let lastEffort: string | undefined
 let updateCheckedAt = 0
 let isStartingUpdate = false
@@ -1299,8 +1305,8 @@ function withCarried(work: () => Promise<void>): Promise<void> {
   return run
 }
 
-// The notes appended and not carried by a request yet, in the order appended (read again from `carried` at
-// session start): the next request of the main loop carries them (carriedNow).
+// The notes appended and not carried by a request yet, in the order appended (read again from `carried` when a
+// reload starts the module: readCarried): the next request of the main loop carries them (carriedNow).
 let pending: Carried[] = []
 // The links whose note the engine refused, or failed to append: a wake delivers them, as before notes.
 const refused = new Set<string>()
@@ -1395,6 +1401,38 @@ async function dropCarried($: EngineInterface, folder: string, read: WakeLine[])
   await withCarried(async () => {
     const all = await carriedOf($, folder)
     await writeCarried($, folder, all.filter(note => note.at === 0 && !links.has(note.link)))
+  })
+}
+
+// Whether the module already started in this process (a reload), recording that it has. A state that cannot be
+// read counts as a new process: a wake then delivers the waiting notes' comments, so none is lost.
+async function wasLoaded($: EngineInterface): Promise<boolean> {
+  try {
+    if (await read($, loaded)) {
+      return true
+    }
+    await update($, loaded, () => true)
+  } catch (err) {
+    $.ui.log(`team: loaded: ${String(err)}`)
+  }
+  return false
+}
+
+// At session start, the notes still waiting in `carried` for their request. After a reload, in the same
+// process, they wait there still: the next request of the main loop carries them. In a new process (a restart, a
+// resume) they went with the old one: read back as not carried, so a wake delivers their comments and no request
+// marks them carried or `seen`.
+async function readCarried($: EngineInterface, folder: string, isReload: boolean): Promise<void> {
+  await withCarried(async () => {
+    const notes = await carriedOf($, folder)
+    if (isReload) {
+      pending = notes.filter(note => note.at === 0)
+      return
+    }
+    pending = []
+    if (notes.some(note => note.at === 0)) {
+      await writeCarried($, folder, notes.filter(note => note.at !== 0))
+    }
   })
 }
 
@@ -1630,6 +1668,7 @@ function emptied(content: readonly ApiContentBlock[]): ApiContentBlock[] {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
+    const isReload = await wasLoaded($)
     // The version loaded now, kept for the session's `version`: in a team session's folder alone. Loaded by a
     // reload to it, the session is told to read its role's rules again.
     await versionOf($)
@@ -1639,9 +1678,9 @@ export const register: Register = on => {
       await noteVersion($, folder)
       await reloadedPrompt($, folder, role)
     }
-    // The notes appended before a reload, still waiting for their request.
+    // The notes appended before a reload or a restart, still waiting for their request.
     if (role === 'tech-lead') {
-      pending = (await carriedOf($, folder)).filter(note => note.at === 0)
+      await readCarried($, folder, isReload)
     }
     await $.command.register({ name: 'team', description: 'Open the team pane: the project, its agents by state, the summary' })
     if (!isBusy) {

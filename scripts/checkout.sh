@@ -26,11 +26,13 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
 me=${CLAUDE_CODE_SESSION_ID:-}
-# A take of a branch fetches it, a give pulls the default branch, from the repository's remote: with none,
-# they stop before the lock, the queue or the checkout change.
+# A take of a branch fetches it from the repository's remote: with none, it stops before the lock, the queue or
+# the checkout change. A give pulls the default branch from it, and with none gives the checkout back all the
+# same, without the pull, as take --as-is holds it without one: a checkout taken as-is is never left locked.
+remote=""
 case "$action" in
 take) [ -n "$as_is" ] || remote=$(repo_remote) || exit 1 ;;
-give) remote=$(repo_remote) || exit 1 ;;
+give) remote=$(repo_remote 2>/dev/null) || remote="" ;;
 esac
 lock="$repo_dir/checkout"
 queue="$repo_dir/checkout.queue"
@@ -170,7 +172,7 @@ give)
 	fi
 	base=$(base_branch)
 	git -C "$root" switch -q "$base"
-	git -C "$root" pull -q --ff-only "$remote" "$base" || true
+	[ -z "$remote" ] || git -C "$root" pull -q --ff-only "$remote" "$base" || true
 	rm -f "$lock"
 	cwd=$(cat "$sessions_dir/$me/cwd" 2>/dev/null || true)
 	if is_worktree "$cwd"; then

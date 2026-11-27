@@ -85,6 +85,7 @@ declare module 'claude-code' {
     // model: this session's model, as /model shows it, and effort: the level its last request to the model
     // carried ('' before the first), for the board's summary and the developer's.
     // dev: a developer session's pane.
-    team: { board: Shaped<Board>; dev: Shaped<Dev>; latest: string; model: string; effort: string }
+    // loaded: true once the module started in this process; a reload keeps it, a new process starts without it.
+    team: { board: Shaped<Board>; dev: Shaped<Dev>; latest: string; model: string; effort: string; loaded: boolean }
   }
 }

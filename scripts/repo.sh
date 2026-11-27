@@ -28,7 +28,9 @@ is_worktree() {
 }
 
 # agents_here: the agent list (claude agents --json --all) of the sessions started in the main checkout, an older
-# worktree under it included, or in a worktree beside it. --cwd takes one folder: one listing for each.
+# worktree under it included, or in a worktree beside it. --cwd takes one folder, and the CLI matches a session in
+# <main checkout>/.claude/worktrees/<x> by the main checkout but any other by its own cwd: the main checkout's
+# listing has the older worktrees' sessions, and only the second one has those beside it.
 agents_here() {
 	{
 		claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]'

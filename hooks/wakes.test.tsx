@@ -1223,7 +1223,9 @@ test('a done session woken by the one it wrote to after done.sh stays done', asy
   expect(`${status.state} · ${status.detail} · ${status.since}`).toBe(`done · merged #50 · ${DONE.since}`)
 })
 
-test('a done session stays done when a turn of its fails, the user writes to it or it is silent', async ($, on) => {
+// Twenty-five minutes of the module's 2-second ticks: seconds of real time, more on a busy machine, past the kit's
+// default 5000 ms there. It gets the time that work takes.
+test('a done session stays done when a turn of its fails, the user writes to it or it is silent', { timeoutMs: 30000 }, async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
   on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))

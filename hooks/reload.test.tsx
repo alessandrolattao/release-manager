@@ -8,8 +8,14 @@ const CACHE = '/home/u/.claude/plugins/cache/team/team'
 const RELOADED = 'Reloaded: 17 plugins · 209 skills · 12 agents · 23 hooks · 2 plugin MCP servers · 2 plugin LSP servers'
 
 // The session's folder as the scripts leave it and the plugin's manifest, by file name; the versions of the
-// plugin installed on an account, by the account's cache folder, as `claude plugin update` leaves them.
-function files(on: On, seed: Record<string, string>, installed: Record<string, string[]> = { [CACHE]: [] }): { files: Map<string, string>; listed: string[] } {
+// plugin installed on an account, by the account's cache folder, as `claude plugin update` leaves them, and the
+// version folders Claude Code marked `.orphaned_at` (left behind by an update or an uninstall).
+function files(
+  on: On,
+  seed: Record<string, string>,
+  installed: Record<string, string[]> = { [CACHE]: [] },
+  orphaned: string[] = [],
+): { files: Map<string, string>; listed: string[] } {
   const all = new Map(Object.entries(seed))
   const listed: string[] = []
   on('session.id', () => ({ value: 'abc-123' }))
@@ -25,6 +31,9 @@ function files(on: On, seed: Record<string, string>, installed: Record<string, s
     all.set(name(e.path), e.text)
     return { value: undefined }
   })
+  on('fs.exists', (_$, e) => ({
+    value: e.path.endsWith('/.orphaned_at') ? orphaned.includes(e.path.slice(0, -'/.orphaned_at'.length)) : all.has(name(e.path)),
+  }))
   on('fs.list', (_$, e) => {
     listed.push(e.path)
     const versions = installed[e.path]
@@ -135,6 +144,33 @@ test('a session in a turn reloads only once the turn has ended', async ($, on) =
   await $.turn.complete({ answer: 'fatto', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.advance(2000)
   expect(reloads(commands)).toEqual(['/reload-plugins --force'])
+})
+
+test('a version folder marked .orphaned_at is not installed: the session reloads the newest one without the mark', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  // Rolled back from 1.2.5 to 1.2.4: Claude Code marked 1.2.5's folder, left behind for 14 days.
+  const { files: all } = files(on, { 'plugin.json': manifest('1.2.3'), ...reviewer }, { [CACHE]: ['1.2.3', '1.2.4', '1.2.5'] }, [`${CACHE}/1.2.5`])
+  const { commands } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  expect(reloads(commands)).toEqual(['/reload-plugins --force'])
+  expect(all.get('reloading')).toBe('1.2.4\n')
+})
+
+test('a session on the newest version without the mark does nothing, though a newer folder marked .orphaned_at is left', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const { files: all } = files(on, { 'plugin.json': manifest('1.2.4'), ...reviewer }, { [CACHE]: ['1.2.3', '1.2.4', '1.2.5'] }, [`${CACHE}/1.2.3`, `${CACHE}/1.2.5`])
+  const { commands, runs, prompts } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(reloads(commands)).toEqual([])
+  expect(restarts(runs)).toEqual([])
+  expect(prompts).toEqual([])
+  expect(all.has('reloading')).toBe(false)
 })
 
 // A QA agent of o/r, and the main checkout's lock as scripts/checkout.sh writes it: holder, since, branch.

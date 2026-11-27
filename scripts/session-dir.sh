@@ -65,6 +65,16 @@ commented_on() {
 	printf '%s\t%s\t%s\n' "$(date +%s)" "$2" "${3:-}" >>"$sessions_dir/$1/commented"
 }
 
+# newest_plugin [config dir]: the folder of the newest version of the plugin installed on that Claude Code account
+# (none named: ~/.claude), nothing when none is. A version folder marked `.orphaned_at` is not installed: Claude
+# Code marks the previous version's folder so when it updates or uninstalls the plugin, and removes it 14 days
+# later, so after a rollback the newer folder left behind would otherwise be the newest.
+newest_plugin() {
+	for _v in "${1:-$HOME/.claude}/plugins/cache/team/team/"*/; do
+		[ -d "$_v" ] && [ ! -e "${_v}.orphaned_at" ] && printf '%s\n' "${_v%/}"
+	done | sort -V | tail -1
+}
+
 # waiting_in_chat <session-id>: true when an agent's last turn ended asking something in its own chat
 # (hooks/asks.sh) and no turn has started since (hooks/sessions.tsx empties `idle` when one does).
 waiting_in_chat() { [ -f "$sessions_dir/$1/asked" ] && [ -s "$sessions_dir/$1/idle" ]; }

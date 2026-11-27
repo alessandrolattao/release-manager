@@ -201,18 +201,19 @@ case "$*" in
 esac
 EOF
 # A fake claude: the agent list comes from a file, stop and rm are recorded. With --cwd <folder> it lists only the
-# sessions started under that folder, as claude does; one with no cwd started in the main checkout. A plugin
-# update installs, on the account it runs on, each version `publish` lists for that account ("<account folder>
-# <version>" per line, the version's files in releases/<version>) and not installed there yet; each session
-# `reloads` lists for a version it installs ("<session folder> <version>" per line) reloads it at once, as a
-# session between turns does (hooks/sessions.tsx): its `version` reaches it.
+# sessions started under that folder as the real CLI matches them: one in <dir>/.claude/worktrees/<x> by <dir>
+# (`--cwd` on its own folder does not list it), any other by its own cwd; one with no cwd started in the main
+# checkout. A plugin update installs, on the account it runs on, each version `publish` lists for that account
+# ("<account folder> <version>" per line, the version's files in releases/<version>) and not installed there yet;
+# each session `reloads` lists for a version it installs ("<session folder> <version>" per line) reloads it at
+# once, as a session between turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
 agents)
 	under=$(prev=""; for a in "$@"; do [ "$prev" != --cwd ] || printf '%s' "$a"; prev=$a; done)
 	{ cat "$TT/agents.json" 2>/dev/null || echo '[]'; } | jq --arg u "$under" --arg root "$TT/repo" \
-		'[.[] | (.cwd // $root) as $c | select($u == "" or $c == $u or ($c | startswith($u + "/")))]' ;;
+		'[.[] | ((.cwd // $root) | sub("/\\.claude/worktrees/.*$"; "")) as $c | select($u == "" or $c == $u or ($c | startswith($u + "/")))]' ;;
 --bg) echo "$*" >>"$TT/claude.log"; echo "backgrounded · abcd1234 · started" ;;
 plugin)
 	echo "$*" >>"$TT/claude.log"
@@ -494,6 +495,15 @@ ok "posted to the tech lead" "$(head -1 "$G/comments/$last")" "**dev #43 → tec
 ok "through the REST API" "$(sed 's/body=@.*/body=@/' "$G/rest.log")" "api repos/test/repo/issues/43/comments -F body=@"
 ok "and the agent waits on it" "$(st "$DEV2" state)" "others"
 ok "and records whom it waits on" "$(st "$DEV2" waits_on)" "tech lead"
+
+echo "== the fake claude's agent list: --cwd as the real CLI matches a session"
+saved_agents=$(cat "$T/agents.json" 2>/dev/null || echo '[]')
+cat >"$T/agents.json" <<EOF
+[{"id":"oldjob01","cwd":"$ROOT/.claude/worktrees/43-other"},{"id":"besjob01","cwd":"$WT/60-done"},{"id":"rootjob1"}]
+EOF
+listed() { claude agents --json --all --cwd "$1" | jq -r '[.[].id] | join(" ")'; }
+ok "one in an older worktree under the main checkout by the main checkout, one beside it by its own cwd" "$(listed "$ROOT") | $(listed "$ROOT/.claude/worktrees/43-other") | $(listed "$WT") | $(listed "$WT/60-done")" "oldjob01 rootjob1 |  | besjob01 | besjob01"
+printf '%s\n' "$saved_agents" >"$T/agents.json"
 
 echo "== dispatch.sh: done sessions go, dead ones turn red"
 jq '.state = "done" | .since = 1' "$S/$SPK/status" >"$S/$SPK/status.t" && mv "$S/$SPK/status.t" "$S/$SPK/status"
@@ -1765,7 +1775,14 @@ release 9.9.11
 echo "$T/config 9.9.11" >>"$T/publish"
 echo "$S/$DEV2 9.9.11" >"$T/reloads"
 for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
-pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+# The dispatcher running on 9.9.9 is a stand-in that never cycles: a real one hands over to 9.9.11 by itself at its
+# next cycle (scripts/dispatcher.sh), and one that came between the install and step 2 would leave the update
+# nothing to restart. The first update.sh section restarts a real one. Detached, so its end needs nobody to reap it.
+sh "$SC/dispatcher.sh" stop >/dev/null
+rm -f "$R/dispatcher.stopped"
+pid=$(sh -c 'sleep 300 >/dev/null 2>&1 & echo $!')
+echo "$pid" >"$R/dispatcher.pid"
+echo 9.9.9 >"$R/dispatcher.version"
 : >"$T/claude.log"
 (
 	sleep 3
@@ -1833,6 +1850,13 @@ done
 ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$DEV2 "
 ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
+# Rolled back from 9.9.11 to 9.9.9: Claude Code left 9.9.11's folder behind, marked .orphaned_at.
+ln -s "$T/releases/9.9.11" "$CACHE/9.9.11"
+date +%s >"$CACHE/9.9.11/.orphaned_at"
+: >"$T/claude.log"
+UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" restart "$DEV2" --now >/dev/null 2>&1
+ok "a newer folder marked .orphaned_at is not installed: the restart is on the newest one without the mark" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in $CACHE/9.9.9/scripts:" "$T/claude.log") $(grep -c '9\.9\.11' "$T/claude.log")" "1 0"
+rm -f "$CACHE/9.9.11/.orphaned_at" "$CACHE/9.9.11"
 rm -f "$S/$DEV2/version"
 
 echo "== dispatcher.sh: a newer version installed on its account takes over"
@@ -1855,6 +1879,34 @@ sh "$SC/dispatcher.sh" stop >/dev/null
 timeout 20 sh "$CACHE/9.9.9/scripts/dispatcher.sh" run >>"$R/dispatcher.log" 2>&1 </dev/null
 code=$?
 ok "a stopped dispatcher stays stopped" "$code $(pgrep -fc "$CACHE/9.9.9/scripts/dispatcher.sh run") $(sh "$SC/dispatcher.sh" status)" "0 0 stopped (by hand)"
+# Rolled back from 9.9.20 to 9.9.9: Claude Code left 9.9.20's folder behind, marked .orphaned_at. One started from
+# 0.0.1 goes on with 9.9.9, which stays.
+release 9.9.20
+ln -s "$T/releases/9.9.20" "$CACHE/9.9.20"
+date +%s >"$CACHE/9.9.20/.orphaned_at"
+: >"$R/dispatcher.log"
+rm -f "$R/board.json"
+out=$(sh "$CACHE/0.0.1/scripts/dispatcher.sh" start 2>&1)
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+n=0
+while [ ! -f "$R/board.json" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+ok "a newer folder marked .orphaned_at is not installed: started from 0.0.1, it goes on with 9.9.9 and stays there" "$out | $(ps -o args= -p "$pid" 2>/dev/null) | $(cat "$R/dispatcher.pid" 2>/dev/null) $(grep -c 'now on team' "$R/dispatcher.log") $(grep -c 'now on team 9.9.20' "$R/dispatcher.log")" "the dispatcher of test/repo runs on this machine (pid $pid, team 9.9.9) | sh $CACHE/9.9.9/scripts/dispatcher.sh run | $pid 1 0"
+sh "$SC/dispatcher.sh" stop >/dev/null
+rm -f "$CACHE/9.9.20/.orphaned_at" "$CACHE/9.9.20"
+# The newest installed, 9.9.30, has a manifest with no version: its own loop never hands over to its own folder,
+# so it does not start itself again and again.
+release 9.9.30
+echo '{"name": "team"}' >"$T/releases/9.9.30/.claude-plugin/plugin.json"
+ln -s "$T/releases/9.9.30" "$CACHE/9.9.30"
+: >"$R/dispatcher.log"
+rm -f "$R/board.json"
+sh "$CACHE/9.9.30/scripts/dispatcher.sh" start >/dev/null 2>&1
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+n=0
+while [ ! -f "$R/board.json" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+ok "one that cannot read its own version stays on its folder and runs its cycle" "$([ -f "$R/board.json" ] && echo yes || echo no) $(cat "$R/dispatcher.pid" 2>/dev/null) $(kill -0 "$pid" 2>/dev/null && echo alive || echo gone) $(grep -c 'now on team' "$R/dispatcher.log") $(pgrep -fc "$CACHE/9.9.30/scripts/dispatcher.sh run")" "yes $pid alive 0 1"
+sh "$SC/dispatcher.sh" stop >/dev/null
+rm -f "$CACHE/9.9.30"
 
 echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
 # 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds

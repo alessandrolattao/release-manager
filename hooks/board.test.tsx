@@ -18,7 +18,7 @@ const PANE = {
 } as const
 
 const BOARD: Board = {
-  repo: 'equokar/equokar.com',
+  repo: 'acme/widgets',
   rows: [
     { id: 'a', label: 'tech lead', role: 'tech-lead', state: 'you', place: '', stage: '', detail: 'Registro come tua regola fissa che le domande per te passano tutte da me?', since: 0 },
     { id: 'b', label: 'dev #318', role: 'dev', state: 'you', place: 'checkout', stage: 'in progress', detail: 'giro vero di #318 sul bucket e su Google Drive, comandi in issue', since: 0 },
@@ -60,9 +60,9 @@ test('the board groups the agents by state, names on the color of their state', 
   expect((await ui.find({ type: 'Text', text: /idle 2m/ }))?.text).toContain('idle 2m')
   // The title: a dialog titled TEAM, the name centered in its thin inner frame, 2 columns in from each side.
   expect((await ui.find({ type: 'Text', text: /TEAM/ }))?.text).toMatch(/^  ╔═+ TEAM ═+╗$/)
-  const titleLine = (await ui.find({ type: 'Text', text: /│ +equokar\.com +│/ }))?.text ?? ''
-  expect(titleLine).toMatch(/^  ║ │ +equokar\.com +│ ║▓$/)
-  const [, before = '', after = ''] = titleLine.match(/│( +)equokar\.com( +)│/) ?? []
+  const titleLine = (await ui.find({ type: 'Text', text: /│ +widgets +│/ }))?.text ?? ''
+  expect(titleLine).toMatch(/^  ║ │ +widgets +│ ║▓$/)
+  const [, before = '', after = ''] = titleLine.match(/│( +)widgets( +)│/) ?? []
   expect(Math.abs(before.length - after.length)).toBeLessThanOrEqual(1)
   // The summary: SUMMARY in the top border of a window as wide as the pane, a row per item.
   expect((await ui.find({ type: 'Text', text: /SUMMARY/ }))?.text).toMatch(/^  ╔═+ SUMMARY ═+╗$/)

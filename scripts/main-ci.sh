@@ -23,13 +23,15 @@ pr=${1:?pull request number}
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
+# The default branch is read from the repository's remote: with none, it stops here.
+remote=$(repo_remote) || exit 1
 base=$(gh pr view "$pr" --json baseRefName --jq '.baseRefName // empty' 2>/dev/null || true)
 [ -n "$base" ] || base=$(base_branch)
 sha=$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid // empty')
 if [ -z "$sha" ]; then
 	head=$(gh pr view "$pr" --json headRefOid --jq .headRefOid 2>/dev/null || true)
 	if [ -n "$head" ] && in_base "$head" "$base"; then
-		sha=$(git rev-list --merges --parents "$head..origin/$base" | awk -v h="$head" '$3 == h { print $1 }' | tail -n 1)
+		sha=$(git rev-list --merges --parents "$head..$remote/$base" | awk -v h="$head" '$3 == h { print $1 }' | tail -n 1)
 	fi
 fi
 [ -n "$sha" ] || {
@@ -84,7 +86,7 @@ if [ "${2:-}" = --wait ]; then
 	while [ "$(date +%s)" -lt "$end" ]; do
 		list=$(runs)
 		if superseded "$list"; then
-			sha=$(git ls-remote origin "refs/heads/$base" | cut -f1)
+			sha=$(git ls-remote "$remote" "refs/heads/$base" | cut -f1)
 			pause
 			continue
 		fi

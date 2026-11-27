@@ -21,20 +21,22 @@ here=$(cd "$(dirname "$0")" && pwd)
 me=${CLAUDE_CODE_SESSION_ID:-}
 record="$repo_dir/qa/$issue"
 mkdir -p "$repo_dir/qa"
-# pushed <branch>: the head of the branch on origin, what the QA agent tests; empty when it is not pushed.
-pushed() { git ls-remote origin "refs/heads/$1" 2>/dev/null | cut -f1; }
+# pushed <branch>: the head of the branch on the repository's remote ($remote, repo_remote), what the QA agent
+# tests; empty when it is not pushed.
+pushed() { git ls-remote "$remote" "refs/heads/$1" 2>/dev/null | cut -f1; }
 
 case "$action" in
 needed)
 	gh issue view "$issue" --json labels --jq 'if any(.labels[]; .name == "qa") then "yes" else "no" end'
 	;;
 request)
+	remote=$(repo_remote) || exit 1
 	# The developer's branch: its session's, else the one checked out here.
 	branch=$(jq -r '.branch // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 	[ -n "$branch" ] || branch=$(git rev-parse --abbrev-ref HEAD)
 	head=$(pushed "$branch")
 	[ -n "$head" ] || {
-		echo "$branch is not on origin: push it, then ask for QA" >&2
+		echo "$branch is not on $remote: push it, then ask for QA" >&2
 		exit 1
 	}
 	short=${head%"${head#???????}"}
@@ -70,7 +72,10 @@ pass | fail)
 	if [ -z "$head" ]; then
 		branch=$(jq -r '.branch // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 		[ -n "$branch" ] || branch=$(cut -f5 "$record" 2>/dev/null || true)
-		[ -z "$branch" ] || head=$(pushed "$branch")
+		if [ -n "$branch" ]; then
+			remote=$(repo_remote) || exit 1
+			head=$(pushed "$branch")
+		fi
 	fi
 	[ -n "$head" ] || {
 		echo "no head to record: take the checkout (checkout.sh take) and test there" >&2

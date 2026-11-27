@@ -615,14 +615,15 @@ async function gitOf($: EngineInterface, cwd: string, args: string[]): Promise<s
   }
 }
 
-// The branch's work, local and read at every refresh: the commits ahead of the default branch, and the
-// files and lines changed since the two parted. Null when git cannot tell.
-async function workOf($: EngineInterface, cwd: string, base: string): Promise<DevWork | null> {
-  if (base === '') {
+// The branch's work, local and read at every refresh: the commits ahead of the default branch as the
+// repository's remote has it (the `remote` the scripts write, repo.sh), and the files and lines changed since
+// the two parted. Null when git cannot tell, or the remote or the default branch is not known yet.
+async function workOf($: EngineInterface, cwd: string, remote: string, base: string): Promise<DevWork | null> {
+  if (remote === '' || base === '') {
     return null
   }
-  const commits = await gitOf($, cwd, ['rev-list', '--count', `origin/${base}..HEAD`])
-  const stat = await gitOf($, cwd, ['diff', '--shortstat', `origin/${base}...HEAD`])
+  const commits = await gitOf($, cwd, ['rev-list', '--count', `${remote}/${base}..HEAD`])
+  const stat = await gitOf($, cwd, ['diff', '--shortstat', `${remote}/${base}...HEAD`])
   if (commits === null || stat === null) {
     return null
   }
@@ -765,7 +766,7 @@ async function refreshDev($: EngineInterface, folder: string, status: Status, no
   if (repo !== '' && status.issue !== undefined && now - github.at >= GITHUB_EVERY_S) {
     void readGithub($, folder, cwd, repo, status.issue, branch, now)
   }
-  const work = await workOf($, cwd, await readText($, `${dir}/base`))
+  const work = await workOf($, cwd, await readText($, `${dir}/remote`), await readText($, `${dir}/base`))
   const checkout = await checkoutOf($, dir, await $.session.id())
   const review = await reviewOf($, dir, cwd, status.issue ?? 0, github.qa)
   const ci = await readText($, `${dir}/ci`)

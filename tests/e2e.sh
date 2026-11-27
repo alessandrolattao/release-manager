@@ -171,7 +171,7 @@ case "$*" in
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
-"issue develop 46 --list") echo "46-older	https://x" ;;
+"issue develop 66 --list") echo "66-older	https://x" ;;
 # The plugin's own repository, for report.sh. The REST listing has an issue as soon as it is opened, and a
 # pull request among the issues it lists; the search index behind `gh issue list --label` has not seen it yet.
 "api repos/"*"/issues?labels=flow-report&state=open&per_page=100")
@@ -1006,18 +1006,19 @@ out=$(sh "$SC/start-dev.sh" 44 2>&1); code=$?
 ok "a second developer for an issue is refused" "$code $(printf '%s' "$out" | grep -c 'already has a developer')" "1 1"
 
 echo "== start-dev.sh: an older worktree under the main checkout stays where it is"
-git -C "$ROOT" branch -q 46-older
-git -C "$ROOT" push -q origin 46-older
-git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/46-older" 46-older
-DEV46=22222222-0000-0000-0000-000000000046
+# Issue 66, which no other check uses: start-dev.sh takes it on GitHub (claim.sh), and the take stays.
+git -C "$ROOT" branch -q 66-older
+git -C "$ROOT" push -q origin 66-older
+git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/66-older" 66-older
+DEV66=22222222-0000-0000-0000-000000000066
 saved_agents=$(cat "$T/agents.json")
-echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$DEV46\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
-sh "$SC/start-dev.sh" 46 >/dev/null 2>&1; code=$?
-ok "its developer starts in it, and none goes beside" "$code $(cat "$S/$DEV46/cwd" 2>/dev/null) $([ -e "$WT/46-older" ] && echo beside || echo none)" "0 $ROOT/.claude/worktrees/46-older none"
-ok "its place is that worktree" "$(st "$DEV46" place)" "worktree 46"
+echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$DEV66\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
+sh "$SC/start-dev.sh" 66 >/dev/null 2>&1; code=$?
+ok "its developer starts in it, and none goes beside" "$code $(cat "$S/$DEV66/cwd" 2>/dev/null) $([ -e "$WT/66-older" ] && echo beside || echo none)" "0 $ROOT/.claude/worktrees/66-older none"
+ok "its place is that worktree" "$(st "$DEV66" place)" "worktree 66"
 printf '%s\n' "$saved_agents" >"$T/agents.json"
-rm -rf "${S:?}/$DEV46"
-git -C "$ROOT" worktree remove --force "$ROOT/.claude/worktrees/46-older"
+rm -rf "${S:?}/$DEV66"
+git -C "$ROOT" worktree remove --force "$ROOT/.claude/worktrees/66-older"
 
 printf 'pass\t%s\n' "$reviewed" >"$R/qa/42"
 touch "$G/checks-broken"

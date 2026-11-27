@@ -193,7 +193,18 @@ case "$*" in
 	# The boards: what is sent to add a Status option is kept, and the field comes back with the ids sent.
 	*"--input -"*) cat >"$G/add-status-sent"; jq -c '[.variables.o[] | {id: (.id // "OPT_NEW"), name}]' "$G/add-status-sent" ;;
 	*projectItems*) cat "$G/items.json" 2>/dev/null || echo '{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}' ;;
-	*updateProjectV2ItemFieldValue*) printf '%s\n' "$*" | grep -o 'OPT_[A-Z]*' | head -1 >>"$G/card-moves"; echo '{}' ;;
+	# A card moved: the option sent, in card-moves. GitHub takes $o as a String: an option id sent typed (-F)
+	# that is all digits reaches it as a number, and is refused.
+	*updateProjectV2ItemFieldValue*)
+		prev="" opt=""
+		for a in "$@"; do
+			case "$prev $a" in "-F o="*)
+				case "${a#o=}" in "" | *[!0-9]*) ;; *) echo 'gh: Variable $o of type String! was provided invalid value' >&2; exit 1 ;; esac ;;
+			esac
+			case "$a" in o=*) opt=${a#o=} ;; esac
+			prev=$a
+		done
+		echo "$opt" >>"$G/card-moves"; echo '{}' ;;
 	*projectsV2*) cat "$G/boards.json" 2>/dev/null || echo '{"data":{"repository":{"projectsV2":{"nodes":[]}}}}' ;;
 	*"projectV2(number"*) cat "$G/board.json" 2>/dev/null || echo null ;;
 	*"issue(number"*) echo I_1 ;;
@@ -1344,6 +1355,14 @@ EOF
 rm -f "$G/card-moves"
 out=$(sh "$SC/issue-status.sh" 42 in_review 2>&1)
 ok "several boards: one part per board lacking it, then the boards that move" "$(printf '%s' "$out" | tr '\n' '|') $(cat "$G/card-moves")" 'issue 42: In review (board "Roadmap" has no "In Review" status: its card stays in "Todo"; board "Notes" has no "In Review" status: its card has no status)|issue 42: In Review on Ops OPT_REV'
+# A board's ids as GitHub gives them, its Done option's all digits: a closed issue's card moves to Done.
+cat >"$G/items.json" <<'EOF'
+{"data":{"repository":{"issue":{"projectItems":{"nodes":[{"id":"PVTI_1","fieldValueByName":{"name":"In review"},
+ "project":{"id":"PVT_1","title":"Roadmap","field":{"id":"PVTSSF_1","options":[{"id":"47fc9ee4","name":"In progress"},{"id":"98236657","name":"Done"}]}}}]}}}}}
+EOF
+rm -f "$G/card-moves"
+out=$(sh "$SC/project.sh" 42 "Done" 2>&1); code=$?
+ok "an option id all in digits (Done, for a closed issue): sent as a string, the card moves" "$code | $out | $(cat "$G/card-moves" 2>/dev/null)" "0 | issue 42: Done on Roadmap | 98236657"
 rm -f "$G/items.json"
 ok "an issue on no board: its status alone" "$(sh "$SC/issue-status.sh" 42 in_review 2>&1)" "issue 42: In review"
 ok "check, with no board: nothing" "$(sh "$SC/project.sh" check 2>&1)" ""

@@ -167,10 +167,11 @@ give)
 	git -C "$root" pull -q --ff-only origin "$base" || true
 	rm -f "$lock"
 	cwd=$(cat "$sessions_dir/$me/cwd" 2>/dev/null || true)
-	case "$cwd" in
-	"$root/.claude/worktrees/"*) status_set "$me" --arg p "worktree $(basename "$cwd" | cut -d- -f1)" '.place = $p' ;;
-	*) status_set "$me" '.place = ""' ;;
-	esac
+	if is_worktree "$cwd"; then
+		status_set "$me" --arg p "worktree $(basename "$cwd" | cut -d- -f1)" '.place = $p'
+	else
+		status_set "$me" '.place = ""'
+	fi
 	state_set "$me" working "gave the checkout back"
 	wake_next
 	next=$(head -1 "$queue")

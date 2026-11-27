@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/repo.sh"
 prompt="Your session was cut off by a restart of the machine or a crash, and it is now resumed: go on with your work from where you stopped."
 unset_args=$(env | grep -o -E '^CLAUDE[A-Z_]*' | grep -v '^CLAUDE_CONFIG_DIR$' | sed 's/^/-u /' | tr '\n' ' ')
-listing=$(claude agents --json --all --cwd "$root" 2>/dev/null || echo '[]')
+listing=$(agents_here)
 
 for id in $(sessions_of dev) $(sessions_of review) $(sessions_of qa); do
 	status="$sessions_dir/$id/status"

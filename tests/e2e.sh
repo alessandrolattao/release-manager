@@ -148,10 +148,10 @@ case "$*" in
 	[ ! -f "$G/base-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 	cat "$G/base-50" 2>/dev/null || echo main ;;
 # With superseded-50, every run of the merge commit was cancelled: a newer commit of the branch holds the change.
-# With runs-broken, the runs cannot be read.
+# With cancelled-<sha>, every run of that commit was. With runs-broken, the runs cannot be read.
 "run list --commit "*)
 	[ ! -f "$G/runs-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
-	if [ "$4" = deadbeefcafe ] && [ -f "$G/superseded-50" ]; then
+	if { [ "$4" = deadbeefcafe ] && [ -f "$G/superseded-50" ]; } || [ -f "$G/cancelled-$4" ]; then
 		echo '[{"status":"completed","conclusion":"cancelled","workflowName":"ci","url":"u0"}]'
 	elif [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
 "run list "*) echo '[]' ;;
@@ -1279,6 +1279,22 @@ echo '[]' >"$G/runs"
 ok "a workflow on push to the default branch and no run yet: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
 # ago <seconds>: that long ago, as GitHub writes a time.
 ago() { jq -nr --argjson s "$1" 'now - $s | floor | todate'; }
+# A clock for main-ci.sh, with $T/clock first in its PATH: its `date +%s` runs ahead of the real one by the
+# seconds in $G/clock, so a wait of minutes passes in a moment; any other date is the real one.
+mkdir -p "$T/clock"
+d=$(command -v date)
+cat >"$T/clock/date" <<EOF
+#!/bin/sh
+[ "\$*" = +%s ] || exec $d "\$@"
+echo \$((\$($d +%s) + \$(cat "\$G/clock" 2>/dev/null || echo 0)))
+EOF
+chmod +x "$T/clock/date"
+# next_look: main-ci.sh $mpid's pause $spid cut short, so it looks again; its next pause's pid in $spid, empty when
+# it ends instead.
+next_look() {
+	[ -z "$spid" ] || kill "$spid" 2>/dev/null
+	spid=$(nap_of "$mpid" "$spid")
+}
 ago 60 >"$G/merged-at-50"
 ok "merged a minute ago, no run yet: it waits" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
 # A run that appears after its first look, within the 5 minutes: followed as today.
@@ -1369,14 +1385,54 @@ ok "every run cancelled: it follows the newest commit of that branch" "$(cat "$T
 ago 360 >"$G/merged-at-50"
 interrupt_wait 2
 ok "and 5 minutes after the merge, the newest commit just followed with no run yet: it waits for it" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
-# Its 5 minutes over (none, here): none will start for it.
-MAIN_CI_NO_RUN=0 sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+# Its 5 minutes over, on the clock: none will start for it.
+PATH="$T/clock:$PATH" sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
 mpid=$!
 spid=$(nap_of "$mpid")
-[ -z "$spid" ] || kill "$spid" 2>/dev/null
+echo 301 >"$G/clock"
+next_look
 ended "$mpid"
 ok "the newest commit with no run 5 minutes after it is followed: NO CI, and why" "$code $(cat "$T/main-ci.out")" "0 NO CI release ${rtip%"${rtip#???????}"}: the merge's runs were cancelled and the newest commit started none"
-rm -f "$G/superseded-50" "$G/merged-at-50"
+rm -f "$G/superseded-50" "$G/merged-at-50" "$G/clock"
+# Every run of the merge commit cancelled 43 minutes on: the newest commit's 5 minutes end past the 45 of the wait.
+echo '[{"status":"in_progress","conclusion":"","workflowName":"ci","url":"u1"}]' >"$G/runs"
+PATH="$T/clock:$PATH" sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+spid=$(nap_of "$mpid")
+echo 2580 >"$G/clock"
+touch "$G/superseded-50"
+next_look
+next_look
+echo 2760 >"$G/clock"
+next_look
+ok "cancelled 43 minutes on, no run of the newest commit at 46: it waits past the limit" "$([ -n "$spid" ] && echo waiting || cat "$T/main-ci.out")" "waiting"
+echo 2881 >"$G/clock"
+next_look
+ended "$mpid"
+ok "and once that commit's 5 minutes are over: NO CI, not PENDING" "$code $(cat "$T/main-ci.out")" "0 NO CI release ${rtip%"${rtip#???????}"}: the merge's runs were cancelled and the newest commit started none"
+rm -f "$G/superseded-50" "$G/clock"
+# Past the 45 minutes, a push cancels every run of the commit it follows: the even newer one gets its 5 minutes.
+PATH="$T/clock:$PATH" sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+spid=$(nap_of "$mpid")
+echo 2580 >"$G/clock"
+touch "$G/superseded-50"
+next_look
+next_look
+git -C "$T/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "release 2"
+git -C "$T/landed" push -q origin release
+rtip2=$(git -C "$T/landed" rev-parse HEAD)
+touch "$G/cancelled-$rtip"
+echo 2820 >"$G/clock"
+next_look
+echo 2940 >"$G/clock"
+next_look
+ok "cancelled again at 47 minutes, no run of the newer commit at 49: it waits on" "$([ -n "$spid" ] && echo waiting || cat "$T/main-ci.out")" "waiting"
+echo 3121 >"$G/clock"
+next_look
+ended "$mpid"
+ok "and once its own 5 minutes are over: NO CI for it" "$code $(cat "$T/main-ci.out")" "0 NO CI release ${rtip2%"${rtip2#???????}"}: the merge's runs were cancelled and the newest commit started none"
+rm -f "$G/superseded-50" "$G/clock" "$G/cancelled-$rtip"
 # A merge into the release branch GitHub has not marked yet: the head is in that branch only, not in main.
 git -C "$T/landed" checkout -q -b side main
 git -C "$T/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m side

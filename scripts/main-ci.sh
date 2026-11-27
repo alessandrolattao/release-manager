@@ -16,7 +16,8 @@
 # merge, as with GREEN. With --wait, so does a merge commit with no run 5 minutes after the merge, whatever the
 # workflow files say (a push trigger whose filters leave this push out): none will start. The same holds for the
 # newest commit it follows once every run of the merge commit was cancelled, 5 minutes after it started
-# following it.
+# following it, even when that is near or past the end of the wait: each switch moves the end to 5 minutes after
+# it when that is later.
 # While GitHub has not marked a merge that landed (merge.sh says so), the merge commit is the branch's commit
 # whose second parent is the pull request's head. A squash or a rebase leaves none: not merged, until GitHub
 # marks it.
@@ -71,6 +72,17 @@ superseded() {
 	[ "$(printf '%s' "$1" | jq '[.[] | select(.conclusion != "cancelled")] | length')" -eq 0 ] &&
 		[ "$(printf '%s' "$1" | jq length)" -gt 0 ]
 }
+# no_run, with --wait: NO CI, and the end, when the runs of the commit followed were read ($seen, $list) and
+# there are none 5 minutes after $since: none will start. Runs that cannot be read are not known to be none.
+no_run() {
+	[ -n "$seen" ] && [ "$(printf '%s' "$list" | jq length)" -eq 0 ] && [ "$(date +%s)" -ge $((since + 300)) ] || return 0
+	if [ "$sha" = "$merge" ]; then
+		echo "NO CI $base ${sha%"${sha#???????}"}: no workflow run started for this merge"
+	else
+		echo "NO CI $base ${sha%"${sha#???????}"}: the merge's runs were cancelled and the newest commit started none"
+	fi
+	exit 0
+}
 
 # The wait's own pause, a sleep in the background so that a signal stops it at once; stopped with the wait.
 nap=""
@@ -95,16 +107,19 @@ fi
 if [ "${2:-}" = --wait ]; then
 	minutes=${MAIN_CI_WAIT:-45}
 	end=$(($(date +%s) + minutes * 60))
-	# since: when the 5 minutes (grace) for a first run of the commit followed start: the merge for the merge
-	# commit, the moment it starts following it for a newer one.
-	grace=$((${MAIN_CI_NO_RUN:-5} * 60))
+	# since: when the 5 minutes for a first run of the commit followed start: the merge for the merge commit,
+	# the moment it starts following it for a newer one.
 	since=$merged
 	while [ "$(date +%s)" -lt "$end" ]; do
 		seen=yes
 		list=$(runs) || seen=""
 		if superseded "$list"; then
 			newest=$(git ls-remote origin "refs/heads/$base" | cut -f1)
-			[ "$newest" = "$sha" ] || since=$(date +%s)
+			if [ "$newest" != "$sha" ]; then
+				since=$(date +%s)
+				# Its 5 minutes may end past the limit: the wait goes on until they do.
+				[ $((since + 300)) -le "$end" ] || end=$((since + 300))
+			fi
 			sha=$newest
 			pause
 			continue
@@ -113,21 +128,14 @@ if [ "${2:-}" = --wait ]; then
 		pending=$(printf '%s' "$list" | jq '[.[] | select(.status != "completed")] | length')
 		# Runs may take a moment to appear after a merge; once a minute, to spare the API.
 		[ "$total" -gt 0 ] && [ "$pending" -eq 0 ] && break
-		# No run of the commit followed 5 minutes after since: none will start. Runs that cannot be read are not
-		# known to be none: it waits for them.
-		if [ -n "$seen" ] && [ "$total" -eq 0 ] && [ "$(date +%s)" -ge $((since + grace)) ]; then
-			if [ "$sha" = "$merge" ]; then
-				echo "NO CI $base $short: no workflow run started for this merge"
-			else
-				echo "NO CI $base ${sha%"${sha#???????}"}: the merge's runs were cancelled and the newest commit started none"
-			fi
-			exit 0
-		fi
+		no_run
 		pause
 	done
 fi
 
-list=$(runs) || true
+seen=yes
+list=$(runs) || seen=""
+[ "${2:-}" != --wait ] || no_run
 short=${sha%"${sha#???????}"}
 failed=$(printf '%s' "$list" | jq -r '[.[] | select(.status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure", "action_required")))]')
 if [ "$(printf '%s' "$failed" | jq length)" -gt 0 ]; then

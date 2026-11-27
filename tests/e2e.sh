@@ -1765,7 +1765,14 @@ release 9.9.11
 echo "$T/config 9.9.11" >>"$T/publish"
 echo "$S/$DEV2 9.9.11" >"$T/reloads"
 for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
-pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+# The dispatcher running on 9.9.9 is a stand-in that never cycles: a real one hands over to 9.9.11 by itself at its
+# next cycle (scripts/dispatcher.sh), and one that came between the install and step 2 would leave the update
+# nothing to restart. The first update.sh section restarts a real one. Detached, so its end needs nobody to reap it.
+sh "$SC/dispatcher.sh" stop >/dev/null
+rm -f "$R/dispatcher.stopped"
+pid=$(sh -c 'sleep 300 >/dev/null 2>&1 & echo $!')
+echo "$pid" >"$R/dispatcher.pid"
+echo 9.9.9 >"$R/dispatcher.version"
 : >"$T/claude.log"
 (
 	sleep 3

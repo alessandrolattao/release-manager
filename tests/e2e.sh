@@ -1967,6 +1967,12 @@ ok "before claiming the issue" "$(ls "$G/comments" | grep -c '^81\.') $(ls "$G/c
 cd "$WT/80-fork-thing" || exit 1
 out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take 2>&1); code=$?
 ok "checkout.sh take stops too, before holding the checkout" "$code $(held) | $out" "1 free | $missing"
+# take --as-is fetches nothing, and give works without the remote too: a checkout taken as-is is never left locked.
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take --as-is 2>&1); code=$?
+ok "checkout.sh take --as-is holds it all the same" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD)" "0 held main"
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" give 2>&1); code=$?
+ok "and give gives it back, on the default branch, with nothing to pull from" "$code $(held) $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) | $out" "0 free main | given back: the checkout is on main"
+ok "and the giver is back in its worktree" "$(st "$FRK" place) | $(st "$FRK" detail)" "worktree 80 | gave the checkout back"
 cd "$ROOT" || exit 1
 out=$(sh "$SC/main-ci.sh" 50 2>&1); code=$?
 ok "and main-ci.sh" "$code | $out" "1 | $missing"

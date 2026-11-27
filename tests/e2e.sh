@@ -62,10 +62,19 @@ answer() {
 next_id() { n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/next-id"; echo "$n"; }
 case "$*" in
 "repo view --json nameWithOwner --jq .nameWithOwner") echo test/repo ;;
+# A repository by its name, as GitHub spells it whatever the case asked: test/repo and someone/else; any
+# other, GitHub does not know.
+"repo view "*" --json nameWithOwner --jq .nameWithOwner")
+	r=$(printf '%s' "$3" | tr '[:upper:]' '[:lower:]')
+	case "$r" in
+	test/repo | someone/else) echo "$r" ;;
+	*) echo "GraphQL: Could not resolve to a Repository with the name '$3'. (repository)" >&2; exit 1 ;;
+	esac ;;
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
 # The user's permission on the repository: ADMIN, or the one in permission.
 "repo view --json viewerPermission --jq .viewerPermission") cat "$G/permission" 2>/dev/null || echo ADMIN ;;
 "repo view --json url --jq .url") echo https://github.com/test/repo ;;
+"repo view --json nameWithOwner,owner --jq "*) J='{"nameWithOwner":"test/repo","owner":{"login":"test"}}' answer "$@" ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
 "issue view "*" --json id --jq .id") echo "I_$3" ;;
@@ -173,12 +182,29 @@ case "$*" in
 	cat "$f" 2>/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; } ;;
 "api graphql "*)
 	case "$*" in
+	# The owner, test, is a personal account: GitHub resolves no organization, and gh fails printing its answer.
+	*"organization(login"*)
+		echo '{"data":{"organization":null},"errors":[{"type":"NOT_FOUND","path":["organization"],"message":"Could not resolve to an Organization with the login of '"'test'"'."}]}'
+		echo "gh: Could not resolve to an Organization with the login of 'test'." >&2
+		exit 1 ;;
+	*setIssueFieldValue*) echo "$*" >>"$G/field-sets"; echo '{}' ;;
 	*planningStatuses*) echo '[{"id":"S_TODO","name":"Todo"},{"id":"S_PROG","name":"In progress"},{"id":"S_REV","name":"In review"}]' ;;
 	*setIssueStatus*) printf '%s\n' "$*" | grep -o 'S_[A-Z]*' | head -1 >"$G/status-last"; echo '{}' ;;
 	# The boards: what is sent to add a Status option is kept, and the field comes back with the ids sent.
 	*"--input -"*) cat >"$G/add-status-sent"; jq -c '[.variables.o[] | {id: (.id // "OPT_NEW"), name}]' "$G/add-status-sent" ;;
 	*projectItems*) cat "$G/items.json" 2>/dev/null || echo '{"data":{"repository":{"issue":{"projectItems":{"nodes":[]}}}}}' ;;
-	*updateProjectV2ItemFieldValue*) printf '%s\n' "$*" | grep -o 'OPT_[A-Z]*' | head -1 >>"$G/card-moves"; echo '{}' ;;
+	# A card moved: the option sent, in card-moves. GitHub takes $o as a String: an option id sent typed (-F)
+	# that is all digits reaches it as a number, and is refused.
+	*updateProjectV2ItemFieldValue*)
+		prev="" opt=""
+		for a in "$@"; do
+			case "$prev $a" in "-F o="*)
+				case "${a#o=}" in "" | *[!0-9]*) ;; *) echo 'gh: Variable $o of type String! was provided invalid value' >&2; exit 1 ;; esac ;;
+			esac
+			case "$a" in o=*) opt=${a#o=} ;; esac
+			prev=$a
+		done
+		echo "$opt" >>"$G/card-moves"; echo '{}' ;;
 	*projectsV2*) cat "$G/boards.json" 2>/dev/null || echo '{"data":{"repository":{"projectsV2":{"nodes":[]}}}}' ;;
 	*"projectV2(number"*) cat "$G/board.json" 2>/dev/null || echo null ;;
 	*"issue(number"*) echo I_1 ;;
@@ -449,8 +475,16 @@ ok "the writer's state does not change" "$(jq -c '{state, detail, waits_on}' "$S
 ok "recorded on the issue the pull request closes" "$(tail -1 "$S/$TL1/commented" | cut -f2,3)" "42${tab}tech lead of someone/else"
 m=$(ls -t "$box/new/"* | head -1)
 ok "its inbox line says it is news" "$(sed -n '5,$p' "$m")" "Wrote to you on test/repo#50 · fyi: https://github.com/test/repo/issues/50#issuecomment-${f##*.}"
+# Named in another case than GitHub's: written as GitHub spells it, so that tech lead's name matches.
+jq -c '.state = "working" | del(.waits_on)' "$S/$TL1/status" >"$S/$TL1/status.t" && mv "$S/$TL1/status.t" "$S/$TL1/status"
+echo "Sì" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 "tech lead of Someone/Else" >/dev/null
+f=$(ls -t "$G/comments/42."* | head -1)
+ok "another case: its header names the repository as GitHub spells it" "$(head -1 "$f")" "**tech lead → tech lead of someone/else**"
+ok "the writer waits on that tech lead by that name" "$(st "$TL1" waits_on)" "tech lead of someone/else"
+ok "the thread records that name" "$(tail -1 "$S/$TL1/commented" | cut -f3)" "tech lead of someone/else"
+ok "the line goes to the inbox that tech lead reads" "$(ls "$box/new" | wc -l | tr -d ' ') $(ls "$T/data/team/inbox")" "3 someone_else"
 posted=$(ls "$G/comments" | wc -l) left=$(ls "$box/new" | wc -l)
-for to in "tech lead of Test/Repo" "tech lead of someone/else/forks#" "tech lead of someone" "tech lead of "; do
+for to in "tech lead of Test/Repo" "tech lead of someone/else/forks#" "tech lead of someone" "tech lead of " "tech lead of nobody/here"; do
 	echo "x" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/comment.sh" 42 "$to" >/dev/null 2>&1; code=$?
 	ok "refused ($to): nothing posted, nothing left in an inbox" "$code $(ls "$G/comments" | wc -l) $(ls "$box/new" | wc -l)" "2 $posted $left"
 done
@@ -815,11 +849,24 @@ rm -f "$G/comments-broken" "$G/decided-42"
 
 echo "== merge.sh: the code review only for an issue with the label review"
 echo no >"$G/review-42"
-echo no >"$G/qa-42"
+echo yes >"$G/qa-42"
 rm -f "$R/review/42" "$R/qa/42" "$G/merged-50"
+# With its decisions, as every issue has them, read for its QA, passed after them: a code review it never had
+# is not older than them.
+date -u +%Y-%m-%dT%H:%M:%SZ >"$G/decided-42"
+sleep 1
+printf 'requested\t%s\t42\t%s\t42-feature\n' "$reviewed" "$DEV" >"$R/qa/42"
+sh "$SC/qa.sh" pass 42 >/dev/null
 CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
 ok "an issue without the label review: merged with no code review pass" "$code $(merged)" "0 merged"
-rm -f "$G/merged-50"
+rm -f "$G/merged-50" "$G/decided-42" "$R/qa/42"
+echo no >"$G/qa-42"
+# Neither a code review nor a QA: nothing checks the decisions, so its comments are not read, and comments that
+# cannot be read refuse nothing.
+touch "$G/comments-broken"
+CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 >/dev/null 2>&1; code=$?
+ok "an issue with neither review nor qa: merged when its comments cannot be read" "$code $(merged)" "0 merged"
+rm -f "$G/merged-50" "$G/comments-broken"
 echo yes >"$G/review-42"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "one with it and no pass: refused" "$code $(printf '%s' "$out" | grep -c 'issue #42 carries the label review and the code review has not passed the current head: push it, then review.sh request 42$') $(merged)" "1 1 not-merged"
@@ -1308,6 +1355,14 @@ EOF
 rm -f "$G/card-moves"
 out=$(sh "$SC/issue-status.sh" 42 in_review 2>&1)
 ok "several boards: one part per board lacking it, then the boards that move" "$(printf '%s' "$out" | tr '\n' '|') $(cat "$G/card-moves")" 'issue 42: In review (board "Roadmap" has no "In Review" status: its card stays in "Todo"; board "Notes" has no "In Review" status: its card has no status)|issue 42: In Review on Ops OPT_REV'
+# A board's ids as GitHub gives them, its Done option's all digits: a closed issue's card moves to Done.
+cat >"$G/items.json" <<'EOF'
+{"data":{"repository":{"issue":{"projectItems":{"nodes":[{"id":"PVTI_1","fieldValueByName":{"name":"In review"},
+ "project":{"id":"PVT_1","title":"Roadmap","field":{"id":"PVTSSF_1","options":[{"id":"47fc9ee4","name":"In progress"},{"id":"98236657","name":"Done"}]}}}]}}}}}
+EOF
+rm -f "$G/card-moves"
+out=$(sh "$SC/project.sh" 42 "Done" 2>&1); code=$?
+ok "an option id all in digits (Done, for a closed issue): sent as a string, the card moves" "$code | $out | $(cat "$G/card-moves" 2>/dev/null)" "0 | issue 42: Done on Roadmap | 98236657"
 rm -f "$G/items.json"
 ok "an issue on no board: its status alone" "$(sh "$SC/issue-status.sh" 42 in_review 2>&1)" "issue 42: In review"
 ok "check, with no board: nothing" "$(sh "$SC/project.sh" check 2>&1)" ""
@@ -1348,6 +1403,10 @@ rm -f "$G/add-status-sent"
 out=$(sh "$SC/project.sh" add-status 3 "in progress" 2>&1); code=$?
 ok "a status the board has already: said, nothing sent" "$code $out $([ -f "$G/add-status-sent" ] && echo sent || echo none)" '0 board 3 "Roadmap" already has "in progress" none'
 rm -f "$G/boards.json" "$G/board.json" "$R/board-asked.3"
+
+echo "== set-fields.sh: a repository of a personal account"
+out=$(sh "$SC/set-fields.sh" 42 High Low 2>&1); code=$?
+ok "it says so in one line, changes nothing and exits 0" "$code | $out | $(cat "$G/field-sets" 2>/dev/null | wc -l | tr -d ' ')" "0 | test has no issue fields: Priority and Effort not set | 0"
 
 echo "== dispatch.sh: takes are no messages; other machines' agents on the board"
 date +%s >"$S/$TL1/alive"

@@ -40,10 +40,12 @@ move() {
 	printf '%s\n' "$items" | while IFS="$tab" read -r kind a b c d e; do
 		case "$kind" in
 		move)
+			# The ids as strings (-f): an option id can be all digits ("98236657"), which -F would send as a
+			# number, and GitHub refuses a number for $o.
 			# shellcheck disable=SC2016 # GraphQL variables, not shell ones
 			gh api graphql -f query='mutation($p: ID!, $i: ID!, $f: ID!, $o: String!) { updateProjectV2ItemFieldValue(input: {
 				projectId: $p, itemId: $i, fieldId: $f, value: {singleSelectOptionId: $o}}) { clientMutationId } }' \
-				-F p="$a" -F i="$b" -F f="$c" -F o="$d" >/dev/null
+				-f p="$a" -f i="$b" -f f="$c" -f o="$d" >/dev/null
 			echo "issue $issue: $status on $e"
 			;;
 		lack)

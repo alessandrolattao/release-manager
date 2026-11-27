@@ -16,7 +16,9 @@
 #                from a tech lead only: ANOTHER repository's tech lead, who wrote on this repository's issue
 #                (comment.sh --repo there), answered here: the header says "**tech lead → tech lead of
 #                <owner/name>**", and a line with the comment's link goes to that tech lead's inbox (tell.sh
-#                <owner/name> info), since its dispatcher does not read this repository
+#                <owner/name> info), since its dispatcher does not read this repository. <owner/name> is
+#                written as GitHub spells it (gh repo view), whatever its case here; one GitHub does not know is
+#                refused
 # Any other recipient is refused, and nothing is posted. The options may come anywhere among the arguments.
 # Your state follows: waiting on the user (yellow) or on another session (purple), until an answer wakes you.
 # The status records whom you wait on (waits_on: the address, or "the user"): their comment ends the wait.
@@ -113,6 +115,14 @@ case "$to" in "tech lead of "*)
 		echo "only a tech lead writes to another repository's tech lead: write to your tech lead (comment.sh $target \"tech lead\")" >&2
 		exit 2
 	}
+	# Named as GitHub spells it, as that tech lead signs (its repo_full): the header, the wait and its inbox
+	# match the name it writes with.
+	spelled=$(gh repo view "$other" --json nameWithOwner --jq .nameWithOwner 2>/dev/null) && is_repo_name "$spelled" || {
+		echo "unknown recipient '$to': GitHub has no repository $other this account can read" >&2
+		exit 2
+	}
+	other=$spelled
+	to="tech lead of $other"
 	[ "$(lower "$other")" != "$(lower "$repo_full")" ] || {
 		echo "$repo_full is this repository: write to its tech lead with comment.sh $target \"tech lead\"" >&2
 		exit 2

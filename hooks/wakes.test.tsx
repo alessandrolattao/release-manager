@@ -1201,24 +1201,35 @@ test('no wake with no plan usage to read', async ($, on) => {
 // Done is final: what the module sets after done.sh leaves a done session done, so the dispatcher removes it.
 const DONE = { role: 'dev', issue: 42, state: 'done', detail: 'merged #50', since: NOW / 1000 - 30 }
 
-test('a done session woken by the one it wrote to after done.sh stays done', async ($, on) => {
+test('a done session is never woken: the lines that wait for it are dropped, and it stays done', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
   on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
-  // comment.sh, run after done.sh, still recorded whom it wrote to.
+  // Two comments written to it during the turn that ran done.sh, one already read by an earlier wake;
+  // comment.sh, run after done.sh, still recorded whom it wrote to; and a stop on the usage limit, reset since.
   const files = folder(on, {
     role: 'dev',
     status: JSON.stringify({ ...DONE, waits_on: 'tech lead' }),
-    wake: `${NOW / 1000}\ttech lead on #42\tNever mind\thttps://x/42#c101\n`,
+    wake: [
+      `${NOW / 1000 - 600}\ttech lead on #42\tGià letto\thttps://x/42#c100`,
+      `${NOW / 1000 - 300}\ttech lead on #42\tUsa la tabella users\thttps://x/42#c101`,
+      `${NOW / 1000 - 60}\ttech lead on #42\tNever mind\thttps://x/42#c102`,
+      '',
+    ].join('\n'),
+    'wake-read': '1\n',
+    limited: `${NOW / 1000 - 3600}\n`,
+    ...usage(A_MINUTE_AGO),
   })
   const seen = prompts(on)
-  engine(on)
+  const logs: string[] = []
+  engine(on, logs)
   turns(on)
 
   await $.session.start(START)
-  await clock.advance(6000)
-  expect(seen.length).toBe(1)
-  await wokenTurn($)
+  await clock.advance(60000)
+  expect(seen).toEqual([])
+  expect(files.get('wake-read')).toBe('3\n')
+  expect(logs).toEqual([])
   const status = JSON.parse(files.get('status') ?? '{}') as typeof DONE
   expect(`${status.state} · ${status.detail} · ${status.since}`).toBe(`done · merged #50 · ${DONE.since}`)
 })

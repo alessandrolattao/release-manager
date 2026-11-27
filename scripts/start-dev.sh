@@ -60,8 +60,11 @@ brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}
 
 cd "$worktree"
 name=$(dev_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in progress")
+# Taken just before the launch: the developer reads the issue with all its comments after it, so none written
+# before wakes it (role.sh, dispatch.sh).
+started=$(date +%s)
 id=$(launch "$name" "$brief")
-sh "$here/role.sh" "$id" dev "$issue" "$branch" >/dev/null
+sh "$here/role.sh" "$id" dev "$issue" "$branch" "$started" >/dev/null
 echo "started $name ($id)"
 echo "branch   $branch"
 echo "worktree $worktree"

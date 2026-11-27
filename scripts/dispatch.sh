@@ -2,8 +2,9 @@
 # One cycle of the team's dispatcher. dispatcher.sh, a process of its own, runs it every minute; one
 # run at a time per repository and machine (a lock). No model: it only does what follows from the state.
 #   1. hands each new GitHub comment of the repository (not an edit of an older one) to the session it is
-#      written to, and what another repository's tech lead writes here (a comment or a new issue, signed
-#      `<!-- team · tech lead of <owner/name> -->`) to this repository's tech lead;
+#      written to, but not to a developer or QA agent started after it, and what another repository's tech
+#      lead writes here (a comment or a new issue, signed `<!-- team · tech lead of <owner/name> -->`) to this
+#      repository's tech lead;
 #   2. turns a question an agent left in its own chat, unanswered for 5 minutes, into a comment to the
 #      repository's tech lead;
 #   3. marks dead sessions stuck (red, in the agent list too), or done when they are developers or QA agents
@@ -157,6 +158,10 @@ if comments=$(since=$since gh api --paginate "repos/$repo_full/issues/comments?s
 		esac
 		for id in $targets; do
 			[ "$(address_of "$id")" != "$from" ] || continue
+			# A developer or QA agent reads the issue with all its comments when it starts: one written before its
+			# launch (`started`, role.sh) it has read already.
+			started=$(jq -r 'select(.role == "dev" or .role == "qa") | .started // empty' "$sessions_dir/$id/status" 2>/dev/null || true)
+			[ -z "$started" ] || [ "$created" -ge "$started" ] || continue
 			wake "$id" "$created" "$from on #$issue" "$text" "$link"
 		done
 	done

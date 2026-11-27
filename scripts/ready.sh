@@ -2,7 +2,33 @@
 # Marks an issue ready for development (label "ready for development", created when missing), or takes it back.
 #   ready.sh <issue-number>           the issue enters the queue: the dispatcher starts a developer on it
 #   ready.sh --remove <issue-number>  back to the backlog
+# --remove may come anywhere among the arguments. Any other argument is refused with the usage, and nothing
+# changes on the issue.
 set -eu
+
+usage() {
+	echo "usage: ready.sh [--remove] <issue-number>" >&2
+	exit 2
+}
+action=add issue=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--remove) action=remove ;;
+	-*)
+		echo "unknown option '$1'" >&2
+		usage
+		;;
+	*)
+		[ -z "$issue" ] || {
+			echo "one issue: '$1' is one too many" >&2
+			usage
+		}
+		issue=$1
+		;;
+	esac
+	shift
+done
+[ -n "$issue" ] || usage
 
 here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
@@ -10,12 +36,6 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/rest.sh
 . "$here/rest.sh"
 label="ready for development"
-action=add
-if [ "${1:-}" = --remove ]; then
-	action=remove
-	shift
-fi
-issue=${1:?issue number}
 if [ "$action" = add ]; then
 	# The label lets a developer take the issue: never before its technical decisions are posted.
 	decided=$(gh issue view "$issue" --json comments --jq '[.comments[].body | select(startswith("## Technical decisions"))] | length')

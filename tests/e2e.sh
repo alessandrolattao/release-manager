@@ -65,6 +65,7 @@ case "$*" in
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
+"issue view "*" --json id --jq .id") echo "I_$3" ;;
 "api repos/"*"/issues/"*"/comments "*)
 	n=$(echo "$2" | sed -n 's#.*/issues/\([0-9]*\)/comments$#\1#p') id=$(next_id)
 	cat "$(F=body field "$@" | sed 's/^@//')" >"$G/comments/$n.$id"
@@ -165,6 +166,8 @@ case "$*" in
 	*projectsV2*) cat "$G/boards.json" 2>/dev/null || echo '{"data":{"repository":{"projectsV2":{"nodes":[]}}}}' ;;
 	*"projectV2(number"*) cat "$G/board.json" 2>/dev/null || echo null ;;
 	*"issue(number"*) echo I_1 ;;
+	# A "blocked by" relationship added or taken away: the mutation and the two issues, in blocks.
+	*BlockedBy*) printf '%s\n' "$*" | grep -o -e '[a-zA-Z]*BlockedBy(' -e '[ib]=I_[0-9]*' | tr -d '(' | paste -sd' ' >>"$G/blocks"; echo '{}' ;;
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
@@ -1399,7 +1402,17 @@ ok "an issue without the label is already in the backlog" "$code $out" "0 issue 
 echo "gh: Not Found (HTTP 404)" >"$G/fail-next"
 out=$(sh "$SC/ready.sh" --remove 42 2>&1); code=$?
 ok "any other refusal fails with its error" "$code $out" "1 gh: Not Found (HTTP 404)"
+sh "$SC/ready.sh" 42 >/dev/null
+out=$(sh "$SC/ready.sh" 42 --remove 2>&1); code=$?
+ok "--remove after the issue number takes the label away too" "$code $(grep -c '^42 ready for development$' "$G/labels-added") $out" "0 0 issue 42: back to the backlog"
+: >"$G/rest.log"
+out=$(sh "$SC/ready.sh" 42 extra 2>&1); code=$?
+ok "an argument it does not expect: its usage, and nothing changes" "$code $(printf '%s' "$out" | grep -c '^usage: ready.sh') $(wc -l <"$G/rest.log") $(grep -c '^42 ready for development$' "$G/labels-added")" "2 1 0 0"
 rm -f "$G/decided-42" "$G/fail-next"
+
+echo "== block.sh"
+out=$(sh "$SC/block.sh" 42 43 extra 2>&1); code=$?
+ok "an argument it does not expect: its usage, and no relationship changes" "$code $(printf '%s' "$out" | grep -c '^usage: block.sh') $(cat "$G/blocks" 2>/dev/null | wc -l)" "2 1 0"
 
 echo "== open-issue.sh: a new issue through the REST API"
 url=$(printf 'Il corpo\n' | sh "$SC/open-issue.sh" "Un nuovo tema" @me); code=$?

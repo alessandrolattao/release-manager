@@ -1114,3 +1114,52 @@ test('no wake with no plan usage to read', async ($, on) => {
   expect(seen).toEqual([])
   expect(logs).toEqual([])
 })
+
+// Done is final: what the module sets after done.sh leaves a done session done, so the dispatcher removes it.
+const DONE = { role: 'dev', issue: 42, state: 'done', detail: 'merged #50', since: NOW / 1000 - 30 }
+
+test('a done session woken by the one it wrote to after done.sh stays done', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  // comment.sh, run after done.sh, still recorded whom it wrote to.
+  const files = folder(on, {
+    role: 'dev',
+    status: JSON.stringify({ ...DONE, waits_on: 'tech lead' }),
+    wake: `${NOW / 1000}\ttech lead on #42\tNever mind\thttps://x/42#c101\n`,
+  })
+  const seen = prompts(on)
+  engine(on)
+  turns(on)
+
+  await $.session.start(START)
+  await clock.advance(6000)
+  expect(seen.length).toBe(1)
+  await wokenTurn($)
+  const status = JSON.parse(files.get('status') ?? '{}') as typeof DONE
+  expect(`${status.state} · ${status.detail} · ${status.since}`).toBe(`done · merged #50 · ${DONE.since}`)
+})
+
+test('a done session stays done when a turn of its fails, the user writes to it or it is silent', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface in a test' } }))
+  const files = folder(on, { role: 'dev', status: JSON.stringify(DONE) })
+  prompts(on)
+  engine(on)
+  turns(on)
+  on('classic.StopFailure', () => ({}))
+  const state = () => {
+    const status = JSON.parse(files.get('status') ?? '{}') as typeof DONE
+    return `${status.state} · ${status.detail} · ${status.since}`
+  }
+
+  await $.session.start(START)
+  await failingTurn($, 'server_error')
+  expect(state()).toBe(`done · merged #50 · ${DONE.since}`)
+  type Submit = Parameters<typeof $.prompt.submit>[0]
+  await $.prompt.submit({ text: 'ancora una cosa', origin: { kind: 'composer' } } as Submit)
+  expect(state()).toBe(`done · merged #50 · ${DONE.since}`)
+  await clock.advance(25 * 60 * 1000)
+  expect(state()).toBe(`done · merged #50 · ${DONE.since}`)
+})

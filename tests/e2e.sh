@@ -1833,6 +1833,13 @@ done
 ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ')" "$DEV2 "
 ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
+# Rolled back from 9.9.11 to 9.9.9: Claude Code left 9.9.11's folder behind, marked .orphaned_at.
+ln -s "$T/releases/9.9.11" "$CACHE/9.9.11"
+date +%s >"$CACHE/9.9.11/.orphaned_at"
+: >"$T/claude.log"
+UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" restart "$DEV2" --now >/dev/null 2>&1
+ok "a newer folder marked .orphaned_at is not installed: the restart is on the newest one without the mark" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in $CACHE/9.9.9/scripts:" "$T/claude.log") $(grep -c '9\.9\.11' "$T/claude.log")" "1 0"
+rm -f "$CACHE/9.9.11/.orphaned_at" "$CACHE/9.9.11"
 rm -f "$S/$DEV2/version"
 
 echo "== dispatcher.sh: a newer version installed on its account takes over"
@@ -1855,6 +1862,20 @@ sh "$SC/dispatcher.sh" stop >/dev/null
 timeout 20 sh "$CACHE/9.9.9/scripts/dispatcher.sh" run >>"$R/dispatcher.log" 2>&1 </dev/null
 code=$?
 ok "a stopped dispatcher stays stopped" "$code $(pgrep -fc "$CACHE/9.9.9/scripts/dispatcher.sh run") $(sh "$SC/dispatcher.sh" status)" "0 0 stopped (by hand)"
+# Rolled back from 9.9.20 to 9.9.9: Claude Code left 9.9.20's folder behind, marked .orphaned_at. One started from
+# 0.0.1 goes on with 9.9.9, which stays.
+release 9.9.20
+ln -s "$T/releases/9.9.20" "$CACHE/9.9.20"
+date +%s >"$CACHE/9.9.20/.orphaned_at"
+: >"$R/dispatcher.log"
+rm -f "$R/board.json"
+out=$(sh "$CACHE/0.0.1/scripts/dispatcher.sh" start 2>&1)
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+n=0
+while [ ! -f "$R/board.json" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+ok "a newer folder marked .orphaned_at is not installed: started from 0.0.1, it goes on with 9.9.9 and stays there" "$out | $(ps -o args= -p "$pid" 2>/dev/null) | $(cat "$R/dispatcher.pid" 2>/dev/null) $(grep -c 'now on team' "$R/dispatcher.log") $(grep -c 'now on team 9.9.20' "$R/dispatcher.log")" "the dispatcher of test/repo runs on this machine (pid $pid, team 9.9.9) | sh $CACHE/9.9.9/scripts/dispatcher.sh run | $pid 1 0"
+sh "$SC/dispatcher.sh" stop >/dev/null
+rm -f "$CACHE/9.9.20/.orphaned_at" "$CACHE/9.9.20"
 
 echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
 # 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds

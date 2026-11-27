@@ -933,19 +933,26 @@ async function noteVersion($: EngineInterface, folder: string): Promise<void> {
 }
 
 // The newest version of the plugin installed on the session's account and its folder, as scripts/update.sh
-// reads it: the newest of the version folders in <config>/plugins/cache/team/team, <config> the folder the
-// session's `config` names (empty: ~/.claude). Null when none is.
+// reads it (newest_plugin, scripts/session-dir.sh): the newest of the version folders in
+// <config>/plugins/cache/team/team, <config> the folder the session's `config` names (empty: ~/.claude). A folder
+// marked `.orphaned_at` is not installed: Claude Code marks the previous version's folder so when it updates or
+// uninstalls the plugin, and removes it 14 days later. Null when none is.
 async function installedOf($: EngineInterface, folder: string): Promise<{ version: string; root: string } | null> {
   const config = (await readText($, `${folder}/config`)) || `${(await $.env.get('HOME')) ?? ''}/.claude`
   const cache = `${config}/plugins/cache/team/team`
-  let versions: string[]
   try {
-    versions = (await $.fs.list(cache)).filter(entry => entry.kind !== 'file' && /^\d+(\.\d+)*$/.test(entry.name)).map(entry => entry.name)
+    const versions = (await $.fs.list(cache)).filter(entry => entry.kind !== 'file' && /^\d+(\.\d+)*$/.test(entry.name)).map(entry => entry.name)
+    // Newest first, so the mark is looked for only until the first folder without it.
+    versions.sort((a, b) => (isNewer(a, b) ? -1 : isNewer(b, a) ? 1 : 0))
+    for (const version of versions) {
+      if (!(await $.fs.exists(`${cache}/${version}/.orphaned_at`))) {
+        return { version, root: `${cache}/${version}` }
+      }
+    }
   } catch {
     return null
   }
-  const newest = versions.reduce((best, version) => (best === '' || isNewer(version, best) ? version : best), '')
-  return newest === '' ? null : { version: newest, root: `${cache}/${newest}` }
+  return null
 }
 
 // The version this module reloaded the session to, or fell back to a restart for: once per version.

@@ -78,8 +78,9 @@ alive() {
 	case "$at" in "" | *[!0-9]*) return 1 ;; esac
 	[ $(($(date +%s) - at)) -le 180 ]
 }
-# newest <config dir>: the newest installed version's folder of the plugin on that account.
-newest() { ls -d "$(home_of "$1")/plugins/cache/team/team/"*/ 2>/dev/null | sort -V | tail -1 | sed 's#/$##'; }
+# newest <config dir>: the newest installed version's folder of the plugin on that account (newest_plugin,
+# session-dir.sh: a folder Claude Code marked `.orphaned_at` is not installed).
+newest() { newest_plugin "$(home_of "$1")"; }
 # installed <accounts>: each account and the newest version of the plugin installed on it, one per line.
 installed() {
 	printf '%s\n' "$1" | while IFS= read -r cfg; do

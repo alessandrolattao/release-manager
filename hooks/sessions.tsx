@@ -18,9 +18,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     `role`: at session start, or at the first tick that finds the one role.sh wrote. scripts/update.sh
 //     waits for it to reach the newest version installed.
 //   - between turns, when a newer version of the plugin is installed on the session's account than the one
-//     it runs, it reloads the plugin in place (/reload-plugins), once per version; the new version's module
-//     then has the session read its role's rules again. A reload that fails restarts the session instead
-//     (scripts/update.sh restart).
+//     it runs, it reloads the plugin in place (/reload-plugins), once per version, and does nothing more
+//     between those turns; the new version's module then has the session read its role's rules again, and
+//     wakes it. A reload that fails restarts the session instead (scripts/update.sh restart).
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -944,19 +944,20 @@ let reloadedTo = ''
 // its own version there, has the session read its role's rules again (reloadedPrompt). The call resolves only
 // when the reload did not work (no `Reloaded:` line), or it rejects: then the session restarts instead, as the
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
-// since the restart carries its own prompt.
-async function reloadIfBehind($: EngineInterface, folder: string): Promise<void> {
+// since the restart carries its own prompt. True when it started a reload.
+async function reloadIfBehind($: EngineInterface, folder: string): Promise<boolean> {
   const running = await versionOf($)
   if (running === '') {
-    return
+    return false
   }
   const installed = await installedOf($, folder)
   if (installed === null || installed.version === reloadedTo || !isNewer(installed.version, running)) {
-    return
+    return false
   }
   reloadedTo = installed.version
   await $.fs.write(`${folder}/reloading`, `${installed.version}\n`)
   void reload($, folder, installed.root)
+  return true
 }
 
 async function reload($: EngineInterface, folder: string, root: string): Promise<void> {
@@ -1071,10 +1072,14 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (!isBusy) {
-      // A newer version installed on the account: the session reloads it. What fails there never keeps the
-      // session from its wakes and its color.
+      // A newer version installed on the account: the session reloads it, and these turns' work ends here:
+      // the new version's module delivers the wakes and applies the name and the color, so nothing is marked
+      // read by a module whose prompt never goes out. What fails there never keeps the session from its wakes
+      // and its color.
       try {
-        await reloadIfBehind($, folder)
+        if (await reloadIfBehind($, folder)) {
+          return
+        }
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }

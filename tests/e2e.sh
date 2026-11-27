@@ -138,13 +138,19 @@ case "$*" in
 # A merge GitHub has not marked yet (unmarked-50) has no mergeCommit; its runs are those of the merge commit in
 # the default branch (landed-50).
 "pr view 50 --json mergeCommit --jq .mergeCommit.oid // empty") [ -f "$G/unmarked-50" ] || echo deadbeefcafe ;;
+# When the merge landed: the time in merged-at-50, else now; none while GitHub has not marked it.
+"pr view 50 --json mergedAt --jq "*)
+	if [ -f "$G/unmarked-50" ]; then J='{"mergedAt":null}'; else J=$(jq -n --arg t "$(cat "$G/merged-at-50" 2>/dev/null || jq -nr 'now | floor | todate')" '{mergedAt: $t}'); fi
+	answer "$@" ;;
 "pr view 50 --json headRefOid --jq .headRefOid") cat "$G/head-50" 2>/dev/null || echo abc1234567 ;;
 # The branch the pull request merges into: main, or the one in base-50; base-broken, an answer that cannot be read.
 "pr view 50 --json baseRefName --jq .baseRefName // empty")
 	[ ! -f "$G/base-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 	cat "$G/base-50" 2>/dev/null || echo main ;;
 # With superseded-50, every run of the merge commit was cancelled: a newer commit of the branch holds the change.
+# With runs-broken, the runs cannot be read.
 "run list --commit "*)
+	[ ! -f "$G/runs-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }
 	if [ "$4" = deadbeefcafe ] && [ -f "$G/superseded-50" ]; then
 		echo '[{"status":"completed","conclusion":"cancelled","workflowName":"ci","url":"u0"}]'
 	elif [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
@@ -1220,30 +1226,48 @@ echo '[{"status":"in_progress","conclusion":"","workflowName":"deploy","url":"u2
 ok "still running" "$(sh "$SC/main-ci.sh" 50 | cut -c1-15)" "PENDING main de"
 ok "a run still going at the limit of --wait: PENDING, and to run it again" "$(within 10 env MAIN_CI_WAIT=0 sh "$SC/main-ci.sh" 50 --wait)" "PENDING main deadbee: 1 run(s) still going after 0 minutes: run main-ci.sh 50 --wait again"
 ok "with exit 3" "$(cat "$T/within.code")" "3"
-# interrupt_wait: main-ci.sh 50 --wait, stopped by a TERM while it waits between two looks. Its output goes in
-# $T/main-ci.out, its exit code (or "still running") in $code, its pause's pid in $spid.
+# nap_of <pid> [<pause>]: the pid of the pause main-ci.sh <pid> takes between two looks, once it takes one other
+# than <pause>; empty when it ends first.
+nap_of() {
+	n=0
+	np=""
+	while [ -z "$np" ] && kill -0 "$1" 2>/dev/null && [ "$n" -lt 100 ]; do
+		np=$(pgrep -P "$1" -x sleep 2>/dev/null | grep -vx "${2:-}" | head -1)
+		[ -n "$np" ] || sleep 0.1
+		n=$((n + 1))
+	done
+	echo "$np"
+}
+# ended <pid>: main-ci.sh <pid> once it ends, stopped when it still runs 5 seconds on; its exit code, or "still
+# running", in $code.
+ended() {
+	n=0
+	while kill -0 "$1" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+	if kill -0 "$1" 2>/dev/null; then
+		pkill -P "$1" 2>/dev/null
+		kill -KILL "$1" 2>/dev/null
+		wait "$1" 2>/dev/null
+		code="still running"
+	else
+		wait "$1" 2>/dev/null
+		code=$?
+	fi
+}
+# interrupt_wait [<looks>]: main-ci.sh 50 --wait, stopped by a TERM while it waits between two looks, after
+# <looks> of them (1 when not given): each pause before cut short. Its output goes in $T/main-ci.out, its exit
+# code (or "still running") in $code, its last pause's pid in $spid.
 interrupt_wait() {
 	sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
 	mpid=$!
-	n=0
-	spid=""
-	while [ -z "$spid" ] && kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 100 ]; do
-		spid=$(pgrep -P "$mpid" -x sleep 2>/dev/null | head -1)
-		[ -n "$spid" ] || sleep 0.1
-		n=$((n + 1))
+	spid=$(nap_of "$mpid")
+	looks=${1:-1}
+	while [ "$looks" -gt 1 ] && [ -n "$spid" ]; do
+		kill "$spid" 2>/dev/null
+		spid=$(nap_of "$mpid" "$spid")
+		looks=$((looks - 1))
 	done
 	kill -TERM "$mpid" 2>/dev/null
-	n=0
-	while kill -0 "$mpid" 2>/dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
-	if kill -0 "$mpid" 2>/dev/null; then
-		pkill -P "$mpid" 2>/dev/null
-		kill -KILL "$mpid" 2>/dev/null
-		wait "$mpid" 2>/dev/null
-		code="still running"
-	else
-		wait "$mpid" 2>/dev/null
-		code=$?
-	fi
+	ended "$mpid"
 }
 # A TERM while it waits between two looks: it says so at once, not at the end of its pause.
 interrupt_wait
@@ -1253,6 +1277,32 @@ sleep 0.2
 ok "and its pause stopped with it" "$([ -n "$spid" ] && ! kill -0 "$spid" 2>/dev/null && echo stopped)" "stopped"
 echo '[]' >"$G/runs"
 ok "a workflow on push to the default branch and no run yet: it waits as today" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+# ago <seconds>: that long ago, as GitHub writes a time.
+ago() { jq -nr --argjson s "$1" 'now - $s | floor | todate'; }
+ago 60 >"$G/merged-at-50"
+ok "merged a minute ago, no run yet: it waits" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+# A run that appears after its first look, within the 5 minutes: followed as today.
+sh "$SC/main-ci.sh" 50 --wait >"$T/main-ci.out" 2>&1 &
+mpid=$!
+spid=$(nap_of "$mpid")
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+[ -z "$spid" ] || kill "$spid" 2>/dev/null
+ended "$mpid"
+ok "a run that appears within the 5 minutes: followed as today" "$code $(cut -c1-21 "$T/main-ci.out")" "0 GREEN main deadbee: t"
+# The issue's repository: its only push workflow filters on tags, so no run starts for a merge.
+ago 360 >"$G/merged-at-50"
+echo '[]' >"$G/runs"
+printf "name: int\non:\n  push:\n    tags: ['int-*']\n  workflow_dispatch:\n" >"$G/workflow-1.yml"
+ok "no run of the merge commit 5 minutes after the merge: NO CI" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow run started for this merge"
+ok "with exit 0" "$(cat "$T/within.code")" "0"
+touch "$G/runs-broken"
+ok "runs that cannot be read then: it waits" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+rm -f "$G/runs-broken"
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+ok "a run of the merge commit then: followed as today" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main deadbee: t"
+printf 'name: ci\non:\n  push:\n    branches: [main]\n  pull_request:\n' >"$G/workflow-1.yml"
+rm -f "$G/merged-at-50"
+echo '[]' >"$G/runs"
 rm -f "$G/workflows"
 ok "no workflow: NO CI at once, without waiting" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main deadbee: no workflow runs on main"
 ok "with exit 0" "$(cat "$T/within.code")" "0"
@@ -1271,6 +1321,23 @@ echo "$landed" >"$G/landed-50"
 echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
 echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
 ok "no mergeCommit and the head in the default branch: the merge commit by its second parent, and its CI" "$(within 10 sh "$SC/main-ci.sh" 50 --wait | cut -c1-21)" "GREEN main ${landed%"${landed#???????}"}: t"
+# unmarked_merge <seconds>: a new commit merged into main that long ago, by its merge commit's date, as GitHub
+# leaves it before it marks the pull request merged: the commit in head-50, the merge commit in landed-50.
+unmarked_merge() {
+	git -C "$T/landed" checkout -q -b "late-$1" main
+	git -C "$T/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "late $1"
+	git -C "$T/landed" rev-parse HEAD >"$G/head-50"
+	git -C "$T/landed" checkout -q main
+	GIT_COMMITTER_DATE="$(($(date +%s) - $1)) +0000" git -C "$T/landed" -c user.email=t@t -c user.name=t merge -q --no-ff -m "Merge pull request #50" "late-$1"
+	git -C "$T/landed" push -q origin main
+	git -C "$T/landed" rev-parse HEAD >"$G/landed-50"
+}
+echo '[]' >"$G/runs"
+unmarked_merge 0
+ok "no mergeCommit, merged just now and no run yet: it waits" "$(within 2 sh "$SC/main-ci.sh" 50 --wait)" "TIMEOUT"
+unmarked_merge 360
+m=$(cat "$G/landed-50")
+ok "no mergeCommit and no run 5 minutes after its merge commit's date: NO CI" "$(within 10 sh "$SC/main-ci.sh" 50 --wait)" "NO CI main ${m%"${m#???????}"}: no workflow run started for this merge"
 echo abc1234567 >"$G/head-50"
 ok "no mergeCommit and the head not in it: not merged, as today" "$(sh "$SC/main-ci.sh" 50)" "#50 is not merged"
 echo "$reviewed" >"$G/head-50"
@@ -1298,7 +1365,11 @@ printf 'name: ci\non:\n  push:\n    branches: [release]\n' >"$G/workflow-1-relea
 touch "$G/superseded-50"
 interrupt_wait
 ok "every run cancelled: it follows the newest commit of that branch" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
-rm -f "$G/superseded-50"
+# The merge commit has runs, the newest commit none yet: 5 minutes after the merge it still waits for that one.
+ago 360 >"$G/merged-at-50"
+interrupt_wait 2
+ok "and 5 minutes after the merge, with no run of that commit yet: it waits for it" "$(cat "$T/main-ci.out")" "INTERRUPTED release ${rtip%"${rtip#???????}"}: run main-ci.sh 50 --wait again"
+rm -f "$G/superseded-50" "$G/merged-at-50"
 # A merge into the release branch GitHub has not marked yet: the head is in that branch only, not in main.
 git -C "$T/landed" checkout -q -b side main
 git -C "$T/landed" -c user.email=t@t -c user.name=t commit -q --allow-empty -m side

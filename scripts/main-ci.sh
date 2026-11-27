@@ -13,7 +13,8 @@
 # Every workflow that runs on the commit counts; a cancelled one (superseded by a newer commit) does not, and
 # when all of them were, the newest commit of the branch, which holds the change, is followed instead.
 # A repository with no workflow that runs on a push gets NO CI at once, without waiting: the work ends with the
-# merge, as with GREEN.
+# merge, as with GREEN. With --wait, so does a merge commit with no run 5 minutes after the merge, whatever the
+# workflow files say (a push trigger whose filters leave this push out): none will start.
 # While GitHub has not marked a merge that landed (merge.sh says so), the merge commit is the branch's commit
 # whose second parent is the pull request's head. A squash or a rebase leaves none: not merged, until GitHub
 # marks it.
@@ -38,8 +39,19 @@ fi
 }
 
 short=${sha%"${sha#???????}"}
+merge=$sha
+# merged: when the merge landed, in seconds: GitHub's mergedAt, or, for a merge it has not marked, the merge
+# commit's own date; now when neither can be read, so the 5 minutes never start before the merge.
+merged=$(gh pr view "$pr" --json mergedAt --jq '.mergedAt // empty | fromdate' 2>/dev/null || true)
+[ -n "$merged" ] || merged=$(git log -1 --format=%ct "$sha" 2>/dev/null || true)
+case "$merged" in "" | *[!0-9]*) merged=$(date +%s) ;; esac
 
-runs() { gh run list --commit "$sha" --limit 50 --json status,conclusion,workflowName,url 2>/dev/null || echo '[]'; }
+# runs: the runs of the commit followed; [] and a failure when they cannot be read.
+runs() {
+	gh run list --commit "$sha" --limit 50 --json status,conclusion,workflowName,url 2>/dev/null && return 0
+	echo '[]'
+	return 1
+}
 # push_workflow: whether an active workflow file of the repository (.github/workflows/*) runs on a push: its
 # on: on the branch has a push trigger, whatever its filters (push-trigger.py). GitHub's dynamic
 # workflows (Pages build, CodeQL default setup, Dependabot, Copilot) have no file and do not count. A read
@@ -82,7 +94,8 @@ if [ "${2:-}" = --wait ]; then
 	minutes=${MAIN_CI_WAIT:-45}
 	end=$(($(date +%s) + minutes * 60))
 	while [ "$(date +%s)" -lt "$end" ]; do
-		list=$(runs)
+		seen=yes
+		list=$(runs) || seen=""
 		if superseded "$list"; then
 			sha=$(git ls-remote origin "refs/heads/$base" | cut -f1)
 			pause
@@ -92,11 +105,17 @@ if [ "${2:-}" = --wait ]; then
 		pending=$(printf '%s' "$list" | jq '[.[] | select(.status != "completed")] | length')
 		# Runs may take a moment to appear after a merge; once a minute, to spare the API.
 		[ "$total" -gt 0 ] && [ "$pending" -eq 0 ] && break
+		# No run of the merge commit 5 minutes after the merge: none will start. Runs that cannot be read are not
+		# known to be none, and a newer commit followed is no longer the merge commit: it waits for them.
+		if [ -n "$seen" ] && [ "$total" -eq 0 ] && [ "$sha" = "$merge" ] && [ "$(date +%s)" -ge $((merged + 300)) ]; then
+			echo "NO CI $base $short: no workflow run started for this merge"
+			exit 0
+		fi
 		pause
 	done
 fi
 
-list=$(runs)
+list=$(runs) || true
 short=${sha%"${sha#???????}"}
 failed=$(printf '%s' "$list" | jq -r '[.[] | select(.status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure", "action_required")))]')
 if [ "$(printf '%s' "$failed" | jq length)" -gt 0 ]; then

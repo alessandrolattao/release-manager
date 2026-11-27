@@ -66,6 +66,8 @@ minutes=${2:-60}
 # shellcheck source=scripts/launch.sh
 . "$here/launch.sh"
 base=$(base_branch)
+# The spike reads the default branch from the repository's remote: with none, it is not started.
+remote=$(repo_remote) || exit 1
 
 question=$(cat)
 [ -n "$question" ] || {
@@ -81,7 +83,8 @@ slug=$(printf '%s' "$topic" | tr -cs 'A-Za-z0-9' '-' | sed 's/^-//; s/-$//' | cu
 report="$dir/$(date +%Y%m%dT%H%M%S)-${slug:-spike}.md"
 
 brief=$(sed -e "s|{{REPO}}|$repo_full|g" -e "s|{{TECH_LEAD}}|$(address_of "${CLAUDE_CODE_SESSION_ID:-}")|g" \
-	-e "s|{{REPORT}}|$report|g" -e "s|{{BASE}}|$base|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/spike.md")
+	-e "s|{{REPORT}}|$report|g" -e "s|{{BASE}}|$base|g" -e "s|{{REMOTE}}|$remote|g" -e "s|{{SCRIPTS}}|$here|g" \
+	"$here/../briefs/spike.md")
 brief="$brief
 
 $question"

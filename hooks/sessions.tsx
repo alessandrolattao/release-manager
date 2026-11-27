@@ -18,9 +18,10 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     `role`: at session start, or at the first tick that finds the one role.sh wrote. scripts/update.sh
 //     waits for it to reach the newest version installed.
 //   - between turns, when a newer version of the plugin is installed on the session's account than the one
-//     it runs, it reloads the plugin in place (/reload-plugins), once per version; the new version's module
-//     then has the session read its role's rules again. A reload that fails restarts the session instead
-//     (scripts/update.sh restart).
+//     it runs, it reloads the plugin in place (/reload-plugins), once per version, and does nothing more
+//     between those turns; the new version's module then has the session read its role's rules again, and
+//     wakes it. A reload that fails restarts the session instead (scripts/update.sh restart). A session that
+//     holds the main checkout reloads once it has given it back; a done session neither reloads nor restarts.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -193,9 +194,12 @@ async function readStatus($: EngineInterface, folder: string): Promise<Status> {
   }
 }
 
-// Changes the session's own state the way scripts/session-dir.sh state_set does.
+// Changes the session's own state the way scripts/session-dir.sh state_set does: a done session stays done.
 async function setState($: EngineInterface, folder: string, state: string, detail: string): Promise<void> {
   const status = await readStatus($, folder)
+  if (status.state === 'done' && state !== 'done') {
+    return
+  }
   const now = Math.floor((await $.clock.now()) / 1000)
   if (status.state !== state || status.detail !== detail) {
     status.since = now
@@ -611,14 +615,15 @@ async function gitOf($: EngineInterface, cwd: string, args: string[]): Promise<s
   }
 }
 
-// The branch's work, local and read at every refresh: the commits ahead of the default branch, and the
-// files and lines changed since the two parted. Null when git cannot tell.
-async function workOf($: EngineInterface, cwd: string, base: string): Promise<DevWork | null> {
-  if (base === '') {
+// The branch's work, local and read at every refresh: the commits ahead of the default branch as the
+// repository's remote has it (the `remote` the scripts write, repo.sh), and the files and lines changed since
+// the two parted. Null when git cannot tell, or the remote or the default branch is not known yet.
+async function workOf($: EngineInterface, cwd: string, remote: string, base: string): Promise<DevWork | null> {
+  if (remote === '' || base === '') {
     return null
   }
-  const commits = await gitOf($, cwd, ['rev-list', '--count', `origin/${base}..HEAD`])
-  const stat = await gitOf($, cwd, ['diff', '--shortstat', `origin/${base}...HEAD`])
+  const commits = await gitOf($, cwd, ['rev-list', '--count', `${remote}/${base}..HEAD`])
+  const stat = await gitOf($, cwd, ['diff', '--shortstat', `${remote}/${base}...HEAD`])
   if (commits === null || stat === null) {
     return null
   }
@@ -761,7 +766,7 @@ async function refreshDev($: EngineInterface, folder: string, status: Status, no
   if (repo !== '' && status.issue !== undefined && now - github.at >= GITHUB_EVERY_S) {
     void readGithub($, folder, cwd, repo, status.issue, branch, now)
   }
-  const work = await workOf($, cwd, await readText($, `${dir}/base`))
+  const work = await workOf($, cwd, await readText($, `${dir}/remote`), await readText($, `${dir}/base`))
   const checkout = await checkoutOf($, dir, await $.session.id())
   const review = await reviewOf($, dir, cwd, status.issue ?? 0, github.qa)
   const ci = await readText($, `${dir}/ci`)
@@ -937,6 +942,15 @@ async function installedOf($: EngineInterface, folder: string): Promise<{ versio
 // The version this module reloaded the session to, or fell back to a restart for: once per version.
 let reloadedTo = ''
 
+// This session holds its repository's main checkout: the lock's first line is its id (scripts/checkout.sh).
+async function holdsCheckout($: EngineInterface, repo: string): Promise<boolean> {
+  if (repo === '') {
+    return false
+  }
+  const lock = await readText($, `${await rootOf($)}/repos/${repo.replace('/', '_')}/checkout`)
+  return lock.split('\n')[0] === (await $.session.id())
+}
+
 // A newer version of the plugin installed on the session's account than the one it runs: the session reloads
 // the plugin in place, once per version, with /reload-plugins (queued by the engine until the session is idle;
 // --force, so a reload that drops the prompt cache is not skipped). A reload that works replaces this module
@@ -944,19 +958,26 @@ let reloadedTo = ''
 // its own version there, has the session read its role's rules again (reloadedPrompt). The call resolves only
 // when the reload did not work (no `Reloaded:` line), or it rejects: then the session restarts instead, as the
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
-// since the restart carries its own prompt.
-async function reloadIfBehind($: EngineInterface, folder: string): Promise<void> {
+// since the restart carries its own prompt. A session that holds its repository's main checkout (holdsCheckout)
+// reloads only once it has given it back: it may be testing there, and a reload restarts the plugins' MCP
+// servers, a browser's signed-in sessions with them. A done session neither reloads nor restarts: its work is
+// over, and the dispatcher removes it. True when it started a reload.
+async function reloadIfBehind($: EngineInterface, folder: string, status: Status): Promise<boolean> {
   const running = await versionOf($)
-  if (running === '') {
-    return
+  if (running === '' || status.state === 'done') {
+    return false
   }
   const installed = await installedOf($, folder)
   if (installed === null || installed.version === reloadedTo || !isNewer(installed.version, running)) {
-    return
+    return false
+  }
+  if (await holdsCheckout($, status.repo ?? '')) {
+    return false
   }
   reloadedTo = installed.version
   await $.fs.write(`${folder}/reloading`, `${installed.version}\n`)
   void reload($, folder, installed.root)
+  return true
 }
 
 async function reload($: EngineInterface, folder: string, root: string): Promise<void> {
@@ -995,7 +1016,7 @@ function reloadedText(root: string, version: string, role: string): string {
 }
 
 // At session start, after a reload to this version (`reloading` names it, reloadIfBehind): the prompt that has
-// the session read its role's rules again, once.
+// the session read its role's rules again, once. A session done meanwhile is told nothing: its work is over.
 async function reloadedPrompt($: EngineInterface, folder: string, role: string): Promise<void> {
   try {
     const version = await versionOf($)
@@ -1003,6 +1024,9 @@ async function reloadedPrompt($: EngineInterface, folder: string, role: string):
       return
     }
     await $.fs.write(`${folder}/reloading`, '')
+    if ((await readStatus($, folder)).state === 'done') {
+      return
+    }
     void $.prompt.submit({ text: reloadedText($.plugin.root, version, role) }).catch(err => $.ui.log(`team: ${String(err)}`))
   } catch (err) {
     $.ui.log(`team: reloaded: ${String(err)}`)
@@ -1071,10 +1095,14 @@ async function tick($: EngineInterface): Promise<void> {
       }
     }
     if (!isBusy) {
-      // A newer version installed on the account: the session reloads it. What fails there never keeps the
-      // session from its wakes and its color.
+      // A newer version installed on the account: the session reloads it, and these turns' work ends here:
+      // the new version's module delivers the wakes and applies the name and the color, so nothing is marked
+      // read by a module whose prompt never goes out. What fails there never keeps the session from its wakes
+      // and its color.
       try {
-        await reloadIfBehind($, folder)
+        if (await reloadIfBehind($, folder, status)) {
+          return
+        }
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }
@@ -1285,7 +1313,7 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
 // ends. A tech lead that asked the user in its own chat waits on the user, who may answer on GitHub too: as a
 // prompt the user types, the user's comment ends that wait. A comment from anyone else leaves the wait: worked
 // for the turn, back to waiting after it. Each `from` is a wake line's as dispatch.sh writes it, "<author> on
-// #<issue>".
+// #<issue>". A done session waits on nobody, whatever comment.sh recorded after done.sh: it stays done.
 async function answered($: EngineInterface, folder: string, role: string, froms: string[], now: number): Promise<void> {
   const status = await readStatus($, folder)
   const isTechLeadAsking = status.state === 'you' && role === 'tech-lead'
@@ -1311,7 +1339,7 @@ async function answered($: EngineInterface, folder: string, role: string, froms:
 // and whatever it waited on is over (markTurn would otherwise put the wait back when the turn ends). A tech
 // lead the user comes back to after a pause hears, in one line of context, that other repositories left
 // messages in its inbox; the messages never enter the conversation here. The plugin's own wakes, the
-// engine's notifications and the scripts' prompts are not the user.
+// engine's notifications and the scripts' prompts are not the user. A done session stays done.
 async function heardUser($: EngineInterface): Promise<string | undefined> {
   const folder = await folderOf($)
   const role = await readText($, `${folder}/role`)
@@ -1320,6 +1348,9 @@ async function heardUser($: EngineInterface): Promise<string | undefined> {
   }
   const now = Math.floor((await $.clock.now()) / 1000)
   const status = await readStatus($, folder)
+  if (status.state === 'done') {
+    return undefined
+  }
   if (status.state !== 'working' || status.detail !== 'with you') {
     status.since = now
   }

@@ -27,4 +27,5 @@ if [ "${3:-}" = --for ]; then
 	minutes=${4:?minutes}
 	status_set "$id" --argjson u "$(($(date +%s) + minutes * 60))" '.busy_until = $u'
 fi
-echo "state: $state"
+# The state it is in now: a done session stays done (session-dir.sh state_set).
+echo "state: $(jq -r '.state // ""' "$sessions_dir/$id/status")"

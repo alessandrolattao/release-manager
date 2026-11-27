@@ -366,7 +366,10 @@ ci_file="$repo_dir/ci"
 if [ -n "$(find "$ci_file" -mmin -5 2>/dev/null)" ]; then
 	ci=$(cat "$ci_file")
 else
-	sha=$(git ls-remote origin "refs/heads/$base" 2>/dev/null | cut -f1)
+	# Through the repository's remote; with none, as a read that failed.
+	sha=""
+	remote=$(repo_remote 2>/dev/null) || remote=""
+	[ -z "$remote" ] || sha=$(git ls-remote "$remote" "refs/heads/$base" 2>/dev/null | cut -f1)
 	ci=$(gh run list --branch "$base" --commit "$sha" --limit 50 --json status,conclusion 2>/dev/null |
 		jq -r 'if length == 0 then "no runs" elif any(.[]; .status == "completed" and (.conclusion | IN("failure", "timed_out", "startup_failure"))) then "red"
 			elif any(.[]; .status != "completed") then "running" else "green" end' 2>/dev/null || echo "?")

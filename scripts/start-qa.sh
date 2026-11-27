@@ -12,6 +12,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/repo.sh"
 # shellcheck source=scripts/launch.sh
 . "$here/launch.sh"
+# The QA agent reads the branch from the repository's remote: with none, nobody is started.
+remote=$(repo_remote) || exit 1
 
 for other in $(sessions_of qa "$issue"); do
 	if alive "$other" && [ "$(jq -r .state "$sessions_dir/$other/status")" != done ]; then
@@ -26,7 +28,7 @@ branch=$(cut -f5 "$record" 2>/dev/null || true)
 	exit 1
 }
 brief=$(sed -e "s|{{ISSUE}}|$issue|g" -e "s|{{BRANCH}}|$branch|g" -e "s|{{REPO}}|$repo_full|g" -e "s|{{ROOT}}|$root|g" \
-	-e "s|{{BASE}}|$(base_branch)|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/qa.md")
+	-e "s|{{BASE}}|$(base_branch)|g" -e "s|{{REMOTE}}|$remote|g" -e "s|{{SCRIPTS}}|$here|g" "$here/../briefs/qa.md")
 
 cd "$root"
 name=$(qa_name "$issue" "$(gh issue view "$issue" --json title --jq .title 2>/dev/null || true)" "in progress")

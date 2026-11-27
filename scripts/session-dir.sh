@@ -4,8 +4,9 @@
 #                                asked, blocked, wake, commented, version (what the hooks module and the
 #                                scripts read and write)
 #   $team_state/repos/<key>/     one folder per repository: the checkout lock, the dispatcher's lock and
-#                                cursor, QA and review records, the board, and `seen` (what reached its tech
-#                                leads: hooks/sessions.tsx, mentions.sh)
+#                                cursor, QA and review records, the board, `seen` (what reached its tech
+#                                leads: hooks/sessions.tsx, mentions.sh), and `base` and `remote` (the default
+#                                branch and the git remote of the repository, repo.sh)
 #   $team_data/                  what is kept: the tech leads' notes, spike reports, other repositories' messages
 # The status of a session is one JSON object, written by the scripts and the hooks, never by the model:
 #   {"role", "repo", "name", "issue", "title", "topic", "place", "state", "detail", "since", "branch",
@@ -21,7 +22,7 @@
 # written before.
 # state: working (cyan), others (purple: waits on another agent or the checkout), you (yellow: waits on
 # the user), stuck (red: dead, failing or silent), idle (green: a tech lead waiting for work), done (no
-# color, then the session goes away).
+# color, then the session goes away; final: nothing moves a done session to another state).
 # shellcheck shell=sh disable=SC2034 # the variables are used by the files that source this one
 
 team_state="${XDG_STATE_HOME:-$HOME/.local/state}/team"
@@ -48,9 +49,12 @@ status_set() {
 
 # state_set <session-id> <state> <detail>: the session's state and what it means in a few words; `since`
 # moves only when one of the two changes. Whom it waited on goes: a new wait records its own (comment.sh).
+# Done is final: a done session stays done whatever is set after it (a comment it still writes, a hook), so the
+# dispatcher removes it as done.sh announces.
 state_set() {
 	status_set "$1" --arg s "$2" --arg d "$3" --argjson now "$(date +%s)" \
-		'(if .state == $s and .detail == $d then . else .since = $now end) | .state = $s | .detail = $d | del(.waits_on)'
+		'if .state == "done" and $s != "done" then .
+		else (if .state == $s and .detail == $d then . else .since = $now end) | .state = $s | .detail = $d | del(.waits_on) end'
 }
 
 # commented_on <session-id> <issue> [to]: the session wrote on that issue's thread (an issue and the pull

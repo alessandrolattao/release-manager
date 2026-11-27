@@ -63,6 +63,9 @@ next_id() { n=$(cat "$G/next-id" 2>/dev/null || echo 1); echo $((n + 1)) >"$G/ne
 case "$*" in
 "repo view --json nameWithOwner --jq .nameWithOwner") echo test/repo ;;
 "repo view --json defaultBranchRef --jq .defaultBranchRef.name") echo main ;;
+# The user's permission on the repository: ADMIN, or the one in permission.
+"repo view --json viewerPermission --jq .viewerPermission") cat "$G/permission" 2>/dev/null || echo ADMIN ;;
+"repo view --json url --jq .url") echo https://github.com/test/repo ;;
 "api user --jq .login") echo tester ;;
 "issue view "*" --json title --jq .title") echo "Title $3" ;;
 "issue view "*" --json id --jq .id") echo "I_$3" ;;
@@ -154,6 +157,8 @@ case "$*" in
 	if { [ "$4" = deadbeefcafe ] && [ -f "$G/superseded-50" ]; } || [ -f "$G/cancelled-$4" ]; then
 		echo '[{"status":"completed","conclusion":"cancelled","workflowName":"ci","url":"u0"}]'
 	elif [ "$4" = deadbeefcafe ] || [ "$4" = "$(cat "$G/landed-50" 2>/dev/null)" ]; then cat "$G/runs" 2>/dev/null || echo '[]'; else echo '[]'; fi ;;
+# The board's CI of the default branch: the commit asked about, in ci-commit.
+"run list --branch "*) printf '%s\n' "$6" >"$G/ci-commit"; echo '[]' ;;
 "run list "*) echo '[]' ;;
 "workflow list "*) [ ! -f "$G/workflows-broken" ] || { echo "HTTP 502: Bad Gateway" >&2; exit 1; }; cat "$G/workflows" 2>/dev/null || true ;;
 # A workflow file as the branch it is read on has it: workflow-<id>.yml on main, workflow-<id>-<branch>.yml on another.
@@ -177,6 +182,7 @@ case "$*" in
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
+"issue develop 80 --list") echo "80-fork-thing	https://x" ;;
 # The plugin's own repository, for report.sh. The REST listing has an issue as soon as it is opened, and a
 # pull request among the issues it lists; the search index behind `gh issue list --label` has not seen it yet.
 "api repos/"*"/issues?labels=flow-report&state=open&per_page=100")
@@ -195,7 +201,9 @@ esac
 EOF
 # A fake claude: the agent list comes from a file, stop and rm are recorded. A plugin update installs, on
 # the account it runs on, each version `publish` lists for that account ("<account folder> <version>" per
-# line, the version's files in releases/<version>) and not installed there yet.
+# line, the version's files in releases/<version>) and not installed there yet; each session `reloads` lists
+# for a version it installs ("<session folder> <version>" per line) reloads it at once, as a session between
+# turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -211,12 +219,14 @@ plugin)
 		mkdir -p "$home/plugins/cache/team/team"
 		ln -s "$TT/releases/$version" "$home/plugins/cache/team/team/$version"
 		got=$version
+		while read -r folder at; do [ "$at" != "$version" ] || echo "$at" >"$folder/version"; done <"$TT/reloads"
 	done <"$TT/publish"
 	if [ -n "$got" ]; then echo "Plugin \"team\" updated to $got"; else echo "Plugin \"team\" is already at the latest version"; fi ;;
 *) echo "$*" >>"$TT/claude.log" ;;
 esac
 EOF
 : >"$T/publish"
+: >"$T/reloads"
 # release <version>: the plugin's files as that version publishes them, in releases/<version>.
 release() {
 	mkdir -p "$T/releases/$1/.claude-plugin"
@@ -235,9 +245,11 @@ JSON
 EOF
 chmod +x "$T/bin/gh" "$T/bin/claude" "$T/bin/clessidra"
 
-# A real repository with an origin, a branch for issue 42 and its worktree.
-git init -q --bare -b main "$T/origin.git"
-git clone -q "$T/origin.git" "$T/repo" 2>/dev/null
+# A real repository with an origin, a branch for issue 42 and its worktree. Its URL ends in test/repo, the
+# repository gh resolves.
+mkdir -p "$T/test"
+git init -q --bare -b main "$T/test/repo.git"
+git clone -q "$T/test/repo.git" "$T/repo" 2>/dev/null
 ROOT="$T/repo"
 git -C "$ROOT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$ROOT" push -q origin main
@@ -260,6 +272,13 @@ cd "$ROOT" || exit 1
 sh "$SC/role.sh" "$TL1" tech-lead "" >/dev/null
 date +%s >"$S/$TL1/alive"
 ok "tech lead name" "$(cat "$S/$TL1/name")" "repo · tech lead"
+ok "where the user can write, only its name" "$(sh "$SC/role.sh" "$TL1" tech-lead)" "repo · tech lead"
+echo READ >"$G/permission"
+out=$(sh "$SC/role.sh" "$TL1" tech-lead); code=$?
+ok "where the user can only read, a line says so before the name" "$code | $out" "0 | the user can only read test/repo here, so the plugin's flow cannot run
+repo · tech lead"
+ok "and the tech lead is recorded all the same" "$(st "$TL1" role) $(st "$TL1" repo)" "tech-lead test/repo"
+rm -f "$G/permission"
 out=$(sh "$SC/role.sh" "$TL2" tech-lead)
 ok "a second tech lead for the repository is refused" "$(printf '%s' "$out" | grep -c 'already has a tech lead') $([ -f "$S/$TL2/status" ] && echo registered || echo not-registered)" "1 not-registered"
 cd "$ROOT/.claude/worktrees/42-feature" || exit 1
@@ -524,6 +543,13 @@ DEV60=22222222-0000-0000-0000-000000000060
 before=$(ls "$G/comments" | wc -l)
 (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null)
 ok "a developer with no merged pull request tells nobody" "$(ls "$G/comments" | wc -l)" "$before"
+# Woken after done.sh by a comment written before it, the developer answers the tech lead, without --fyi, and
+# sets its state again: done is final, it stays done and goes as announced.
+echo "Already merged." | (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/comment.sh" 60 "tech lead" >/dev/null)
+last=$(ls -t "$G/comments" | head -1)
+ok "a done developer that writes to the tech lead posts its comment, and stays done" "$(head -1 "$G/comments/$last") $(st "$DEV60" state) $(st "$DEV60" detail)" "**dev #60 → tech lead** done merged"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/status.sh" working "one more look")
+ok "nor does status.sh move it: it says the state it stays in" "$out $(st "$DEV60" state)" "state: done done"
 date +%s >"$S/$DEV60/alive"
 : >"$T/claude.log"
 cat >"$T/agents.json" <<EOF
@@ -730,7 +756,7 @@ merging 50
 out=$(CLAUDE_CODE_SESSION_ID=$DEV sh "$SC/merge.sh" 50 2>&1); code=$?
 ok "it fails and the head is not in the default branch: it fails as today, with gh's error" "$code | $out | $(st "$DEV" detail)" "1 | HTTP 502: Bad Gateway | merging #50"
 # The merge landed all the same: the default branch holds its merge commit, the head as its second parent.
-git clone -q "$T/origin.git" "$T/landed" 2>/dev/null
+git clone -q "$T/test/repo.git" "$T/landed" 2>/dev/null
 git -C "$T/landed" -c user.email=t@t -c user.name=t merge -q --no-ff -m "Merge pull request #50" "$reviewed"
 git -C "$T/landed" push -q origin main
 landed=$(git -C "$T/landed" rev-parse HEAD)
@@ -1023,6 +1049,11 @@ ok "the one started right after keeps its pid file" "$([ -n "$pid" ] && kill -0 
 sh "$SC/dispatcher.sh" stop >/dev/null
 n=0
 while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); done
+echo READ >"$G/permission"
+out=$(sh "$SC/dispatcher.sh" start 2>&1); code=$?
+ok "where the user can only read, a start is refused with the line role.sh prints" "$code | $out" "1 | the user can only read test/repo here, so the plugin's flow cannot run"
+ok "and nothing starts or changes" "$([ -f "$R/dispatcher.pid" ] && echo pid || echo no-pid) $(sh "$SC/dispatcher.sh" status)" "no-pid stopped (by hand)"
+rm -f "$G/permission"
 
 echo "== mentions.sh"
 now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -1562,6 +1593,17 @@ echo 0.5.7 >"$S/$DEV2/version"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 date +%s >"$S/$NEW/alive"
+# A developer that ran done.sh just now (the dispatcher removes it 2 minutes after), alive, between turns for a
+# minute, on a version too old to reload: its work is over, the update leaves it alone.
+DONE61=77777777-0000-0000-0000-000000000061
+mkdir -p "$S/$DONE61"
+echo dev >"$S/$DONE61/role"
+jq -n --argjson now "$(date +%s)" '{role: "dev", repo: "test/repo", name: "repo · dev #61 · in review · Title 61", issue: 61, state: "done", detail: "merged #61", since: $now}' >"$S/$DONE61/status"
+echo "$T/config" >"$S/$DONE61/config"
+echo "$ROOT" >"$S/$DONE61/cwd"
+echo 0.5.7 >"$S/$DONE61/version"
+date +%s >"$S/$DONE61/alive"
+echo $(($(date +%s) - 60)) >"$S/$DONE61/idle"
 sh "$SC/dispatcher.sh" start >/dev/null 2>&1
 old_pid=$(cat "$R/dispatcher.pid")
 : >"$T/claude.log"
@@ -1620,7 +1662,9 @@ ok "with no flags, which would start a copy" "$(grep -- '--resume' "$T/claude.lo
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"
 ok "before any session" "$(grep -e '^dispatcher ' -e ': backgrounded' "$T/update.out" | head -1 | cut -d: -f1)" "dispatcher test_repo"
+ok "a done session is neither stopped nor restarted, and has no line" "$(grep -c -e "--resume $DONE61" -e "^stop ${DONE61%%-*}" "$T/claude.log") $(grep -c 'dev #61' "$T/update.out") $(st "$DONE61" state)" "0 0 done"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+rm -rf "${S:?}/$DONE61"
 
 echo "== update.sh: a second run right after the first restarts nothing"
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
@@ -1671,16 +1715,17 @@ ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "up
 
 echo "== update.sh: a new version on the team's account restarts the dispatcher, and no session"
 # 9.9.11 published on the team's account, where the dispatcher and the sessions run 9.9.9. The two developers
-# reload it by themselves a few seconds in; the tech lead, which started the update, reloads like them but has
-# not when the update stops waiting.
+# reload it by themselves: one as soon as it is installed, before the update looks at the sessions, the other
+# a few seconds in; the tech lead, which started the update, reloads like them but has not when the update
+# stops waiting.
 release 9.9.11
 echo "$T/config 9.9.11" >>"$T/publish"
+echo "$S/$DEV2 9.9.11" >"$T/reloads"
 for id in $TL1 $DEV2 $NEW $ACC; do date +%s >"$S/$id/alive"; done
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 : >"$T/claude.log"
 (
 	sleep 3
-	echo 9.9.11 >"$S/$DEV2/version"
 	echo 9.9.11 >"$S/$NEW/version"
 ) &
 reloader=$!
@@ -1689,7 +1734,7 @@ wait "$reloader"
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "the dispatcher restarts on 9.9.11" "$([ -n "$new_pid" ] && [ "$new_pid" != "$pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out") $(cat "$R/dispatcher.version")" "yes 1 9.9.11"
 ok "no session restarts, the one that started the update neither" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
-ok "each session that reached 9.9.11 has its line" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|')" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44|"
+ok "each session that reached 9.9.11 has its line, the one that reloaded before the update looked at it too" "$(grep ': now on 9.9.11$' "$T/update.out" | cut -d: -f1 | sort | tr '\n' '|') $(grep -c ': already on 9.9.11$' "$T/update.out")" "repo · dev #43 · in progress · Title 43|repo · dev #44 · in review · Title 44| 0"
 ok "the one on another account, already on its newest, is left alone" "$(grep -c '^repo · dev #45 · in progress · Title 45: already on 9.9.10$' "$T/update.out")" "1"
 ok "one still behind when the update stops waiting is reported, last" "$(tail -2 "$T/update.out" | head -1)" "repo · tech lead: still behind after 0 minutes, on 9.9.9"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
@@ -1697,6 +1742,7 @@ sh "$SC/dispatcher.sh" stop >/dev/null
 rm -rf "${S:?}/$ACC" "$T/home/.claude/plugins"
 rm -f "$S/$TL1/version" "$S/$DEV2/version" "$S/$NEW/version" "$T/config/plugins/cache/team/team/9.9.11"
 : >"$T/publish"
+: >"$T/reloads"
 
 echo "== update.sh: started by an older version, the newest one restarts the sessions"
 # An older version, whose restart prompt lacks a sentence of the newer one's.
@@ -1745,6 +1791,142 @@ ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log"
 ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
 rm -f "$S/$DEV2/version"
+
+echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
+# 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds
+# the main checkout, testing there; the other live sessions run 9.9.12 already. It gives the checkout back once
+# the update's first pass has looked at every session (the last one listed has its line).
+release 9.9.12
+echo "$T/config 9.9.12" >>"$T/publish"
+for id in $TL1 $NEW; do echo 9.9.12 >"$S/$id/version"; done
+for id in $TL1 $DEV2 $NEW; do date +%s >"$S/$id/alive"; done
+echo $(($(date +%s) - 60)) >"$S/$DEV2/idle"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null; code=$?
+ok "the developer holds the checkout" "$code $(sed -n 1p "$R/checkout")" "0 $DEV2"
+cd "$ROOT" || exit 1
+: >"$T/claude.log"
+: >"$T/update.out"
+(
+	n=0
+	until grep -q '^repo · dev #44 · [^:]*: [a-z]* on 9.9.12$' "$T/update.out" || [ "$n" -ge 300 ]; do
+		sleep 0.1
+		n=$((n + 1))
+	done
+	grep -c -- "--resume $DEV2 " "$T/claude.log" >"$T/held-restarts"
+	cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+) &
+giver=$!
+UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+wait "$giver"
+ok "while it holds the checkout it does not restart" "$(cat "$T/held-restarts")" "0"
+ok "once it has given it back it restarts, on the new version" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ') $(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.12 " "$T/claude.log")" "$DEV2  1"
+ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+
+echo "== update.sh restart: one still holding the checkout when the update stops waiting is left on its version"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+date +%s >"$S/$DEV2/alive"
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null
+cd "$ROOT" || exit 1
+: >"$T/claude.log"
+out=$(UPDATE_QUIET=0 UPDATE_GONE=1 UPDATE_WAIT=3 sh "$SC/update.sh" restart "$DEV2" --now 2>&1)
+ok "it does not restart" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
+ok "and the log says it still holds the checkout" "$(printf '%s\n' "$out" | tail -1)" "repo · dev #43 · in progress · Title 43: still holds the checkout after 0 minutes, left on its version"
+cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+cd "$ROOT" || exit 1
+rm -f "$S/$TL1/version" "$S/$NEW/version"
+
+echo "== a fork's checkout: the remote of the repository gh resolves, whatever its name"
+cd "$ROOT" || exit 1
+# origin is another repository (the one a fork comes from); test/repo, the one gh resolves, is the remote fork.
+mkdir -p "$T/upstream"
+git init -q --bare -b main "$T/upstream/repo.git"
+git -C "$ROOT" remote set-url origin "$T/upstream/repo.git"
+git -C "$ROOT" fetch -q --prune origin
+git -C "$ROOT" remote add fork "$T/test/repo.git"
+# commit_on <ref>: a new commit on top of the fork's <ref>, pushed there from another clone, so the main
+# checkout knows nothing of it until it fetches.
+commit_on() {
+	c=$(git -C "$T/landed" -c user.email=t@t -c user.name=t commit-tree -p "$1" -m "on the fork" "$1^{tree}")
+	git -C "$T/landed" push -q origin "$c:refs/heads/$2"
+	echo "$c"
+}
+forked=$(commit_on main 80-fork-thing)
+FRK=88888888-0000-0000-0000-000000000080
+cat >"$T/agents.json" <<EOF
+[{"id":"abcd1234","sessionId":"$FRK","name":"repo · dev #80","status":"running","state":"working"}]
+EOF
+out=$(sh "$SC/start-dev.sh" 80 2>&1); code=$?
+ok "start-dev.sh fetches the issue's branch from that remote" "$code $(git -C "$ROOT/.claude/worktrees/80-fork-thing" rev-parse HEAD 2>/dev/null)" "0 $forked"
+ok "and the worktree's branch follows it there" "$(git -C "$ROOT/.claude/worktrees/80-fork-thing" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)" "fork/80-fork-thing"
+date +%s >"$S/$FRK/alive"
+pushed=$(commit_on "$forked" 80-fork-thing)
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take >/dev/null 2>&1; code=$?
+ok "checkout.sh take puts the main checkout on the branch as that remote has it" "$code $(git -C "$ROOT" rev-parse HEAD)" "0 $pushed"
+newmain=$(git -C "$T/landed" rev-parse main)
+newmain=$(commit_on "$newmain" main)
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" give >/dev/null 2>&1; code=$?
+ok "and give pulls the default branch from it" "$code $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(git -C "$ROOT" rev-parse HEAD)" "0 main $newmain"
+cd "$ROOT" || exit 1
+touch "$G/unmarked-50"
+echo "$landed" >"$G/landed-50"
+echo '[{"id":1,"name":"ci","path":".github/workflows/ci.yml","state":"active"}]' >"$G/workflows"
+echo '[{"status":"completed","conclusion":"success","workflowName":"ci","url":"u1"}]' >"$G/runs"
+ok "main-ci.sh finds a merge GitHub has not marked in the default branch as that remote has it" "$(sh "$SC/main-ci.sh" 50 | cut -c1-21)" "GREEN main ${landed%"${landed#???????}"}: t"
+ok "the remote's name is written for the hooks module" "$(cat "$R/remote")" "fork"
+rm -f "$R/ci" "$G/ci-commit"
+sh "$SC/dispatch.sh" >/dev/null 2>&1
+ok "the board's CI is the default branch's newest commit on that remote" "$(cat "$G/ci-commit" 2>/dev/null)" "$newmain"
+# The code review and the QA find the branch pushed there, and their briefs read it from there.
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/review.sh" request 80 >/dev/null 2>&1; code=$?
+ok "review.sh request finds the branch's head on that remote" "$code $(cut -f1,2 "$R/review/80")" "0 requested${tab}$pushed"
+cd "$ROOT" || exit 1
+REV=99999999-0000-0000-0000-000000000080
+echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$REV\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
+: >"$T/claude.log"
+sh "$SC/start-review.sh" 80 >/dev/null 2>&1; code=$?
+ok "the reviewer's brief reads the change from that remote" "$code $(grep -cF "git fetch -q fork main 80-fork-thing\`, then \`git diff fork/main...$pushed\`" "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "0 1 0"
+CLAUDE_CODE_SESSION_ID=$REV sh "$SC/review.sh" pass 80 "reads the fork" >/dev/null
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/qa.sh" request 80 >/dev/null 2>&1; code=$?
+ok "qa.sh request too" "$code $(cut -f1,2 "$R/qa/80")" "0 requested${tab}$pushed"
+cd "$ROOT" || exit 1
+QAF=77777777-0000-0000-0000-000000000080
+echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$QAF\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
+: >"$T/claude.log"
+sh "$SC/start-qa.sh" 80 >/dev/null 2>&1; code=$?
+ok "and the QA agent's brief" "$code $(grep -cF 'git fetch -q fork main 80-fork-thing`, then `git diff fork/main...fork/80-fork-thing`' "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "0 1 0"
+echo '[{"id":"abcd1234","sessionId":"abcd1234-0000-0000-0000-000000000002","status":"running","state":"working"}]' >"$T/agents.json"
+: >"$T/claude.log"
+echo "Da dove si legge?" | CLAUDE_CODE_SESSION_ID=$TL1 sh "$SC/spike.sh" "fork remote" 1 >/dev/null 2>&1 &
+spk=$!
+n=0
+while ! grep -q -- '--bg' "$T/claude.log" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.5; n=$((n + 1)); done
+kill "$spk" 2>/dev/null
+spk=""
+ok "and a spike's brief" "$(grep -cF 'First run `git fetch -q fork main`, so `fork/main` is' "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "1 0"
+# No remote points to test/repo any more.
+git -C "$ROOT" remote remove fork
+missing="no git remote of $ROOT points to test/repo, the repository gh works on here: add it with git -C $ROOT remote add test https://github.com/test/repo.git, then run this again"
+before=$(ls "$G/comments" | wc -l)
+out=$(sh "$SC/start-dev.sh" 81 2>&1); code=$?
+ok "with no remote on it, start-dev.sh stops, saying which repository and how to add the remote" "$code | $out" "1 | $missing"
+ok "before claiming the issue" "$(ls "$G/comments" | grep -c '^81\.') $(ls "$G/comments" | wc -l)" "0 $before"
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take 2>&1); code=$?
+ok "checkout.sh take stops too, before holding the checkout" "$code $(held) | $out" "1 free | $missing"
+cd "$ROOT" || exit 1
+out=$(sh "$SC/main-ci.sh" 50 2>&1); code=$?
+ok "and main-ci.sh" "$code | $out" "1 | $missing"
+cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/review.sh" request 80 2>&1); code=$?
+ok "and review.sh request" "$code | $out" "1 | $missing"
+cd "$ROOT" || exit 1
+ok "and the hooks module's remote is gone" "$([ -f "$R/remote" ] && echo kept || echo gone)" "gone"
+rm -f "$G/unmarked-50" "$G/landed-50" "$G/workflows" "$G/runs"
+git -C "$ROOT" remote set-url origin "$T/test/repo.git"
 
 echo "== no write through GitHub's GraphQL API where REST has an endpoint"
 ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"

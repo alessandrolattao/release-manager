@@ -1835,6 +1835,27 @@ ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "-
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
 rm -f "$S/$DEV2/version"
 
+echo "== dispatcher.sh: a newer version installed on its account takes over"
+cd "$ROOT" || exit 1
+# 0.0.1 and 9.9.9 installed on the team's account. One started from 0.0.1, as by a session still on it while an
+# update runs, goes on with 9.9.9 at its first cycle; 9.9.9, the newest, keeps running.
+: >"$R/dispatcher.log"
+rm -f "$R/board.json"
+out=$(sh "$CACHE/0.0.1/scripts/dispatcher.sh" start 2>&1)
+code=$?
+pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
+ok "started from 0.0.1, it runs 9.9.9's loop from its first cycle" "$code $out | $(ps -o args= -p "$pid" 2>/dev/null)" "0 the dispatcher of test/repo runs on this machine (pid $pid, team 9.9.9) | sh $CACHE/9.9.9/scripts/dispatcher.sh run"
+ok "its log says so, once" "$(grep -c ' now on team 9.9.9$' "$R/dispatcher.log") $(grep -c 'now on team' "$R/dispatcher.log")" "1 1"
+ok "and 0.0.1's has left" "$(pgrep -fc "$CACHE/0.0.1/scripts/dispatcher.sh run")" "0"
+n=0
+while [ ! -f "$R/board.json" ] && [ "$n" -lt 30 ]; do sleep 1; n=$((n + 1)); done
+ok "with no newer version, it keeps running after its cycle" "$([ -f "$R/board.json" ] && echo yes || echo no) $(cat "$R/dispatcher.pid" 2>/dev/null) $(kill -0 "$pid" 2>/dev/null && echo alive || echo gone) $(grep -c 'now on team' "$R/dispatcher.log")" "yes $pid alive 1"
+sh "$SC/dispatcher.sh" stop >/dev/null
+# A stop by hand as an older one hands over: the newer one it started leaves at once.
+timeout 20 sh "$CACHE/9.9.9/scripts/dispatcher.sh" run >>"$R/dispatcher.log" 2>&1 </dev/null
+code=$?
+ok "a stopped dispatcher stays stopped" "$code $(pgrep -fc "$CACHE/9.9.9/scripts/dispatcher.sh run") $(sh "$SC/dispatcher.sh" status)" "0 0 stopped (by hand)"
+
 echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
 # 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds
 # the main checkout, testing there; the other live sessions run 9.9.12 already. It gives the checkout back once

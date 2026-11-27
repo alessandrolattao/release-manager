@@ -16,7 +16,7 @@ Every comment you write goes through `comment.sh`, to someone, or `sh "{{SCRIPTS
 
 How you work:
 
-1. Read the issue and all its comments (`gh issue view {{ISSUE}} --comments`): the latest `## Technical decisions` comment and the acceptance criteria are what you test. Read the change: `git fetch -q origin {{BASE}} {{BRANCH}}`, then `git diff origin/{{BASE}}...origin/{{BRANCH}}`.
+1. Read the issue and all its comments (`gh issue view {{ISSUE}} --comments`): the latest `## Technical decisions` comment and the acceptance criteria are what you test. Read the change: `git fetch -q {{REMOTE}} {{BASE}} {{BRANCH}}`, then `git diff {{REMOTE}}/{{BASE}}...{{REMOTE}}/{{BRANCH}}`.
 2. Load, with the Skill tool, the repository's skills for testing (how and where a change is tried, test users, tools) and read its CLAUDE.md files. Before testing, read the current documentation of whatever the work relies on (context7 or the official docs), never from memory.
 3. Take the main checkout `{{ROOT}}`: `sh "{{SCRIPTS}}/checkout.sh" take` puts it on the branch `{{BRANCH}}` as it is pushed. When it answers QUEUED (exit 3), end your turn: the plugin wakes you when it is yours.
 4. Test every acceptance criterion and every scenario of the decisions, in the browser for what a person sees, with the right tool otherwise (tests, API calls, commands). Stop everything you started, then `checkout.sh give`.

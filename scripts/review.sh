@@ -20,17 +20,19 @@ here=$(cd "$(dirname "$0")" && pwd)
 me=${CLAUDE_CODE_SESSION_ID:-}
 record="$repo_dir/review/$issue"
 mkdir -p "$repo_dir/review"
-# pushed <branch>: the head of the branch on origin, what the reviewer reads; empty when it is not pushed.
-pushed() { git ls-remote origin "refs/heads/$1" 2>/dev/null | cut -f1; }
+# pushed <branch>: the head of the branch on the repository's remote ($remote, repo_remote), what the reviewer
+# reads; empty when it is not pushed.
+pushed() { git ls-remote "$remote" "refs/heads/$1" 2>/dev/null | cut -f1; }
 
 case "$action" in
 request)
+	remote=$(repo_remote) || exit 1
 	# The developer's branch: its session's, else the one checked out here.
 	branch=$(jq -r '.branch // empty' "$sessions_dir/$me/status" 2>/dev/null || true)
 	[ -n "$branch" ] || branch=$(git rev-parse --abbrev-ref HEAD)
 	head=$(pushed "$branch")
 	[ -n "$head" ] || {
-		echo "$branch is not on origin: push it, then ask for the code review" >&2
+		echo "$branch is not on $remote: push it, then ask for the code review" >&2
 		exit 1
 	}
 	# One round at a time: a reviewer at work would record its pass over this request.

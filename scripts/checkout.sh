@@ -26,6 +26,12 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=scripts/repo.sh
 . "$here/repo.sh"
 me=${CLAUDE_CODE_SESSION_ID:-}
+# A take of a branch fetches it, a give pulls the default branch, from the repository's remote: with none,
+# they stop before the lock, the queue or the checkout change.
+case "$action" in
+take) [ -n "$as_is" ] || remote=$(repo_remote) || exit 1 ;;
+give) remote=$(repo_remote) || exit 1 ;;
+esac
 lock="$repo_dir/checkout"
 queue="$repo_dir/checkout.queue"
 mutex="$repo_dir/checkout.mutex"
@@ -131,7 +137,7 @@ take)
 		exit 1
 	fi
 	if [ -z "$as_is" ]; then
-		git -C "$root" fetch -q origin "$branch"
+		git -C "$root" fetch -q "$remote" "$branch"
 		git -C "$root" switch -q --detach FETCH_HEAD
 	else
 		# As it is: what is checked out there stays, and the lock says so on its fourth line.
@@ -164,7 +170,7 @@ give)
 	fi
 	base=$(base_branch)
 	git -C "$root" switch -q "$base"
-	git -C "$root" pull -q --ff-only origin "$base" || true
+	git -C "$root" pull -q --ff-only "$remote" "$base" || true
 	rm -f "$lock"
 	cwd=$(cat "$sessions_dir/$me/cwd" 2>/dev/null || true)
 	if is_worktree "$cwd"; then

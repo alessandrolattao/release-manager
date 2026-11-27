@@ -47,6 +47,8 @@ function seeded(on: On, extra: Record<string, string> = {}): Map<string, string>
       }),
       'sessions/other-1/status': JSON.stringify({ role: 'dev', repo: 'acme/shop', issue: 7, state: 'working' }),
       'repos/acme_shop/base': 'main',
+      // The repository's remote, as repo.sh found it: not origin, in a fork's checkout.
+      'repos/acme_shop/remote': 'fork',
       'repos/acme_shop/ci': 'green',
       'repos/acme_shop/checkout': `other-1\n${NOW / 1000 - 600}\n7-search\n`,
       'repos/acme_shop/checkout.queue': 'qa-9\nabc-123\n',
@@ -100,10 +102,10 @@ function engine(on: On, github: (argv: readonly string[]) => string = () => '', 
     if (e.init?.cwd !== WORKTREE) {
       return { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
     }
-    if (line === 'git rev-list --count origin/main..HEAD') {
+    if (line === 'git rev-list --count fork/main..HEAD') {
       return answer('3\n')
     }
-    if (line === 'git diff --shortstat origin/main...HEAD') {
+    if (line === 'git diff --shortstat fork/main...HEAD') {
       return answer(' 4 files changed, 120 insertions(+), 15 deletions(-)\n')
     }
     if (line === 'git rev-parse HEAD') {
@@ -164,6 +166,20 @@ test("a developer's pane shows its issue, status, branch, pull request, work and
   expect((await ui.find({ type: 'Text', text: /║ main CI/ }))?.text).toMatch(/║ main CI +green +║▓$/)
   expect((await ui.find({ type: 'Text', text: /║ model/ }))?.text).toMatch(/║ model +Opus 5\.5 +║▓$/)
   expect((await ui.find({ type: 'Text', text: /team 9\.9\.9/ }))?.text.trim()).toBe('team 9.9.9')
+  await ui.unmount()
+})
+
+test("the work is unknown until a script has found the repository's remote", async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const files = seeded(on, { 'sessions/abc-123/github': JSON.stringify({ at: NOW / 1000 - 60, status: 'In review', qa: true, pr: PR }) })
+  files.delete('repos/acme_shop/remote')
+  engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^WORK / }))?.text).toBe('WORK    ?')
   await ui.unmount()
 })
 

@@ -522,6 +522,13 @@ DEV60=22222222-0000-0000-0000-000000000060
 before=$(ls "$G/comments" | wc -l)
 (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null)
 ok "a developer with no merged pull request tells nobody" "$(ls "$G/comments" | wc -l)" "$before"
+# Woken after done.sh by a comment written before it, the developer answers the tech lead, without --fyi, and
+# sets its state again: done is final, it stays done and goes as announced.
+echo "Already merged." | (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/comment.sh" 60 "tech lead" >/dev/null)
+last=$(ls -t "$G/comments" | head -1)
+ok "a done developer that writes to the tech lead posts its comment, and stays done" "$(head -1 "$G/comments/$last") $(st "$DEV60" state) $(st "$DEV60" detail)" "**dev #60 → tech lead** done merged"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/status.sh" working "one more look")
+ok "nor does status.sh move it: it says the state it stays in" "$out $(st "$DEV60" state)" "state: done done"
 date +%s >"$S/$DEV60/alive"
 : >"$T/claude.log"
 cat >"$T/agents.json" <<EOF

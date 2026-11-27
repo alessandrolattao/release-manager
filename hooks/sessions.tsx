@@ -194,9 +194,12 @@ async function readStatus($: EngineInterface, folder: string): Promise<Status> {
   }
 }
 
-// Changes the session's own state the way scripts/session-dir.sh state_set does.
+// Changes the session's own state the way scripts/session-dir.sh state_set does: a done session stays done.
 async function setState($: EngineInterface, folder: string, state: string, detail: string): Promise<void> {
   const status = await readStatus($, folder)
+  if (status.state === 'done' && state !== 'done') {
+    return
+  }
   const now = Math.floor((await $.clock.now()) / 1000)
   if (status.state !== state || status.detail !== detail) {
     status.since = now
@@ -1295,7 +1298,7 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
 // ends. A tech lead that asked the user in its own chat waits on the user, who may answer on GitHub too: as a
 // prompt the user types, the user's comment ends that wait. A comment from anyone else leaves the wait: worked
 // for the turn, back to waiting after it. Each `from` is a wake line's as dispatch.sh writes it, "<author> on
-// #<issue>".
+// #<issue>". A done session waits on nobody, whatever comment.sh recorded after done.sh: it stays done.
 async function answered($: EngineInterface, folder: string, role: string, froms: string[], now: number): Promise<void> {
   const status = await readStatus($, folder)
   const isTechLeadAsking = status.state === 'you' && role === 'tech-lead'
@@ -1321,7 +1324,7 @@ async function answered($: EngineInterface, folder: string, role: string, froms:
 // and whatever it waited on is over (markTurn would otherwise put the wait back when the turn ends). A tech
 // lead the user comes back to after a pause hears, in one line of context, that other repositories left
 // messages in its inbox; the messages never enter the conversation here. The plugin's own wakes, the
-// engine's notifications and the scripts' prompts are not the user.
+// engine's notifications and the scripts' prompts are not the user. A done session stays done.
 async function heardUser($: EngineInterface): Promise<string | undefined> {
   const folder = await folderOf($)
   const role = await readText($, `${folder}/role`)
@@ -1330,6 +1333,9 @@ async function heardUser($: EngineInterface): Promise<string | undefined> {
   }
   const now = Math.floor((await $.clock.now()) / 1000)
   const status = await readStatus($, folder)
+  if (status.state === 'done') {
+    return undefined
+  }
   if (status.state !== 'working' || status.detail !== 'with you') {
     status.since = now
   }

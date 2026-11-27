@@ -182,6 +182,7 @@ case "$*" in
 	*) cat "$G/queue" 2>/dev/null ;;
 	esac ;;
 "issue develop 44 --list") echo "44-new-thing	https://x" ;;
+"issue develop 66 --list") echo "66-older	https://x" ;;
 "issue develop 80 --list") echo "80-fork-thing	https://x" ;;
 # The plugin's own repository, for report.sh. The REST listing has an issue as soon as it is opened, and a
 # pull request among the issues it lists; the search index behind `gh issue list --label` has not seen it yet.
@@ -199,15 +200,19 @@ case "$*" in
 *) echo "gh stub: unhandled: $*" >>"$G/unhandled"; exit 1 ;;
 esac
 EOF
-# A fake claude: the agent list comes from a file, stop and rm are recorded. A plugin update installs, on
-# the account it runs on, each version `publish` lists for that account ("<account folder> <version>" per
-# line, the version's files in releases/<version>) and not installed there yet; each session `reloads` lists
-# for a version it installs ("<session folder> <version>" per line) reloads it at once, as a session between
-# turns does (hooks/sessions.tsx): its `version` reaches it.
+# A fake claude: the agent list comes from a file, stop and rm are recorded. With --cwd <folder> it lists only the
+# sessions started under that folder, as claude does; one with no cwd started in the main checkout. A plugin
+# update installs, on the account it runs on, each version `publish` lists for that account ("<account folder>
+# <version>" per line, the version's files in releases/<version>) and not installed there yet; each session
+# `reloads` lists for a version it installs ("<session folder> <version>" per line) reloads it at once, as a
+# session between turns does (hooks/sessions.tsx): its `version` reaches it.
 cat >"$T/bin/claude" <<'EOF'
 #!/bin/sh
 case "$1" in
-agents) cat "$TT/agents.json" 2>/dev/null || echo '[]' ;;
+agents)
+	under=$(prev=""; for a in "$@"; do [ "$prev" != --cwd ] || printf '%s' "$a"; prev=$a; done)
+	{ cat "$TT/agents.json" 2>/dev/null || echo '[]'; } | jq --arg u "$under" --arg root "$TT/repo" \
+		'[.[] | (.cwd // $root) as $c | select($u == "" or $c == $u or ($c | startswith($u + "/")))]' ;;
 --bg) echo "$*" >>"$TT/claude.log"; echo "backgrounded · abcd1234 · started" ;;
 plugin)
 	echo "$*" >>"$TT/claude.log"
@@ -246,11 +251,13 @@ EOF
 chmod +x "$T/bin/gh" "$T/bin/claude" "$T/bin/clessidra"
 
 # A real repository with an origin, a branch for issue 42 and its worktree. Its URL ends in test/repo, the
-# repository gh resolves.
+# repository gh resolves. 42 and 43 have theirs where older developers had them, under the main checkout's
+# .claude/worktrees/; new ones go beside it, in $WT.
 mkdir -p "$T/test"
 git init -q --bare -b main "$T/test/repo.git"
 git clone -q "$T/test/repo.git" "$T/repo" 2>/dev/null
 ROOT="$T/repo"
+WT="$ROOT.worktrees"
 git -C "$ROOT" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$ROOT" push -q origin main
 git -C "$ROOT" branch -q 42-feature
@@ -537,15 +544,17 @@ rm -f "$G/closed-42" "$G/closed-43" "$G/closed-45" "$G/state-broken"
 echo "== dispatch.sh: a developer that ran done.sh goes after 2 minutes, with its worktree and branch"
 git -C "$ROOT" branch -q 60-done
 git -C "$ROOT" push -q origin 60-done
-git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/60-done" 60-done
+# Its worktree is beside the main checkout, where the agent list has it only when asked for that folder.
+git -C "$ROOT" worktree add -q "$WT/60-done" 60-done
 DEV60=22222222-0000-0000-0000-000000000060
-(cd "$ROOT/.claude/worktrees/60-done" && sh "$SC/role.sh" "$DEV60" dev 60 60-done >/dev/null)
+(cd "$WT/60-done" && sh "$SC/role.sh" "$DEV60" dev 60 60-done >/dev/null)
+ok "a developer beside the main checkout: its place is its worktree" "$(st "$DEV60" place)" "worktree 60"
 before=$(ls "$G/comments" | wc -l)
-(cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null)
+(cd "$WT/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null)
 ok "a developer with no merged pull request tells nobody" "$(ls "$G/comments" | wc -l)" "$before"
 # Woken after done.sh by a comment written before it, the developer answers the tech lead, without --fyi, and
 # sets its state again: done is final, it stays done and goes as announced.
-echo "Already merged." | (cd "$ROOT/.claude/worktrees/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/comment.sh" 60 "tech lead" >/dev/null)
+echo "Already merged." | (cd "$WT/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/comment.sh" 60 "tech lead" >/dev/null)
 last=$(ls -t "$G/comments" | head -1)
 ok "a done developer that writes to the tech lead posts its comment, and stays done" "$(head -1 "$G/comments/$last") $(st "$DEV60" state) $(st "$DEV60" detail)" "**dev #60 → tech lead** done merged"
 out=$(CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/status.sh" working "one more look")
@@ -553,14 +562,14 @@ ok "nor does status.sh move it: it says the state it stays in" "$out $(st "$DEV6
 date +%s >"$S/$DEV60/alive"
 : >"$T/claude.log"
 cat >"$T/agents.json" <<EOF
-[{"id":"donejob1","sessionId":"$DEV60","status":"idle","state":"done"},{"id":"deadjob1","sessionId":"$DEV2","status":null,"state":"blocked"}]
+[{"id":"donejob1","sessionId":"$DEV60","cwd":"$WT/60-done","status":"idle","state":"done"},{"id":"deadjob1","sessionId":"$DEV2","status":null,"state":"blocked"}]
 EOF
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "within 2 minutes of done.sh it stays, to end its turn" "$(grep -c 'donejob1' "$T/claude.log") $([ -d "$S/$DEV60" ] && echo yes || echo no)" "0 yes"
 jq ".since = $(($(date +%s) - 121))" "$S/$DEV60/status" >"$S/$DEV60/status.t" && mv "$S/$DEV60/status.t" "$S/$DEV60/status"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "after 2 minutes it is stopped and removed" "$(grep -c -x -e 'stop donejob1' -e 'rm donejob1' "$T/claude.log") $([ -d "$S/$DEV60" ] && echo yes || echo no)" "2 no"
-ok "with its clean worktree and its merged branch" "$([ -d "$ROOT/.claude/worktrees/60-done" ] && echo yes || echo no) $(git -C "$ROOT" branch --list 60-done | wc -l | tr -d ' ')" "no 0"
+ok "with its clean worktree and its merged branch" "$([ -d "$WT/60-done" ] && echo yes || echo no) $(git -C "$ROOT" branch --list 60-done | wc -l | tr -d ' ')" "no 0"
 
 echo "== resume-agents.sh: dead agents come back, stopped ones stay"
 echo true >"$G/issue-open"
@@ -860,7 +869,7 @@ git -C "$ROOT" push -q origin 44-new-thing
 NEW=44444444-0000-0000-0000-000000000044
 echo '{"number":44,"title":"New thing","labels":{"nodes":[{"name":"ready for development"}]},"blockedBy":{"nodes":[]},"issueFieldValues":{"nodes":[]}}' >"$G/queue"
 cat >"$T/agents.json" <<EOF
-[{"id":"abcd1234","sessionId":"$NEW","name":"dev #44 · repo · new-thing","status":"running","state":"working"}]
+[{"id":"abcd1234","sessionId":"$NEW","cwd":"$WT/44-new-thing","name":"dev #44 · repo · new-thing","status":"running","state":"working"}]
 EOF
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "a developer session is launched with its name" "$(grep -c -- '--name repo · dev #44 · in progress · Title 44' "$T/claude.log")" "1"
@@ -868,13 +877,32 @@ ok "on the account's default model, with no subagents" "$(grep -c -- '--bg --mod
 ok "its role is recorded" "$(cat "$S/$NEW/role" 2>/dev/null)" "dev"
 ok "with the time taken just before its launch" "$(st "$NEW" started | grep -c -E '^[0-9]{10}$')" "1"
 ok "in its own worktree" "$(st "$NEW" place)" "worktree 44"
-ok "on the issue's branch" "$(git -C "$ROOT/.claude/worktrees/44-new-thing" rev-parse --abbrev-ref HEAD 2>/dev/null)" "44-new-thing"
+ok "beside the main checkout, on the issue's branch" "$(git -C "$WT/44-new-thing" rev-parse --abbrev-ref HEAD 2>/dev/null)" "44-new-thing"
+ok "the session starts there" "$(cat "$S/$NEW/cwd" 2>/dev/null)" "$WT/44-new-thing"
+ok "nothing of it under the main checkout's tree" "$(find "$ROOT" -path "$ROOT/.git" -prune -o -name '44-new-thing*' -print | wc -l | tr -d ' ')" "0"
 ok "the brief names the issue" "$(grep -c 'You are the developer of issue #44 of test/repo' "$T/claude.log")" "1"
+ok "and that worktree" "$(grep -c "in the worktree \`$WT/44-new-thing\`" "$T/claude.log")" "1"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "the next minute it is not started again" "$(grep -c -- '--name repo · dev #44' "$T/claude.log")" "1"
 CLAUDE_CODE_SESSION_ID=$NEW sh "$SC/issue-status.sh" 44 in_review >/dev/null
 ok "in review: the developer's name says so" "$(cat "$S/$NEW/name") | $(st "$NEW" stage)" "repo · dev #44 · in review · Title 44 | in review"
-ok "developers at work on the board" "$(jq -r '.developers.busy' "$R/board.json")" "2"
+ok "developers at work on the board, the one beside the main checkout too" "$(jq -r '.developers.busy' "$R/board.json")" "2"
+cd "$WT/44-new-thing" || exit 1
+CLAUDE_CODE_SESSION_ID=$NEW sh "$SC/checkout.sh" take >/dev/null
+CLAUDE_CODE_SESSION_ID=$NEW sh "$SC/checkout.sh" give >/dev/null
+ok "given back from beside the main checkout, it is back in its worktree" "$(st "$NEW" place)" "worktree 44"
+cd "$ROOT" || exit 1
+saved_agents=$(cat "$T/agents.json")
+echo true >"$G/issue-open"
+echo 1 >"$S/$NEW/alive"
+: >"$T/claude.log"
+cat >"$T/agents.json" <<EOF
+[{"id":"abcd1234","sessionId":"$NEW","cwd":"$WT/44-new-thing","status":null,"state":"blocked"}]
+EOF
+sh "$SC/resume-agents.sh" >/dev/null 2>&1
+ok "a dead developer beside the main checkout is resumed" "$(grep -c -- "--bg --resume $NEW " "$T/claude.log")" "1"
+rm -f "$G/issue-open" "$S/$NEW/alive"
+printf '%s\n' "$saved_agents" >"$T/agents.json"
 
 echo "== dispatch.sh starts QA once, and QA ends only with an outcome"
 QA=55555555-0000-0000-0000-000000000042
@@ -989,7 +1017,7 @@ ok "a comment for a dead developer waits in its wake file" "$(grep -c 'usa la po
 date +%s >"$S/$NEW/alive"
 date +%s >"$S/$DEV2/alive"
 before=$(grep -c 'checkout is free' "$S/$DEV2/wake")
-cd "$ROOT/.claude/worktrees/44-new-thing" || exit 1
+cd "$WT/44-new-thing" || exit 1
 CLAUDE_CODE_SESSION_ID=$NEW sh "$SC/checkout.sh" take >/dev/null; code=$?
 ok "another developer takes the checkout" "$code" "0"
 cd "$ROOT/.claude/worktrees/43-other" || exit 1
@@ -1004,6 +1032,21 @@ date +%s >"$S/$NEW/alive"
 
 out=$(sh "$SC/start-dev.sh" 44 2>&1); code=$?
 ok "a second developer for an issue is refused" "$code $(printf '%s' "$out" | grep -c 'already has a developer')" "1 1"
+
+echo "== start-dev.sh: an older worktree under the main checkout stays where it is"
+# Issue 66, which no other check uses: start-dev.sh takes it on GitHub (claim.sh), and the take stays.
+git -C "$ROOT" branch -q 66-older
+git -C "$ROOT" push -q origin 66-older
+git -C "$ROOT" worktree add -q "$ROOT/.claude/worktrees/66-older" 66-older
+DEV66=22222222-0000-0000-0000-000000000066
+saved_agents=$(cat "$T/agents.json")
+echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$DEV66\",\"status\":\"running\",\"state\":\"working\"}]" >"$T/agents.json"
+sh "$SC/start-dev.sh" 66 >/dev/null 2>&1; code=$?
+ok "its developer starts in it, and none goes beside" "$code $(cat "$S/$DEV66/cwd" 2>/dev/null) $([ -e "$WT/66-older" ] && echo beside || echo none)" "0 $ROOT/.claude/worktrees/66-older none"
+ok "its place is that worktree" "$(st "$DEV66" place)" "worktree 66"
+printf '%s\n' "$saved_agents" >"$T/agents.json"
+rm -rf "${S:?}/$DEV66"
+git -C "$ROOT" worktree remove --force "$ROOT/.claude/worktrees/66-older"
 
 printf 'pass\t%s\n' "$reviewed" >"$R/qa/42"
 touch "$G/checks-broken"
@@ -1864,11 +1907,11 @@ cat >"$T/agents.json" <<EOF
 [{"id":"abcd1234","sessionId":"$FRK","name":"repo · dev #80","status":"running","state":"working"}]
 EOF
 out=$(sh "$SC/start-dev.sh" 80 2>&1); code=$?
-ok "start-dev.sh fetches the issue's branch from that remote" "$code $(git -C "$ROOT/.claude/worktrees/80-fork-thing" rev-parse HEAD 2>/dev/null)" "0 $forked"
-ok "and the worktree's branch follows it there" "$(git -C "$ROOT/.claude/worktrees/80-fork-thing" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)" "fork/80-fork-thing"
+ok "start-dev.sh fetches the issue's branch from that remote" "$code $(git -C "$WT/80-fork-thing" rev-parse HEAD 2>/dev/null)" "0 $forked"
+ok "and the worktree's branch follows it there" "$(git -C "$WT/80-fork-thing" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)" "fork/80-fork-thing"
 date +%s >"$S/$FRK/alive"
 pushed=$(commit_on "$forked" 80-fork-thing)
-cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+cd "$WT/80-fork-thing" || exit 1
 CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take >/dev/null 2>&1; code=$?
 ok "checkout.sh take puts the main checkout on the branch as that remote has it" "$code $(git -C "$ROOT" rev-parse HEAD)" "0 $pushed"
 newmain=$(git -C "$T/landed" rev-parse main)
@@ -1886,7 +1929,7 @@ rm -f "$R/ci" "$G/ci-commit"
 sh "$SC/dispatch.sh" >/dev/null 2>&1
 ok "the board's CI is the default branch's newest commit on that remote" "$(cat "$G/ci-commit" 2>/dev/null)" "$newmain"
 # The code review and the QA find the branch pushed there, and their briefs read it from there.
-cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+cd "$WT/80-fork-thing" || exit 1
 CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/review.sh" request 80 >/dev/null 2>&1; code=$?
 ok "review.sh request finds the branch's head on that remote" "$code $(cut -f1,2 "$R/review/80")" "0 requested${tab}$pushed"
 cd "$ROOT" || exit 1
@@ -1896,7 +1939,7 @@ echo "[{\"id\":\"abcd1234\",\"sessionId\":\"$REV\",\"status\":\"running\",\"stat
 sh "$SC/start-review.sh" 80 >/dev/null 2>&1; code=$?
 ok "the reviewer's brief reads the change from that remote" "$code $(grep -cF "git fetch -q fork main 80-fork-thing\`, then \`git diff fork/main...$pushed\`" "$T/claude.log") $(grep -c '{{REMOTE}}' "$T/claude.log")" "0 1 0"
 CLAUDE_CODE_SESSION_ID=$REV sh "$SC/review.sh" pass 80 "reads the fork" >/dev/null
-cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+cd "$WT/80-fork-thing" || exit 1
 CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/qa.sh" request 80 >/dev/null 2>&1; code=$?
 ok "qa.sh request too" "$code $(cut -f1,2 "$R/qa/80")" "0 requested${tab}$pushed"
 cd "$ROOT" || exit 1
@@ -1921,13 +1964,13 @@ before=$(ls "$G/comments" | wc -l)
 out=$(sh "$SC/start-dev.sh" 81 2>&1); code=$?
 ok "with no remote on it, start-dev.sh stops, saying which repository and how to add the remote" "$code | $out" "1 | $missing"
 ok "before claiming the issue" "$(ls "$G/comments" | grep -c '^81\.') $(ls "$G/comments" | wc -l)" "0 $before"
-cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+cd "$WT/80-fork-thing" || exit 1
 out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/checkout.sh" take 2>&1); code=$?
 ok "checkout.sh take stops too, before holding the checkout" "$code $(held) | $out" "1 free | $missing"
 cd "$ROOT" || exit 1
 out=$(sh "$SC/main-ci.sh" 50 2>&1); code=$?
 ok "and main-ci.sh" "$code | $out" "1 | $missing"
-cd "$ROOT/.claude/worktrees/80-fork-thing" || exit 1
+cd "$WT/80-fork-thing" || exit 1
 out=$(CLAUDE_CODE_SESSION_ID=$FRK sh "$SC/review.sh" request 80 2>&1); code=$?
 ok "and review.sh request" "$code | $out" "1 | $missing"
 cd "$ROOT" || exit 1

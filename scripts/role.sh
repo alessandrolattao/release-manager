@@ -36,9 +36,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 # "checkout" is only for the session holding the main checkout's lock (checkout.sh); a session that merely
 # runs in the main checkout's folder (a tech lead, a spike, a reviewer, a QA agent before it takes the lock) has none.
 place=""
-case "$(pwd)" in
-"$root/.claude/worktrees/"*) place="worktree $(basename "$(pwd)" | cut -d- -f1)" ;;
-esac
+! is_worktree "$(pwd)" || place="worktree $(basename "$(pwd)" | cut -d- -f1)"
 
 case "$role" in
 tech-lead)

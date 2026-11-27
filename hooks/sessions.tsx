@@ -28,6 +28,9 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //     (tell.sh). A session outside the team runs nothing. In a tech lead it records each comment it delivered
 //     in the repository's `seen`, as scripts/mentions.sh does for each one it lists: a write to the asker
 //     answers a question only once the question has reached the tech lead.
+//   - in a tech lead that holds for the user in its chat, or is busy in a turn, the agents' comments written to
+//     it go into the conversation as a note instead ($.session.append), which the model reads at its next
+//     request: no new turn. One counts as delivered, and `seen`, once a request of the main loop carries it.
 //   - a session whose turn ended on the usage limit is alive and waits: it wakes it once the limit has reset,
 //     at the reset time the dispatcher reads for the board's usage line, once per stop, in every role.
 //   - a prompt the user writes to a team session means working with them, whatever it waited on.
@@ -1112,6 +1115,13 @@ async function tick($: EngineInterface): Promise<void> {
       }
       await apply($, 'name', 'rename', await readText($, `${folder}/name`), nowMs)
       await apply($, 'color', 'color', COLORS[status.state ?? ''] ?? '', nowMs)
+    } else if (role === 'tech-lead') {
+      // In a turn, a tech lead reads what the agents write to it at its next request, as a note.
+      try {
+        await carryInTurn($, folder, status)
+      } catch (err) {
+        $.ui.log(`team: note: ${String(err)}`)
+      }
     }
   } catch (err) {
     $.ui.log(`team: ${String(err)}`)
@@ -1229,23 +1239,9 @@ async function isGone($: EngineInterface, cwd: string, link: string): Promise<bo
   return false
 }
 
-// Wakes the session, between turns, with what was written to it since: a GitHub comment the dispatcher
-// appended to `wake` (one line each: time, from, what, link), the main checkout freed for it, and for a tech
-// lead the messages other repositories left in its inbox. Once the model has been stopped a few seconds; a
-// tech lead whose last message asked the user something in its chat is left alone, the user is talking to
-// it, until the user writes to it on GitHub: that is the user talking too, and every fresh line goes with it.
-// Each comment is checked again as it is delivered: one the session already answered on GitHub (isAnswered),
-// then, asking GitHub, one deleted since (isGone), is delivered without a turn; with nothing left, no wake.
-// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again. A line from
-// the one the session waits on ends that wait before the turn starts (answered). In a tech lead, the links
-// delivered go to the repository's `seen` once the prompt entered (noteSeen).
-async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
-  const idleSince = Number(await readText($, `${folder}/idle`))
-  if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
-    return
-  }
-  const isInChat = role === 'tech-lead' && status.state === 'you' && (status.asked_on ?? null) === null
-  const parts: string[] = []
+// The lines of the session's `wake` no wake has read yet (`wake-read` counts those it read), and how many
+// lines it holds.
+async function unreadOf($: EngineInterface, folder: string): Promise<{ count: number; unread: WakeLine[] }> {
   let wake = ''
   try {
     wake = await $.fs.read(`${folder}/wake`)
@@ -1257,30 +1253,209 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
   if (delivered > lines.length) {
     delivered = 0
   }
-  const fresh: WakeLine[] = lines.slice(delivered).map(line => {
+  const unread = lines.slice(delivered).map(line => {
     const [time = '', from = '', what = '', link = ''] = line.split('\t')
     return { time: Number(time), from, link, text: `${from}: ${what}${link !== '' ? ` (${link})` : ''}` }
+  })
+  return { count: lines.length, unread }
+}
+
+// Those lines' comments a wake checks again as it delivers them, asking GitHub: without the ones deleted since
+// (isGone).
+async function withoutDeleted($: EngineInterface, folder: string, lines: WakeLine[]): Promise<WakeLine[]> {
+  if (!lines.some(line => commentLink(line.link) !== null)) {
+    return lines
+  }
+  const cwd = (await readText($, `${folder}/cwd`)) || (await $.session.cwd())
+  const deleted = await Promise.all(lines.map(line => isGone($, cwd, line.link)))
+  return lines.filter((_, i) => !deleted[i])
+}
+
+// An agent's comment in a tech lead's `wake`, carried in a note, by link: from whom (a wake line's from) and when
+// the main loop's request that carried it started, 0 while it waits for one. One line of the session's `carried`
+// each, <time> <from> <link>, until a wake has read every line of `wake` up to it.
+type Carried = { at: number; from: string; link: string }
+
+async function carriedOf($: EngineInterface, folder: string): Promise<Carried[]> {
+  return (await readText($, `${folder}/carried`))
+    .split('\n')
+    .filter(line => line !== '')
+    .map(line => {
+      const [at = '', from = '', link = ''] = line.split('\t')
+      return { at: Number(at) || 0, from, link }
+    })
+    .filter(note => note.link !== '')
+}
+
+async function writeCarried($: EngineInterface, folder: string, notes: Carried[]): Promise<void> {
+  await $.fs.write(`${folder}/carried`, notes.map(note => `${note.at}\t${note.from}\t${note.link}\n`).join(''))
+}
+
+// `carried` is written between turns and at a request of the turn: one write after the other.
+let carriedLock: Promise<void> = Promise.resolve()
+function withCarried(work: () => Promise<void>): Promise<void> {
+  const run = carriedLock.then(work)
+  carriedLock = run.catch(() => undefined)
+  return run
+}
+
+// The notes appended and not carried by a request yet, in the order appended (read again from `carried` at
+// session start): the next request of the main loop carries them (carriedNow).
+let pending: Carried[] = []
+// The links whose note the engine refused, or failed to append: a wake delivers them, as before notes.
+const refused = new Set<string>()
+
+// A comment of an agent (a developer, a reviewer, a QA agent, a spike, another repository's tech lead), not the
+// user's, whose note the engine did not refuse.
+function isCarriable(line: WakeLine): boolean {
+  const comment = commentOf(line.from)
+  return comment !== null && comment.author !== USER && line.link !== '' && !refused.has(line.link)
+}
+
+// Appends lines a wake has checked (isAnswered, isGone) to a tech lead's conversation as one note, which the
+// model reads at the next request of its main loop, its next turn's first when none runs: who wrote, on which
+// issue, the first line and the link, as a wake says them. They wait in `carried` for that request.
+async function carry($: EngineInterface, folder: string, lines: WakeLine[]): Promise<void> {
+  const fresh = lines.filter(isCarriable)
+  if (fresh.length === 0) {
+    return
+  }
+  await withCarried(async () => {
+    const notes = await carriedOf($, folder)
+    const known = new Set(notes.map(note => note.link))
+    const lines = fresh.filter(line => !known.has(line.link))
+    if (lines.length === 0) {
+      return
+    }
+    const added = lines.map(line => ({ at: 0, from: line.from, link: line.link }))
+    const text = `for you on GitHub: ${lines.map(line => line.text).join('; ')}`
+    let reason: string | undefined
+    try {
+      reason = (await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } })).deny
+    } catch (err) {
+      reason = String(err)
+    }
+    if (reason !== undefined) {
+      $.ui.log(`team: note: ${reason}`)
+      for (const note of added) {
+        refused.add(note.link)
+      }
+      return
+    }
+    // Accepted: the next request of the main loop carries it, so it waits for one from now.
+    pending.push(...added)
+    await writeCarried($, folder, [...notes, ...added])
+  })
+}
+
+// A tech lead busy in a turn: the agents' lines that arrived, not carried yet, are checked as a wake checks
+// them and appended as a note.
+async function carryInTurn($: EngineInterface, folder: string, status: Status): Promise<void> {
+  const repo = status.repo ?? ''
+  const { unread } = await unreadOf($, folder)
+  let lines = unread.filter(line => isCarriable(line) && !gone.has(line.link))
+  if (repo === '' || lines.length === 0) {
+    return
+  }
+  const known = new Set((await carriedOf($, folder)).map(note => note.link))
+  lines = lines.filter(line => !known.has(line.link))
+  if (lines.length === 0) {
+    return
+  }
+  const said = await saidOf($, folder)
+  const seen = await seenOf($, repo)
+  lines = lines.filter(line => !isAnswered(line, said, 'tech-lead', seen))
+  if (lines.length > 0) {
+    await carry($, folder, await withoutDeleted($, folder, lines))
+  }
+}
+
+// A request of the main loop carried the notes appended before it started: their lines have reached the tech
+// lead now, recorded in the repository's `seen`, and a line from the one it waits on ends that wait (answered).
+async function carriedNow($: EngineInterface, notes: Carried[]): Promise<void> {
+  const folder = await folderOf($)
+  const now = Math.floor((await $.clock.now()) / 1000)
+  const links = new Set(notes.map(note => note.link))
+  await withCarried(async () => {
+    const all = await carriedOf($, folder)
+    await writeCarried($, folder, all.map(note => (note.at === 0 && links.has(note.link) ? { ...note, at: now } : note)))
+  })
+  const status = await readStatus($, folder)
+  if (status.repo) {
+    await noteSeen($, status.repo, [...links])
+  }
+  await answered($, folder, 'tech-lead', notes.map(note => note.from), now)
+}
+
+// A wake read every line of `wake`: the notes of the lines it read itself are dropped, as are those a request
+// carried. A note that waits for its request stays.
+async function dropCarried($: EngineInterface, folder: string, read: WakeLine[]): Promise<void> {
+  const links = new Set(read.map(line => line.link))
+  pending = pending.filter(note => !links.has(note.link))
+  await withCarried(async () => {
+    const all = await carriedOf($, folder)
+    await writeCarried($, folder, all.filter(note => note.at === 0 && !links.has(note.link)))
+  })
+}
+
+// Wakes the session, between turns, with what was written to it since: a GitHub comment the dispatcher
+// appended to `wake` (one line each: time, from, what, link), the main checkout freed for it, and for a tech
+// lead the messages other repositories left in its inbox. Once the model has been stopped a few seconds; a
+// tech lead whose last message asked the user something in its chat holds for the user, who is talking to
+// it, until the user writes to it on GitHub: that is the user talking too, and every fresh line goes with it.
+// While it holds, the agents' comments go into its conversation as a note (carry); the rest waits.
+// Each comment is checked again as it is delivered: one the session already answered on GitHub (isAnswered),
+// then, asking GitHub, one deleted since (isGone), is delivered without a turn; with nothing left, no wake.
+// A comment a note carries is not delivered again: one a request carried, and in a tech lead holding for the
+// user one still waiting for its request, which its next turn carries; otherwise that one is delivered too.
+// `wake-read`, beside it, counts the lines delivered, so a restart does not deliver them again. A line from
+// the one the session waits on ends that wait before the turn starts (answered). In a tech lead, the links
+// delivered go to the repository's `seen` once the prompt entered (noteSeen).
+async function wakeUp($: EngineInterface, folder: string, role: string, status: Status, now: number): Promise<void> {
+  const idleSince = Number(await readText($, `${folder}/idle`))
+  if (!(idleSince > 0) || now - idleSince < WAKE_QUIET_S) {
+    return
+  }
+  const isInChat = role === 'tech-lead' && status.state === 'you' && (status.asked_on ?? null) === null
+  const parts: string[] = []
+  const { count, unread: arrived } = await unreadOf($, folder)
+  const notes = role === 'tech-lead' && arrived.length > 0 ? await carriedOf($, folder) : []
+  const noted = new Map(notes.map(note => [note.link, note.at]))
+  const fresh = arrived.filter(line => {
+    const at = noted.get(line.link)
+    return at === undefined || (at === 0 && !isInChat)
   })
   const said = fresh.length > 0 ? await saidOf($, folder) : []
   const repo = role === 'tech-lead' ? (status.repo ?? '') : ''
   const seen = fresh.length > 0 && repo !== '' ? await seenOf($, repo) : new Map<string, number>()
   // First what needs no call to GitHub: the comments answered, and those already found deleted.
   let kept = fresh.filter(line => !isAnswered(line, said, role, seen) && !gone.has(line.link))
-  const hasUser = () => kept.some(line => commentOf(line.from)?.author === USER)
-  if (isInChat && !hasUser()) {
+  const isHolding = () => isInChat && !kept.some(line => commentOf(line.from)?.author === USER)
+  if (isHolding()) {
+    const agents = kept.filter(isCarriable)
+    if (repo !== '' && agents.length > 0) {
+      await carry($, folder, await withoutDeleted($, folder, agents))
+    }
     return
   }
   if (kept.some(line => commentLink(line.link) !== null)) {
-    const cwd = (await readText($, `${folder}/cwd`)) || (await $.session.cwd())
-    const deleted = await Promise.all(kept.map(line => isGone($, cwd, line.link)))
-    kept = kept.filter((_, i) => !deleted[i])
+    kept = await withoutDeleted($, folder, kept)
     // A turn that started while GitHub answered (the user wrote) has the wake wait for its end, checked again.
-    if (isBusy || (isInChat && !hasUser())) {
+    if (isBusy) {
+      return
+    }
+    if (isHolding()) {
+      if (repo !== '') {
+        await carry($, folder, kept)
+      }
       return
     }
   }
-  if (fresh.length > 0) {
-    await $.fs.write(`${folder}/wake-read`, `${lines.length}\n`)
+  if (arrived.length > 0) {
+    await $.fs.write(`${folder}/wake-read`, `${count}\n`)
+    if (notes.length > 0) {
+      await dropCarried($, folder, fresh)
+    }
   }
   if (kept.length > 0) {
     parts.push(`for you on GitHub: ${kept.map(line => line.text).join('; ')}`)
@@ -1312,13 +1487,15 @@ async function wakeUp($: EngineInterface, folder: string, role: string, status: 
 // answered by them, with nothing to put back, so markTurn does not restore the wait when the turn it wakes
 // ends. A tech lead that asked the user in its own chat waits on the user, who may answer on GitHub too: as a
 // prompt the user types, the user's comment ends that wait. A comment from anyone else leaves the wait: worked
-// for the turn, back to waiting after it. Each `from` is a wake line's as dispatch.sh writes it, "<author> on
-// #<issue>". A done session waits on nobody, whatever comment.sh recorded after done.sh: it stays done.
+// for the turn, back to waiting after it. In a turn (a note a request carried, carriedNow), the wait is the one
+// markTurn would put back when the turn ends. Each `from` is a wake line's as dispatch.sh writes it, "<author>
+// on #<issue>". A done session waits on nobody, whatever comment.sh recorded after done.sh: it stays done.
 async function answered($: EngineInterface, folder: string, role: string, froms: string[], now: number): Promise<void> {
   const status = await readStatus($, folder)
-  const isTechLeadAsking = status.state === 'you' && role === 'tech-lead'
+  const wait = status.state === 'working' && status.resume_to !== undefined ? status.resume_to.state : status.state
+  const isTechLeadAsking = wait === 'you' && role === 'tech-lead'
   const isInChat = isTechLeadAsking && (status.asked_on ?? null) === null
-  const isWaiting = status.state === 'others' || (isTechLeadAsking && !isInChat)
+  const isWaiting = wait === 'others' || (isTechLeadAsking && !isInChat)
   const waitsOn = isInChat ? USER : isWaiting ? status.waits_on : undefined
   if (waitsOn === undefined) {
     return
@@ -1462,6 +1639,10 @@ export const register: Register = on => {
       await noteVersion($, folder)
       await reloadedPrompt($, folder, role)
     }
+    // The notes appended before a reload, still waiting for their request.
+    if (role === 'tech-lead') {
+      pending = (await carriedOf($, folder)).filter(note => note.at === 0)
+    }
     await $.command.register({ name: 'team', description: 'Open the team pane: the project, its agents by state, the summary' })
     if (!isBusy) {
       await markTurn($, false)
@@ -1499,10 +1680,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Each request of the main loop to the model carries its effort: the summary shows it after the model.
+  // Each request of the main loop to the model carries its effort: the summary shows it after the model. It
+  // carries the notes appended before it, too.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       void noteEffort($, e.effort)
+      if (pending.length > 0) {
+        const notes = pending.splice(0)
+        void carriedNow($, notes).catch(err => $.ui.log(`team: note: ${String(err)}`))
+      }
     }
     return yield* next(e)
   })

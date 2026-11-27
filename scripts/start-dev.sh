@@ -49,7 +49,10 @@ fi
 	exit 1
 }
 
-worktree="$root/.claude/worktrees/$branch"
+# Its worktree, beside the main checkout. An older one under the main checkout's .claude/worktrees/ stays there
+# until its issue ends.
+worktree="$worktrees/$branch"
+[ ! -d "$root/.claude/worktrees/$branch" ] || worktree="$root/.claude/worktrees/$branch"
 git -C "$root" fetch -q "$remote" "$branch"
 if [ ! -d "$worktree" ]; then
 	git -C "$root" worktree add -q "$worktree" "$branch" 2>/dev/null ||

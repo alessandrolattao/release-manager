@@ -20,7 +20,7 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //   - between turns, when a newer version of the plugin is installed on the session's account than the one
 //     it runs, it reloads the plugin in place (/reload-plugins), once per version; the new version's module
 //     then has the session read its role's rules again. A reload that fails restarts the session instead
-//     (scripts/update.sh restart).
+//     (scripts/update.sh restart). A session that holds the main checkout reloads once it has given it back.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -937,6 +937,15 @@ async function installedOf($: EngineInterface, folder: string): Promise<{ versio
 // The version this module reloaded the session to, or fell back to a restart for: once per version.
 let reloadedTo = ''
 
+// This session holds its repository's main checkout: the lock's first line is its id (scripts/checkout.sh).
+async function holdsCheckout($: EngineInterface, repo: string): Promise<boolean> {
+  if (repo === '') {
+    return false
+  }
+  const lock = await readText($, `${await rootOf($)}/repos/${repo.replace('/', '_')}/checkout`)
+  return lock.split('\n')[0] === (await $.session.id())
+}
+
 // A newer version of the plugin installed on the session's account than the one it runs: the session reloads
 // the plugin in place, once per version, with /reload-plugins (queued by the engine until the session is idle;
 // --force, so a reload that drops the prompt cache is not skipped). A reload that works replaces this module
@@ -944,14 +953,19 @@ let reloadedTo = ''
 // its own version there, has the session read its role's rules again (reloadedPrompt). The call resolves only
 // when the reload did not work (no `Reloaded:` line), or it rejects: then the session restarts instead, as the
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
-// since the restart carries its own prompt.
-async function reloadIfBehind($: EngineInterface, folder: string): Promise<void> {
+// since the restart carries its own prompt. A session that holds its repository's main checkout (holdsCheckout)
+// reloads only once it has given it back: it may be testing there, and a reload restarts the plugins' MCP
+// servers, a browser's signed-in sessions with them.
+async function reloadIfBehind($: EngineInterface, folder: string, status: Status): Promise<void> {
   const running = await versionOf($)
   if (running === '') {
     return
   }
   const installed = await installedOf($, folder)
   if (installed === null || installed.version === reloadedTo || !isNewer(installed.version, running)) {
+    return
+  }
+  if (await holdsCheckout($, status.repo ?? '')) {
     return
   }
   reloadedTo = installed.version
@@ -1074,7 +1088,7 @@ async function tick($: EngineInterface): Promise<void> {
       // A newer version installed on the account: the session reloads it. What fails there never keeps the
       // session from its wakes and its color.
       try {
-        await reloadIfBehind($, folder)
+        await reloadIfBehind($, folder, status)
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }

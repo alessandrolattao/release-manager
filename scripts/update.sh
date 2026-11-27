@@ -8,9 +8,12 @@
 #      (hooks/sessions.tsx): the update waits for its `version` to reach the new one. One on an older version,
 #      or with none recorded, cannot: it is restarted on the new version once it is quiet (between turns for
 #      5 seconds, so no turn is cut; one started by a version that does not record its turns, its conversation
-#      unchanged for 90 seconds): the quiet ones at once, the busy ones as soon as they go quiet, the one that
-#      started the update last; resumed with no flags (a flag would start a copy) and a message with the new
-#      version and where its scripts are.
+#      unchanged for 90 seconds) and not holding its repository's main checkout (scripts/checkout.sh: testing
+#      there, a restart would lose what it built, a browser's signed-in sessions): the quiet ones at once, the
+#      busy ones as soon as they go quiet, the ones holding the checkout as soon as they give it back, the one
+#      that started the update last; resumed with no flags (a flag would start a copy) and a message with the
+#      new version and where its scripts are. One holding the checkout that reloads by itself waits for it too
+#      (hooks/sessions.tsx).
 # In steps 2 and 3 a dispatcher or a session already on the newest version installed for its account is left
 # alone ("already on <version>"): the version it runs is in dispatcher.version, a session's in its folder's
 # `version` (hooks/sessions.tsx).
@@ -21,8 +24,8 @@
 #   update.sh run                    the update itself
 #   update.sh run --plugin-updated   steps 2 and 3 only: an older version's update.sh hands over to this one
 #   update.sh restart <session id>   restarts that session on the newest version installed, in the background,
-#                                    as step 3 restarts one, its lines in the same log: its hooks module runs it
-#                                    when its reload failed
+#                                    as step 3 restarts one (once it is quiet and holds no checkout), its lines
+#                                    in the same log: its hooks module runs it when its reload failed
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -85,6 +88,11 @@ installed() {
 behind() { [ -z "$1" ] || { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]; }; }
 # reloads <session id>: the version it recorded reloads a new one by itself.
 reloads() { ! behind "$(cat "$sessions_dir/$1/version" 2>/dev/null || true)" "$RELOADS"; }
+# holding <session id>: it holds its repository's main checkout, the lock's first line (scripts/checkout.sh).
+holding() {
+	lock="$team_state/repos/$(jq -r '.repo // ""' "$sessions_dir/$1/status" 2>/dev/null | tr '/' '_')/checkout"
+	[ "$(sed -n 1p "$lock" 2>/dev/null)" = "$1" ]
+}
 running() { [ "$(as "$1" claude agents --json </dev/null 2>/dev/null | jq --arg s "$2" '[.[] | select(.sessionId == $s and .status != null)] | length')" != 0 ]; }
 gone() {
 	roster=$(jq --arg s "$2" '[.workers[]? | select(.sessionId == $s)] | length' "$(home_of "$1")/daemon/roster.json" 2>/dev/null || echo 0)
@@ -128,6 +136,8 @@ look() {
 		echo "$name: left as it is (no plugin or folder)"
 		return 0
 	}
+	# Holding the main checkout: it may be testing there, it restarts once it has given it back.
+	! holding "$id" || return 1
 	# Quiet: between turns for $QUIET seconds, so no turn is cut. Its `idle` holds the time its last turn
 	# ended, empty while one runs (hooks/sessions.tsx); its conversation file is no measure, it changes while
 	# the session waits.
@@ -182,7 +192,11 @@ passes() {
 		name=$(jq -r '.name // ""' "$sessions_dir/$p/status")
 		case " $waited " in
 		*" $p "*) echo "$name: still behind after $((WAIT / 60)) minutes, on $(cat "$sessions_dir/$p/version" 2>/dev/null || true)" ;;
-		*) echo "$name: still busy after $((WAIT / 60)) minutes, left on its version" ;;
+		*) if holding "$p"; then
+			echo "$name: still holds the checkout after $((WAIT / 60)) minutes, left on its version"
+		else
+			echo "$name: still busy after $((WAIT / 60)) minutes, left on its version"
+		fi ;;
 		esac
 	done
 }

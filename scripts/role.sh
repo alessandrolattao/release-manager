@@ -2,7 +2,8 @@
 # Records what a session is in the team and gives it its name. The tech lead skill runs it when it starts;
 # the scripts that start developers, reviewers, QA and spikes run it for the session they start.
 #   role.sh <session-id> tech-lead                                 (from the main checkout; one per repository)
-#                    where the user can only read the repository, a line before the name says so (read_only, repo.sh)
+#                    where the user can only read the repository, a line before the name says so (read_only, repo.sh),
+#                    for the tech lead to tell the user
 #   role.sh <session-id> dev|review|qa <issue> [branch] [started]  (from the session's folder)
 #   role.sh <session-id> spike <topic>                      (from the main checkout)
 # started: when the script that started a developer, a reviewer or a QA agent launched it (epoch seconds), recorded once
@@ -54,7 +55,8 @@ tech-lead)
 		'.role = $r | .repo = $repo | .name = $n | .place = $p | del(.issue) | del(.topic)'
 	state_set "$id" working "with you"
 	# Where the user cannot write, nothing can be labelled, claimed or merged: the tech lead tells the user.
-	read_only
+	ro=$(read_only)
+	[ -z "$ro" ] || echo "$ro. Tell the user in one line."
 	;;
 dev | review | qa)
 	issue=${arg:?issue number}

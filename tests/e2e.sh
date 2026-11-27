@@ -282,7 +282,7 @@ ok "tech lead name" "$(cat "$S/$TL1/name")" "repo · tech lead"
 ok "where the user can write, only its name" "$(sh "$SC/role.sh" "$TL1" tech-lead)" "repo · tech lead"
 echo READ >"$G/permission"
 out=$(sh "$SC/role.sh" "$TL1" tech-lead); code=$?
-ok "where the user can only read, a line says so before the name" "$code | $out" "0 | the user can only read test/repo here, so the plugin's flow cannot run
+ok "where the user can only read, a line says so before the name, for the tech lead to tell the user" "$code | $out" "0 | the user can only read test/repo here, so the plugin's flow cannot run. Tell the user in one line.
 repo · tech lead"
 ok "and the tech lead is recorded all the same" "$(st "$TL1" role) $(st "$TL1" repo)" "tech-lead test/repo"
 rm -f "$G/permission"
@@ -1094,7 +1094,7 @@ n=0
 while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do sleep 1; n=$((n + 1)); done
 echo READ >"$G/permission"
 out=$(sh "$SC/dispatcher.sh" start 2>&1); code=$?
-ok "where the user can only read, a start is refused with the line role.sh prints" "$code | $out" "1 | the user can only read test/repo here, so the plugin's flow cannot run"
+ok "where the user can only read, a start is refused with the read-only line (read_only)" "$code | $out" "1 | the user can only read test/repo here, so the plugin's flow cannot run"
 ok "and nothing starts or changes" "$([ -f "$R/dispatcher.pid" ] && echo pid || echo no-pid) $(sh "$SC/dispatcher.sh" status)" "no-pid stopped (by hand)"
 rm -f "$G/permission"
 

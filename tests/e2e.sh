@@ -531,6 +531,13 @@ ok "a developer beside the main checkout: its place is its worktree" "$(st "$DEV
 before=$(ls "$G/comments" | wc -l)
 (cd "$WT/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/done.sh" "merged" >/dev/null)
 ok "a developer with no merged pull request tells nobody" "$(ls "$G/comments" | wc -l)" "$before"
+# Woken after done.sh by a comment written before it, the developer answers the tech lead, without --fyi, and
+# sets its state again: done is final, it stays done and goes as announced.
+echo "Already merged." | (cd "$WT/60-done" && CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/comment.sh" 60 "tech lead" >/dev/null)
+last=$(ls -t "$G/comments" | head -1)
+ok "a done developer that writes to the tech lead posts its comment, and stays done" "$(head -1 "$G/comments/$last") $(st "$DEV60" state) $(st "$DEV60" detail)" "**dev #60 → tech lead** done merged"
+out=$(CLAUDE_CODE_SESSION_ID=$DEV60 sh "$SC/status.sh" working "one more look")
+ok "nor does status.sh move it: it says the state it stays in" "$out $(st "$DEV60" state)" "state: done done"
 date +%s >"$S/$DEV60/alive"
 : >"$T/claude.log"
 cat >"$T/agents.json" <<EOF
@@ -1475,6 +1482,17 @@ echo 0.5.7 >"$S/$DEV2/version"
 date +%s >"$S/$TL1/alive"
 date +%s >"$S/$DEV2/alive"
 date +%s >"$S/$NEW/alive"
+# A developer that ran done.sh just now (the dispatcher removes it 2 minutes after), alive, between turns for a
+# minute, on a version too old to reload: its work is over, the update leaves it alone.
+DONE61=77777777-0000-0000-0000-000000000061
+mkdir -p "$S/$DONE61"
+echo dev >"$S/$DONE61/role"
+jq -n --argjson now "$(date +%s)" '{role: "dev", repo: "test/repo", name: "repo · dev #61 · in review · Title 61", issue: 61, state: "done", detail: "merged #61", since: $now}' >"$S/$DONE61/status"
+echo "$T/config" >"$S/$DONE61/config"
+echo "$ROOT" >"$S/$DONE61/cwd"
+echo 0.5.7 >"$S/$DONE61/version"
+date +%s >"$S/$DONE61/alive"
+echo $(($(date +%s) - 60)) >"$S/$DONE61/idle"
 sh "$SC/dispatcher.sh" start >/dev/null 2>&1
 old_pid=$(cat "$R/dispatcher.pid")
 : >"$T/claude.log"
@@ -1533,7 +1551,9 @@ ok "with no flags, which would start a copy" "$(grep -- '--resume' "$T/claude.lo
 new_pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
 ok "a running dispatcher restarts" "$([ -n "$new_pid" ] && [ "$new_pid" != "$old_pid" ] && echo yes || echo no) $(grep -c '^dispatcher test_repo: the dispatcher of test/repo runs' "$T/update.out")" "yes 1"
 ok "before any session" "$(grep -e '^dispatcher ' -e ': backgrounded' "$T/update.out" | head -1 | cut -d: -f1)" "dispatcher test_repo"
+ok "a done session is neither stopped nor restarted, and has no line" "$(grep -c -e "--resume $DONE61" -e "^stop ${DONE61%%-*}" "$T/claude.log") $(grep -c 'dev #61' "$T/update.out") $(st "$DONE61" state)" "0 0 done"
 ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+rm -rf "${S:?}/$DONE61"
 
 echo "== update.sh: a second run right after the first restarts nothing"
 pid=$(cat "$R/dispatcher.pid" 2>/dev/null)
@@ -1660,6 +1680,50 @@ ok "that session alone restarts" "$(grep -o -e "--resume [^ ]* " "$T/claude.log"
 ok "on the newest version installed, with the restart's prompt" "$(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.9 and this session was restarted to load it. Its scripts are now in [^ ]*/scripts" "$T/claude.log")" "1"
 ok "the update's log says so, after what it held" "$(head -1 "$ulog") | $(grep -c ' repo · dev #43 · in progress · Title 43: its reload failed, it restarts$' "$ulog") | $(grep -c '^repo · dev #43 · in progress · Title 43: backgrounded' "$ulog")" "an earlier update's line | 1 | 1"
 rm -f "$S/$DEV2/version"
+
+echo "== update.sh: a session that holds the main checkout restarts only once it has given it back"
+# 9.9.12 published on the team's account. The developer, too old to reload by itself and between turns, holds
+# the main checkout, testing there; the other live sessions run 9.9.12 already. It gives the checkout back once
+# the update's first pass has looked at every session (the last one listed has its line).
+release 9.9.12
+echo "$T/config 9.9.12" >>"$T/publish"
+for id in $TL1 $NEW; do echo 9.9.12 >"$S/$id/version"; done
+for id in $TL1 $DEV2 $NEW; do date +%s >"$S/$id/alive"; done
+echo $(($(date +%s) - 60)) >"$S/$DEV2/idle"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null; code=$?
+ok "the developer holds the checkout" "$code $(sed -n 1p "$R/checkout")" "0 $DEV2"
+cd "$ROOT" || exit 1
+: >"$T/claude.log"
+: >"$T/update.out"
+(
+	n=0
+	until grep -q '^repo · dev #44 · [^:]*: [a-z]* on 9.9.12$' "$T/update.out" || [ "$n" -ge 300 ]; do
+		sleep 0.1
+		n=$((n + 1))
+	done
+	grep -c -- "--resume $DEV2 " "$T/claude.log" >"$T/held-restarts"
+	cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+) &
+giver=$!
+UPDATE_QUIET=0 UPDATE_GONE=1 sh "$SC/update.sh" run >"$T/update.out" 2>&1
+wait "$giver"
+ok "while it holds the checkout it does not restart" "$(cat "$T/held-restarts")" "0"
+ok "once it has given it back it restarts, on the new version" "$(grep -o -e "--resume [^ ]* " "$T/claude.log" | cut -d' ' -f2 | tr '\n' ' ') $(grep -c -- "--bg --resume $DEV2 The team plugin was updated to 9.9.12 " "$T/claude.log")" "$DEV2  1"
+ok "and the update says it is done" "$(tail -1 "$T/update.out" | cut -c21-)" "update done"
+
+echo "== update.sh restart: one still holding the checkout when the update stops waiting is left on its version"
+cd "$ROOT/.claude/worktrees/43-other" || exit 1
+date +%s >"$S/$DEV2/alive"
+CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" take >/dev/null
+cd "$ROOT" || exit 1
+: >"$T/claude.log"
+out=$(UPDATE_QUIET=0 UPDATE_GONE=1 UPDATE_WAIT=3 sh "$SC/update.sh" restart "$DEV2" --now 2>&1)
+ok "it does not restart" "$(grep -c -e '--resume' -e '^stop ' "$T/claude.log")" "0"
+ok "and the log says it still holds the checkout" "$(printf '%s\n' "$out" | tail -1)" "repo · dev #43 · in progress · Title 43: still holds the checkout after 0 minutes, left on its version"
+cd "$ROOT/.claude/worktrees/43-other" && CLAUDE_CODE_SESSION_ID=$DEV2 sh "$SC/checkout.sh" give >/dev/null
+cd "$ROOT" || exit 1
+rm -f "$S/$TL1/version" "$S/$NEW/version"
 
 echo "== no write through GitHub's GraphQL API where REST has an endpoint"
 ok "no gh issue comment, issue create, issue edit or label create" "$(cat "$G/unhandled" 2>/dev/null | grep -c -E '^(issue (comment|create|edit)|label create) ')" "0"

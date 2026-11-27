@@ -137,6 +137,40 @@ test('a session in a turn reloads only once the turn has ended', async ($, on) =
   expect(reloads(commands)).toEqual(['/reload-plugins --force'])
 })
 
+// A QA agent of o/r, and the main checkout's lock as scripts/checkout.sh writes it: holder, since, branch.
+const tester = { role: 'qa', status: JSON.stringify({ role: 'qa', repo: 'o/r', state: 'working', detail: 'testing in the checkout' }) }
+const lock = (holder: string) => `${holder}\n1800000000\n42-x\n`
+
+test('a session behind that holds the main checkout reloads only once it has given it back', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const { files: all } = files(on, { 'plugin.json': manifest('1.2.3'), checkout: lock('abc-123'), ...tester }, { [CACHE]: ['1.2.3', '1.2.4'] })
+  const { commands, runs } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  // Testing there, a browser signed in: neither a reload nor a restart in its place.
+  expect(reloads(commands)).toEqual([])
+  expect(restarts(runs)).toEqual([])
+  expect(all.has('reloading')).toBe(false)
+  // checkout.sh give removes the lock.
+  all.delete('checkout')
+  await clock.advance(2000)
+  expect(reloads(commands)).toEqual(['/reload-plugins --force'])
+  expect(all.get('reloading')).toBe('1.2.4\n')
+})
+
+test('a session behind reloads while another session holds the main checkout', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  files(on, { 'plugin.json': manifest('1.2.3'), checkout: lock('def-456'), ...tester }, { [CACHE]: ['1.2.3', '1.2.4'] })
+  const { commands } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(2000)
+  expect(reloads(commands)).toEqual(['/reload-plugins --force'])
+})
+
 test('loaded by a reload to its version, the session is told to read its role\'s rules again, once', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })
@@ -233,6 +267,40 @@ for (const [where, running] of [
     expect(all.has('reloading')).toBe(false)
   })
 }
+
+test('a done session never reloads nor restarts, though a newer version is installed', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const { files: all } = files(
+    on,
+    { 'plugin.json': manifest('1.2.3'), role: 'dev', status: JSON.stringify({ role: 'dev', state: 'done', detail: 'merged #50' }) },
+    { [CACHE]: ['1.2.3', '1.2.4'] },
+  )
+  const { commands, runs, prompts } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(reloads(commands)).toEqual([])
+  expect(restarts(runs)).toEqual([])
+  expect(prompts).toEqual([])
+  expect(all.has('reloading')).toBe(false)
+})
+
+test('a session done by the time a reload loaded it is not told to go on', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const { files: all } = files(
+    on,
+    { 'plugin.json': manifest('1.2.10'), reloading: '1.2.10\n', role: 'dev', status: JSON.stringify({ role: 'dev', state: 'done', detail: 'merged #50' }) },
+    { [CACHE]: ['1.2.3', '1.2.10'] },
+  )
+  const { prompts } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(prompts).toEqual([])
+  expect(all.get('reloading')).toBe('')
+})
 
 test('a session outside the team never reloads', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })

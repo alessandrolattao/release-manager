@@ -208,6 +208,40 @@ for (const [where, running] of [
   })
 }
 
+test('a done session never reloads nor restarts, though a newer version is installed', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const { files: all } = files(
+    on,
+    { 'plugin.json': manifest('1.2.3'), role: 'dev', status: JSON.stringify({ role: 'dev', state: 'done', detail: 'merged #50' }) },
+    { [CACHE]: ['1.2.3', '1.2.4'] },
+  )
+  const { commands, runs, prompts } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(reloads(commands)).toEqual([])
+  expect(restarts(runs)).toEqual([])
+  expect(prompts).toEqual([])
+  expect(all.has('reloading')).toBe(false)
+})
+
+test('a session done by the time a reload loaded it is not told to go on', async ($, on) => {
+  const clock = mock.clock(on, { now: NOW })
+  mock.env(on, { HOME: '/home/u' })
+  const { files: all } = files(
+    on,
+    { 'plugin.json': manifest('1.2.10'), reloading: '1.2.10\n', role: 'dev', status: JSON.stringify({ role: 'dev', state: 'done', detail: 'merged #50' }) },
+    { [CACHE]: ['1.2.3', '1.2.10'] },
+  )
+  const { prompts } = engine(on)
+
+  await $.session.start(START)
+  await clock.advance(10000)
+  expect(prompts).toEqual([])
+  expect(all.get('reloading')).toBe('')
+})
+
 test('a session outside the team never reloads', async ($, on) => {
   const clock = mock.clock(on, { now: NOW })
   mock.env(on, { HOME: '/home/u' })

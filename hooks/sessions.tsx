@@ -20,7 +20,7 @@ import type { Board, BoardRow, Dev, DevPr, DevWork } from '../types'
 //   - between turns, when a newer version of the plugin is installed on the session's account than the one
 //     it runs, it reloads the plugin in place (/reload-plugins), once per version; the new version's module
 //     then has the session read its role's rules again. A reload that fails restarts the session instead
-//     (scripts/update.sh restart).
+//     (scripts/update.sh restart). A done session neither reloads nor restarts.
 //   - between turns it wakes the session, with a prompt of its own, for what was written to it: a GitHub
 //     comment (the dispatcher appends it to `wake`) it has not answered yet on GitHub and GitHub still has,
 //     the main checkout freed for it, and in a tech lead the messages other repositories left in its inbox
@@ -944,10 +944,11 @@ let reloadedTo = ''
 // its own version there, has the session read its role's rules again (reloadedPrompt). The call resolves only
 // when the reload did not work (no `Reloaded:` line), or it rejects: then the session restarts instead, as the
 // update restarts a session too old to reload (scripts/update.sh restart, detached), with `reloading` cleared,
-// since the restart carries its own prompt.
-async function reloadIfBehind($: EngineInterface, folder: string): Promise<void> {
+// since the restart carries its own prompt. A done session neither reloads nor restarts: its work is over, and the
+// dispatcher removes it.
+async function reloadIfBehind($: EngineInterface, folder: string, status: Status): Promise<void> {
   const running = await versionOf($)
-  if (running === '') {
+  if (running === '' || status.state === 'done') {
     return
   }
   const installed = await installedOf($, folder)
@@ -995,7 +996,7 @@ function reloadedText(root: string, version: string, role: string): string {
 }
 
 // At session start, after a reload to this version (`reloading` names it, reloadIfBehind): the prompt that has
-// the session read its role's rules again, once.
+// the session read its role's rules again, once. A session done meanwhile is told nothing: its work is over.
 async function reloadedPrompt($: EngineInterface, folder: string, role: string): Promise<void> {
   try {
     const version = await versionOf($)
@@ -1003,6 +1004,9 @@ async function reloadedPrompt($: EngineInterface, folder: string, role: string):
       return
     }
     await $.fs.write(`${folder}/reloading`, '')
+    if ((await readStatus($, folder)).state === 'done') {
+      return
+    }
     void $.prompt.submit({ text: reloadedText($.plugin.root, version, role) }).catch(err => $.ui.log(`team: ${String(err)}`))
   } catch (err) {
     $.ui.log(`team: reloaded: ${String(err)}`)
@@ -1074,7 +1078,7 @@ async function tick($: EngineInterface): Promise<void> {
       // A newer version installed on the account: the session reloads it. What fails there never keeps the
       // session from its wakes and its color.
       try {
-        await reloadIfBehind($, folder)
+        await reloadIfBehind($, folder, status)
       } catch (err) {
         $.ui.log(`team: reload: ${String(err)}`)
       }
